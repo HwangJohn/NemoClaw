@@ -117,6 +117,16 @@ describe("coverage report", () => {
     }
   });
 
+
+  it("test_should_report_scoped_lifecycle_parity_sections", () => {
+    const meta = loadMetadataFromDir(E2E_DIR);
+    const md = renderCoverageReport(meta);
+    expect(md).toMatch(/lifecycle/);
+    expect(md).toMatch(/Mapped assertions:/);
+    expect(md).toMatch(/Deferred assertions:/);
+    expect(md).toMatch(/Retired assertions:/);
+  });
+
   it("should_flag_expected_states_not_used_by_any_scenario", () => {
     const meta = loadMetadataFromObjects({
       scenarios: {
