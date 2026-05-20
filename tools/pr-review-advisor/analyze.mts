@@ -456,11 +456,13 @@ function collectDriftEvidence(baseRef: string, changedFiles: string[]): DriftEvi
       .split("\n")
       .map((line) => line.trim())
       .filter(Boolean);
-    const name = path.basename(file).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const normalizedFile = file.replace(/^\.\//, "").replace(/\\/g, "/");
+    const escapedFile = normalizedFile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const filePathPattern = new RegExp(`(^|/)${escapedFile}(\\s|$)`);
     const renameHints = (gitOutput([["log", "--oneline", "--name-status", "--find-renames", "-40", baseRef, "--"]], 120000) || "")
       .split("\n")
       .map((line) => line.trim())
-      .filter((line) => /^(R\d+|A|D|M)\s/.test(line) && new RegExp(`(^|/)${name}(\\s|$)`).test(line))
+      .filter((line) => /^(R\d+|A|D|M)\s/.test(line) && filePathPattern.test(line.replace(/\\/g, "/")))
       .slice(0, 20);
     return { file, recentHistory, renameHints };
   });
@@ -586,7 +588,6 @@ async function collectOpenPrOverlaps(
       const labels = recordItems(getPath<unknown>(pull, ["labels"])).map((label) => stringOrUndefined(label.name)).filter((label): label is string => Boolean(label));
       const linkedIssues = extractIssueRefs(`${title}\n${body}`, number);
       const duplicateLinkedIssues = linkedIssues.filter((issue) => currentLinkedIssues.includes(issue));
-      const hasRelevantLabel = labels.some((label) => /refactor|arch|security|vulnerab|hardening/i.test(label));
       let sameFiles: string[] = [];
       if (currentFiles.size > 0) {
         try {
@@ -597,7 +598,7 @@ async function collectOpenPrOverlaps(
           sameFiles = [];
         }
       }
-      if (sameFiles.length === 0 && duplicateLinkedIssues.length === 0 && !hasRelevantLabel) return null;
+      if (sameFiles.length === 0 && duplicateLinkedIssues.length === 0) return null;
       return { number, title, labels, linkedIssues, sameFiles, duplicateLinkedIssues };
     }));
   return overlaps.filter((overlap): overlap is OpenPrOverlap => overlap !== null)
