@@ -444,12 +444,12 @@ function severityRank(severity: MonolithSeverity): number {
 
 function collectDriftEvidence(baseRef: string, changedFiles: string[]): DriftEvidence[] {
   return changedFiles.slice(0, 50).map((file) => {
-    const recentHistory = gitOutput([["log", "--oneline", "--follow", "-20", baseRef, "--", file]], 20000)
+    const recentHistory = (gitOutput([["log", "--oneline", "--follow", "-20", baseRef, "--", file]], 20000) || "")
       .split("\n")
       .map((line) => line.trim())
       .filter(Boolean);
     const name = path.basename(file).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const renameHints = gitOutput([["log", "--oneline", "--name-status", "--find-renames", "-40", baseRef, "--"]], 120000)
+    const renameHints = (gitOutput([["log", "--oneline", "--name-status", "--find-renames", "-40", baseRef, "--"]], 120000) || "")
       .split("\n")
       .map((line) => line.trim())
       .filter((line) => /^(R\d+|A|D|M)\s/.test(line) && new RegExp(`(^|/)${name}(\\s|$)`).test(line))
