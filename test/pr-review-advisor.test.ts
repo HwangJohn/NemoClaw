@@ -208,7 +208,9 @@ describe("PR review advisor", () => {
     expect(summary).not.toContain("## Security review");
     expect(detailed).toContain("## Acceptance coverage");
     expect(detailed).toContain("## Security review");
-    expect(comment).not.toContain("<details>");
+    expect(comment).toContain("<details>");
+    expect(comment).toContain("<summary>Review findings</summary>");
+    expect(comment).toContain("### 🛠️ Needs attention");
     expect(comment).not.toContain("Full advisor summary");
     expect(comment).not.toContain("## Acceptance coverage");
     expect(comment).not.toContain("## Security review");
@@ -242,6 +244,8 @@ describe("PR review advisor", () => {
       result: followUpResult,
     });
     expect(followUp).toContain("**Since last review:** 1 prior item resolved, 1 still applies, 1 new item found");
+    expect(followUp).toContain("<summary>Review findings</summary>");
+    expect(followUp).toContain("<summary>Since last review details</summary>");
   });
 
   it("normalizes output that validates against the JSON schema", () => {
