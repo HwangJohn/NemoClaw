@@ -108,7 +108,7 @@ function buildSecondarySummary(result?: ReviewAdvisorResult): string {
     return `**Since last review:** ${countLabel(sinceLastReview.resolved, "prior item")} resolved, ${countLabel(sinceLastReview.stillApplies, "still applies", "still apply")}, ${countLabel(sinceLastReview.newItems, "new item")} found\n`;
   }
   const topItem = result?.summary?.topItem || topFindingTitle(result);
-  return topItem ? `**Top item:** ${topItem}\n` : "";
+  return topItem ? `**Top item:** ${escapeCommentText(topItem)}\n` : "";
 }
 
 function topFindingTitle(result?: ReviewAdvisorResult): string | undefined {
@@ -151,12 +151,32 @@ function renderPreviousReviewDetails(result?: ReviewAdvisorResult): string {
 }
 
 function formatFinding(finding: NonNullable<ReviewAdvisorResult["findings"]>[number]): string {
-  const title = finding.title || "Review finding";
-  const location = finding.file ? ` (${finding.file}${finding.line ? `:${finding.line}` : ""})` : "";
-  const lines = [`- **${title}**${location}${finding.description ? `: ${finding.description}` : ""}`];
-  if (finding.recommendation) lines.push(`  - Recommendation: ${finding.recommendation}`);
-  if (finding.evidence) lines.push(`  - Evidence: ${finding.evidence}`);
+  const title = escapeCommentText(finding.title || "Review finding");
+  const location = formatFindingLocation(finding);
+  const description = finding.description ? `: ${escapeCommentText(finding.description)}` : "";
+  const lines = [`- **${title}**${location}${description}`];
+  if (finding.recommendation) {
+    lines.push(`  - Recommendation: ${escapeCommentText(finding.recommendation)}`);
+  }
+  if (finding.evidence) lines.push(`  - Evidence: ${escapeCommentText(finding.evidence)}`);
   return lines.join("\n");
+}
+
+function formatFindingLocation(finding: NonNullable<ReviewAdvisorResult["findings"]>[number]): string {
+  if (!finding.file) return "";
+  const line = Number.isInteger(finding.line) && Number(finding.line) > 0 ? `:${finding.line}` : "";
+  return ` (${escapeCommentText(finding.file)}${line})`;
+}
+
+function escapeCommentText(value: string): string {
+  return value
+    .replace(/\s+/g, " ")
+    .trim()
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replace(/([\\`*_\[\]()!|])/g, "\\$1")
+    .replaceAll("@", "&#64;");
 }
 
 function countLabel(count: unknown, singular: string, plural = `${singular}s`): string {
