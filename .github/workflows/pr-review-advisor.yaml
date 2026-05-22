@@ -53,7 +53,7 @@ jobs:
     name: PR review advisor
     if: ${{ github.repository == 'NVIDIA/NemoClaw' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == 'NVIDIA/NemoClaw') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     env:
       # Pin the Pi SDK to a known-good version. Updates should go through
       # normal dependency review so a compromised upstream release cannot run
@@ -132,7 +132,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.target_pr }}
           PR_REVIEW_ADVISOR_RUN_ANALYSIS: ${{ github.event_name == 'workflow_dispatch' && inputs.run_analysis == false && '0' || '1' }}
           GH_TOKEN: ${{ github.token }}
-          PR_REVIEW_ADVISOR_API_KEY: ${{ secrets.PI_PR_REVIEW_ADVISOR_API_KEY }}
+          PR_REVIEW_ADVISOR_API_KEY: ${{ secrets.PR_REVIEW_ADVISOR_API_KEY || secrets.PI_PR_REVIEW_ADVISOR_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           cd "$ADVISOR_WORKDIR"
@@ -201,7 +201,7 @@ jobs:
 
       - name: Upload advisor artifacts
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pr-review-advisor
           path: artifacts/pr-review-advisor/

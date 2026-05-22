@@ -5,7 +5,7 @@
 
 The PR Review Advisor is an SDK-powered, NemoClaw-specific pull request reviewer. It runs as a
 trusted GitHub Actions job, inspects PRs as read-only data, and posts a sticky advisory comment with
-blockers, warnings, suggestions, acceptance coverage, security notes, and code-review follow-up guidance.
+needs-attention items, worth-checking items, nice ideas, and code-review follow-up guidance.
 
 It complements the existing PR surfaces by keeping a NemoClaw maintainer code-review lens focused on the patch itself:
 
@@ -29,6 +29,8 @@ It intentionally does not report GitHub mergeability, branch protection, CI stat
 6. Writes artifacts under `artifacts/pr-review-advisor/`.
 7. Posts or updates a sticky PR comment marked by `<!-- nemoclaw-pr-review-advisor -->`.
 
+The workflow is advisory and must not be configured as a required status check.
+
 ## Safety model
 
 - Static analysis only.
@@ -43,10 +45,11 @@ It intentionally does not report GitHub mergeability, branch protection, CI stat
 
 Configure this repository secret for review analysis:
 
-- `PI_PR_REVIEW_ADVISOR_API_KEY`
+- `PR_REVIEW_ADVISOR_API_KEY`
 
-The analyzer uses the fixed `openai/openai/gpt-5.5` advisor model and also accepts
-`OPENAI_API_KEY` for local runs.
+The workflow also accepts the legacy `PI_PR_REVIEW_ADVISOR_API_KEY` secret as a
+fallback. The analyzer uses the fixed `openai/openai/gpt-5.5` advisor model and
+also accepts `OPENAI_API_KEY` for local runs.
 
 If advisor credentials are unavailable, the advisor writes a low-confidence unavailable result
 instead of failing closed without artifacts.
@@ -78,7 +81,7 @@ node --experimental-strip-types tools/pr-review-advisor/analyze.mts \
 ```
 
 Set `PR_REVIEW_ADVISOR_API_KEY` or `OPENAI_API_KEY` locally, or configure the repository
-`PI_PR_REVIEW_ADVISOR_API_KEY` secret. Run `npm install` first so the Pi SDK dependency is
+`PR_REVIEW_ADVISOR_API_KEY` secret. Run `npm install` first so the Pi SDK dependency is
 available.
 
 ## Output contract
