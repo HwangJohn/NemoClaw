@@ -42,8 +42,6 @@ const FINDING_CATEGORIES = [
   "workflow",
   "docs",
   "scope",
-  "ci",
-  "e2e",
   "acceptance",
 ] as const;
 const SUMMARY_RECOMMENDATIONS = [
@@ -54,19 +52,15 @@ const SUMMARY_RECOMMENDATIONS = [
   "superseded",
   "info_only",
 ] as const;
-const GATE_STATUSES = ["pass", "fail", "warning", "pending", "unknown"] as const;
 const CONFIDENCES = ["low", "medium", "high"] as const;
-const TEST_DEPTH_VERDICTS = ["unit_sufficient", "mocks_recommended", "e2e_required", "unknown"] as const;
-const E2E_STATUS_VERDICTS = ["ok", "missing", "ambiguous", "not_found"] as const;
+const TEST_DEPTH_VERDICTS = ["unit_sufficient", "mocks_recommended", "runtime_validation_recommended", "unknown"] as const;
 const ACCEPTANCE_STATUSES = ["met", "partial", "missing", "unknown"] as const;
 const SECURITY_VERDICTS = ["pass", "warning", "fail"] as const;
 
 type Confidence = (typeof CONFIDENCES)[number];
 type SummaryRecommendation = (typeof SUMMARY_RECOMMENDATIONS)[number];
-type GateStatusName = (typeof GATE_STATUSES)[number];
 type FindingCategory = (typeof FINDING_CATEGORIES)[number];
 type TestDepthVerdict = (typeof TEST_DEPTH_VERDICTS)[number];
-type E2eStatusVerdict = (typeof E2E_STATUS_VERDICTS)[number];
 type AcceptanceStatus = (typeof ACCEPTANCE_STATUSES)[number];
 type SecurityVerdict = (typeof SECURITY_VERDICTS)[number];
 
@@ -78,11 +72,6 @@ type ReviewMetadata = {
   headSha: string;
   changedFiles: string[];
   deterministic: DeterministicReviewContext;
-};
-
-type GateStatus = {
-  status: GateStatusName;
-  evidence: string;
 };
 
 type Finding = {
@@ -118,12 +107,12 @@ type ReviewAdvisorResult = {
     recommendation: SummaryRecommendation;
     confidence: Confidence;
     oneLine: string;
-  };
-  gateStatus: {
-    ci: GateStatus;
-    mergeability: GateStatus;
-    reviewThreads: GateStatus;
-    riskyCodeTested: GateStatus;
+    topItem?: string;
+    sinceLastReview?: {
+      resolved: number;
+      stillApplies: number;
+      newItems: number;
+    };
   };
   findings: Finding[];
   acceptanceCoverage: AcceptanceCoverage[];
@@ -132,13 +121,6 @@ type ReviewAdvisorResult = {
     verdict: TestDepthVerdict;
     rationale: string;
     suggestedTests: string[];
-  };
-  e2eAdvisorStatus: {
-    found: boolean;
-    requiredJobs: string[];
-    passedForHeadSha: string[];
-    missingForHeadSha: string[];
-    verdict: E2eStatusVerdict;
   };
   positives: string[];
   reviewCompleteness: {
@@ -152,10 +134,10 @@ type DeterministicReviewContext = {
   commits: string[];
   riskyAreas: string[];
   testDepth: ReviewAdvisorResult["testDepth"];
-  gateStatus: ReviewAdvisorResult["gateStatus"];
   workflowSignals: string[];
   monolithDeltas: MonolithDelta[];
   driftEvidence: DriftEvidence[];
+  previousAdvisorReview: PreviousAdvisorReview | null;
   github: GitHubReviewContext | null;
 };
 
@@ -191,11 +173,14 @@ type GitHubReviewContext = {
   fetchError?: string;
   pullRequest?: unknown;
   graphQl?: unknown;
-  issueComments?: unknown[];
-  reviewComments?: unknown[];
   linkedIssues?: LinkedIssue[];
   openPrOverlaps?: OpenPrOverlap[];
-  e2eAdvisorComments?: string[];
+  previousAdvisorReview?: PreviousAdvisorReview | null;
+};
+
+type PreviousAdvisorReview = {
+  headSha?: string;
+  body: string;
 };
 
 type LinkedIssue = {
@@ -283,6 +268,7 @@ async function main(): Promise<void> {
   writeJson(artifacts.finalResult, result);
   const summary = renderSummary(result);
   fs.writeFileSync(artifacts.summary, summary);
+  fs.writeFileSync(path.join(outDir, "pr-review-advisor-detailed-review.md"), renderDetailedReview(result));
   console.log(summary);
 }
 
@@ -321,13 +307,12 @@ async function collectDeterministicContext(options: {
   const github = await collectGitHubContext();
   const riskyAreas = detectRiskyAreas(options.changedFiles);
   const testDepth = classifyTestDepth(options.changedFiles, options.diff);
-  const gateStatus = deriveGateStatus(github, options.changedFiles, riskyAreas);
   return {
     diffStat: getDiffStat(options.baseRef, options.headRef),
     commits: getCommits(options.baseRef, options.headRef),
     riskyAreas,
     testDepth,
-    gateStatus,
+    previousAdvisorReview: github?.previousAdvisorReview || null,
     workflowSignals: detectWorkflowSignals(options.changedFiles, options.diff),
     monolithDeltas: computeMonolithDeltas(options.baseRef, options.changedFiles),
     driftEvidence: collectDriftEvidence(options.baseRef, options.changedFiles),
@@ -374,9 +359,9 @@ export function classifyTestDepth(changedFiles: string[], diff = ""): ReviewAdvi
   );
   if (e2eSignals.length > 0) {
     return {
-      verdict: "e2e_required",
-      rationale: `Runtime/sandbox/infrastructure paths need real execution coverage: ${e2eSignals.slice(0, 8).join(", ")}.`,
-      suggestedTests: ["Confirm E2E Advisor required jobs passed for the current PR head SHA."],
+      verdict: "runtime_validation_recommended",
+      rationale: `Runtime/sandbox/infrastructure paths need behavioral runtime validation: ${e2eSignals.slice(0, 8).join(", ")}.`,
+      suggestedTests: ["Add or identify targeted runtime/integration validation for the changed behavior; do not report external E2E job pass/fail here."],
     };
   }
   const mockSignals = sourceFiles.filter((file) =>
@@ -473,51 +458,6 @@ function countLines(text: string): number {
   return text.endsWith("\n") ? text.split("\n").length - 1 : text.split("\n").length;
 }
 
-export function deriveGateStatus(
-  github: GitHubReviewContext | null,
-  changedFiles: string[],
-  riskyAreas: string[],
-): ReviewAdvisorResult["gateStatus"] {
-  const graphQlPr = getPath<Record<string, unknown>>(github?.graphQl, ["data", "repository", "pullRequest"]);
-  const checkNodes = getPath<unknown[]>(graphQlPr, ["statusCheckRollup", "contexts", "nodes"]) || [];
-  const failed = checkNodes.filter((node) => /FAILURE|ERROR|CANCELLED|TIMED_OUT/i.test(JSON.stringify(node)));
-  const pending = checkNodes.filter((node) => /PENDING|IN_PROGRESS|QUEUED|EXPECTED/i.test(JSON.stringify(node)));
-  const ci: GateStatus = checkNodes.length === 0
-    ? { status: "unknown", evidence: "No statusCheckRollup data was available." }
-    : failed.length > 0
-      ? { status: "fail", evidence: `${failed.length} status context(s) appear failed.` }
-      : pending.length > 0
-        ? { status: "pending", evidence: `${pending.length} status context(s) appear pending.` }
-        : { status: "pass", evidence: `${checkNodes.length} status context(s) were present with no failures detected.` };
-
-  const mergeState = stringOrUndefined(getPath<unknown>(graphQlPr, ["mergeStateStatus"])) ||
-    stringOrUndefined(getPath<unknown>(github?.pullRequest, ["mergeable_state"]));
-  const mergeability: GateStatus = !mergeState
-    ? { status: "unknown", evidence: "Merge state was unavailable." }
-    : /CLEAN|MERGEABLE/i.test(mergeState)
-      ? { status: "pass", evidence: `mergeStateStatus=${mergeState}` }
-      : /DIRTY|CONFLICT|BLOCKED|behind/i.test(mergeState)
-        ? { status: "fail", evidence: `mergeStateStatus=${mergeState}` }
-        : { status: "warning", evidence: `mergeStateStatus=${mergeState}` };
-
-  const threads = getPath<unknown[]>(graphQlPr, ["reviewThreads", "nodes"]) || [];
-  const unresolved = threads.filter((thread) => getPath<boolean>(thread, ["isResolved"]) === false);
-  const reviewThreads: GateStatus = threads.length === 0
-    ? { status: "unknown", evidence: "No review thread state was available." }
-    : unresolved.length === 0
-      ? { status: "pass", evidence: `${threads.length} review thread(s), all resolved.` }
-      : { status: "fail", evidence: `${unresolved.length} unresolved review thread(s).` };
-
-  const hasTestChange = changedFiles.some(isTestFile);
-  const riskyCodeTested: GateStatus = riskyAreas.length === 0
-    ? { status: "pass", evidence: "No risky code areas detected by path heuristics." }
-    : hasTestChange
-      ? { status: "warning", evidence: `Risky areas detected (${riskyAreas.join(", ")}); test files changed, but coverage still needs semantic review.` }
-      : { status: "fail", evidence: `Risky areas detected (${riskyAreas.join(", ")}) with no test file changes.` };
-
-  return { ci, mergeability, reviewThreads, riskyCodeTested };
-}
-
 async function collectGitHubContext(): Promise<GitHubReviewContext | null> {
   const repo = process.env.GITHUB_REPOSITORY;
   const prNumber = Number.parseInt(process.env.PR_NUMBER || process.env.GITHUB_REF_NAME?.match(/^(\d+)\//)?.[1] || "", 10);
@@ -527,17 +467,15 @@ async function collectGitHubContext(): Promise<GitHubReviewContext | null> {
   const context: GitHubReviewContext = { repo, prNumber };
   try {
     const [owner, name] = repo.split("/");
-    const [pullRequest, issueComments, reviewComments, graphQl, openPulls] = await Promise.all([
+    const [pullRequest, issueComments, graphQl, openPulls] = await Promise.all([
       githubRest<unknown>(`repos/${repo}/pulls/${prNumber}`, token),
       githubRestPaginated<unknown>(`repos/${repo}/issues/${prNumber}/comments`, token, 100),
-      githubRestPaginated<unknown>(`repos/${repo}/pulls/${prNumber}/comments`, token, 100),
       githubGraphql(token, buildPrGraphqlQuery(), { owner, name, number: prNumber }).catch((error: unknown) => ({ error: String(error) })),
       githubRestPaginated<unknown>(`repos/${repo}/pulls?state=open&sort=updated&direction=desc`, token, 100),
     ]);
     context.pullRequest = pullRequest;
-    context.issueComments = issueComments;
-    context.reviewComments = reviewComments;
     context.graphQl = graphQl;
+    context.previousAdvisorReview = extractPreviousAdvisorReview(issueComments);
     const prText = [
       stringOrUndefined(getPath<unknown>(pullRequest, ["title"])),
       stringOrUndefined(getPath<unknown>(pullRequest, ["body"])),
@@ -546,9 +484,6 @@ async function collectGitHubContext(): Promise<GitHubReviewContext | null> {
     const issueNumbers = extractIssueRefs(prText, prNumber).slice(0, 5);
     context.linkedIssues = await Promise.all(issueNumbers.map((issue) => collectLinkedIssue(repo, issue, token)));
     context.openPrOverlaps = await collectOpenPrOverlaps(repo, prNumber, token, openPulls, issueNumbers);
-    context.e2eAdvisorComments = issueComments
-      .map((comment) => stringOrUndefined(getPath<unknown>(comment, ["body"])))
-      .filter((body): body is string => typeof body === "string" && body.includes("<!-- nemoclaw-e2e-advisor -->"));
   } catch (error: unknown) {
     context.fetchError = error instanceof Error ? error.message : String(error);
   }
@@ -622,6 +557,16 @@ function extractIssueRefs(text: string, prNumber: number): number[] {
   return [...numbers].sort((a, b) => a - b);
 }
 
+function extractPreviousAdvisorReview(issueComments: unknown[]): PreviousAdvisorReview | null {
+  const bodies = issueComments
+    .map((comment) => stringOrUndefined(getPath<unknown>(comment, ["body"])))
+    .filter((body): body is string => Boolean(body && body.includes("<!-- nemoclaw-pr-review-advisor -->")));
+  const body = bodies.at(-1);
+  if (!body) return null;
+  const headSha = body.match(/(?:\*\*Analyzed HEAD:\*\*|Analyzed SHA:)\s*`?([^`\n\s]+)`?/)?.[1];
+  return { headSha, body: body.slice(0, 12000) };
+}
+
 function buildPrGraphqlQuery(): string {
   return `
 query($owner: String!, $name: String!, $number: Int!) {
@@ -631,27 +576,7 @@ query($owner: String!, $name: String!, $number: Int!) {
       title
       isDraft
       authorAssociation
-      reviewDecision
-      mergeStateStatus
       headRefOid
-      statusCheckRollup {
-        contexts(first: 50) {
-          nodes {
-            __typename
-            ... on CheckRun { name status conclusion detailsUrl }
-            ... on StatusContext { context state targetUrl }
-          }
-        }
-      }
-      reviewThreads(first: 100) {
-        nodes {
-          id
-          isResolved
-          comments(first: 10) {
-            nodes { author { login } body path line createdAt }
-          }
-        }
-      }
     }
   }
 }`;
@@ -676,7 +601,7 @@ export function buildSystemPrompt(schema: Record<string, unknown>, securityRevie
     "Use the repository files with read-only tools when needed. Do not ask to execute PR scripts/tests or package-manager commands.",
     "Review rubric:",
     "1. Start with codebase drift: is the PR patching code that still exists, and does it overlap or contradict active work?",
-    "2. Hard gates: CI latest SHA, mergeability, unresolved review/CodeRabbit threads, risky code tests. Report these in gateStatus. Do not lead summary.oneLine with administrative GitHub mergeability/branch-protection state unless it is the only actionable problem; focus summary.oneLine on substantive code, acceptance, security, or test evidence.",
+    "2. Keep the review focused on the code changes in this PR. Do not report GitHub mergeability, branch protection, CI status, reviewer state, CodeRabbit state, or external E2E job status; those are handled by other PR surfaces.",
     "3. Security: use the trusted security code review skill embedded below as the authoritative security rubric. Apply every category with PASS/WARNING/FAIL evidence. NemoClaw-specific focus: sandbox escape, SSRF bypass, policy bypass, credential leakage, blueprint tampering, installer trust, and workflow trusted-code boundary.",
     "Trusted security review skill from main checkout:",
     "```markdown",
@@ -685,8 +610,10 @@ export function buildSystemPrompt(schema: Record<string, unknown>, securityRevie
     "4. Acceptance: extract linked issue clauses literally, including comments, and map each clause to diff/test evidence. Named list items are separate clauses.",
     "5. Correctness: bug-path tests, negative tests, branch coverage, refactor-vs-behavior drift, mocking purity, caller/callee contract verification.",
     "6. Quality: description-vs-diff scope, migration completion, public surface docs/notes, justified error suppression, monolith growth, @ts-nocheck, shell-string execution.",
-    "7. E2E: verify E2E Advisor recommendations and whether required jobs passed for this head SHA. Runtime/security/network/credential/rebuild/snapshot/messaging/GPU/install changes need E2E if unit tests cannot prove behavior.",
-    "Finding severity: blockers prevent merge; warnings should be fixed or consciously accepted; suggestions are nice-to-have.",
+    "7. If a previous PR Review Advisor comment exists, compare it with the current diff and explicitly decide whether prior code-review findings were addressed, still apply, or are obsolete. Consider code changes since the previous analyzed SHA when available. Do not evaluate whether external E2E requirements have been met. When previous review context exists, set summary.sinceLastReview with counts for resolved, stillApplies, and newItems.",
+    "Acceptance and security should inform findings, not become standalone comment sections: any unmet acceptance clause or security fail/warning must be represented as a finding, normally severity=blocker for unmet acceptance or security fail and severity=warning for security warnings.",
+    "Set summary.topItem to the most important actionable finding title or short description for first-review comments. Keep it concise and code-focused.",
+    "Finding severity mapping: blocker renders as 'Needs attention'; warning renders as 'Worth checking'; suggestion renders as 'Nice ideas'.",
     "Return JSON only matching this schema:",
     "```json",
     JSON.stringify(schema),
@@ -729,12 +656,10 @@ export function normalizeReviewResult(result: unknown, metadata: ReviewMetadata)
     headSha: metadata.headSha,
     changedFiles: metadata.changedFiles,
     summary: sanitizeSummary(object.summary),
-    gateStatus: sanitizeGateStatus(object.gateStatus, metadata.deterministic.gateStatus),
     findings: sanitizeFindings(object.findings),
     acceptanceCoverage: sanitizeAcceptanceCoverage(object.acceptanceCoverage),
     securityCategories: sanitizeSecurityCategories(object.securityCategories),
     testDepth: sanitizeTestDepth(object.testDepth, metadata.deterministic.testDepth),
-    e2eAdvisorStatus: sanitizeE2eAdvisorStatus(object.e2eAdvisorStatus),
     positives: stringArray(object.positives).slice(0, 12),
     reviewCompleteness: sanitizeReviewCompleteness(object.reviewCompleteness),
   };
@@ -746,25 +671,22 @@ function sanitizeSummary(value: unknown): ReviewAdvisorResult["summary"] {
     recommendation: enumValue(object.recommendation, SUMMARY_RECOMMENDATIONS, "info_only"),
     confidence: enumValue(object.confidence, CONFIDENCES, "medium"),
     oneLine: stringOrDefault(object.oneLine, "PR review advisor completed with limited summary."),
+    topItem: typeof object.topItem === "string" && object.topItem.trim() ? object.topItem.trim() : undefined,
+    sinceLastReview: sanitizeSinceLastReview(object.sinceLastReview),
   };
 }
 
-function sanitizeGateStatus(value: unknown, fallback: ReviewAdvisorResult["gateStatus"]): ReviewAdvisorResult["gateStatus"] {
-  const object = isRecord(value) ? value : {};
+function sanitizeSinceLastReview(value: unknown): ReviewAdvisorResult["summary"]["sinceLastReview"] {
+  if (!isRecord(value)) return undefined;
   return {
-    ci: sanitizeGate(object.ci, fallback.ci),
-    mergeability: sanitizeGate(object.mergeability, fallback.mergeability),
-    reviewThreads: sanitizeGate(object.reviewThreads, fallback.reviewThreads),
-    riskyCodeTested: sanitizeGate(object.riskyCodeTested, fallback.riskyCodeTested),
+    resolved: nonNegativeInteger(value.resolved),
+    stillApplies: nonNegativeInteger(value.stillApplies),
+    newItems: nonNegativeInteger(value.newItems),
   };
 }
 
-function sanitizeGate(value: unknown, fallback: GateStatus): GateStatus {
-  const object = isRecord(value) ? value : {};
-  return {
-    status: enumValue(object.status, GATE_STATUSES, fallback.status),
-    evidence: stringOrDefault(object.evidence, fallback.evidence),
-  };
+function nonNegativeInteger(value: unknown): number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 0;
 }
 
 function sanitizeFindings(value: unknown): Finding[] {
@@ -811,17 +733,6 @@ function sanitizeTestDepth(value: unknown, fallback: ReviewAdvisorResult["testDe
   };
 }
 
-function sanitizeE2eAdvisorStatus(value: unknown): ReviewAdvisorResult["e2eAdvisorStatus"] {
-  const object = isRecord(value) ? value : {};
-  return {
-    found: typeof object.found === "boolean" ? object.found : false,
-    requiredJobs: stringArray(object.requiredJobs),
-    passedForHeadSha: stringArray(object.passedForHeadSha),
-    missingForHeadSha: stringArray(object.missingForHeadSha),
-    verdict: enumValue(object.verdict, E2E_STATUS_VERDICTS, "not_found"),
-  };
-}
-
 function sanitizeReviewCompleteness(value: unknown): ReviewAdvisorResult["reviewCompleteness"] {
   const object = isRecord(value) ? value : {};
   const limitations = stringArray(object.limitations);
@@ -838,44 +749,11 @@ export function renderSummary(result: ReviewAdvisorResult): string {
   const lines: string[] = [];
   lines.push("# PR Review Advisor");
   lines.push("");
-  lines.push(`Base: \`${result.baseRef}\`  `);
-  lines.push(`Head: \`${result.headRef}\`  `);
-  lines.push(`Analyzed SHA: \`${result.headSha}\`  `);
   lines.push(result.summary.oneLine);
   lines.push("");
-  lines.push("## Gate status");
-  lines.push(`- CI: **${result.gateStatus.ci.status}** — ${result.gateStatus.ci.evidence}`);
-  lines.push(`- Mergeability: **${result.gateStatus.mergeability.status}** — ${result.gateStatus.mergeability.evidence}`);
-  lines.push(`- Review threads: **${result.gateStatus.reviewThreads.status}** — ${result.gateStatus.reviewThreads.evidence}`);
-  lines.push(`- Risky code tested: **${result.gateStatus.riskyCodeTested.status}** — ${result.gateStatus.riskyCodeTested.evidence}`);
-  lines.push("");
-  appendFindings(lines, "🔴 Blockers", blockers);
-  appendFindings(lines, "🟡 Warnings", warnings);
-  appendFindings(lines, "🔵 Suggestions", suggestions);
-  lines.push("## Acceptance coverage");
-  if (result.acceptanceCoverage.length === 0) {
-    lines.push("- _No linked acceptance clauses were analyzed._");
-  } else {
-    for (const clause of result.acceptanceCoverage.slice(0, 20)) {
-      lines.push(`- **${clause.status}** — ${clause.clause}: ${clause.evidence}`);
-    }
-  }
-  lines.push("");
-  lines.push("## Security review");
-  for (const category of result.securityCategories.slice(0, 9)) {
-    lines.push(`- **${category.verdict}** — ${category.category}: ${category.justification}`);
-  }
-  lines.push("");
-  lines.push("## Test / E2E status");
-  lines.push(`- Test depth: **${result.testDepth.verdict}** — ${result.testDepth.rationale}`);
-  lines.push(`- E2E Advisor: **${result.e2eAdvisorStatus.verdict}**${result.e2eAdvisorStatus.found ? "" : " (not found)"}`);
-  if (result.e2eAdvisorStatus.requiredJobs.length > 0) {
-    lines.push(`- Required E2E jobs: ${result.e2eAdvisorStatus.requiredJobs.map((job) => `\`${job}\``).join(", ")}`);
-  }
-  if (result.e2eAdvisorStatus.missingForHeadSha.length > 0) {
-    lines.push(`- Missing for analyzed SHA: ${result.e2eAdvisorStatus.missingForHeadSha.map((job) => `\`${job}\``).join(", ")}`);
-  }
-  lines.push("");
+  appendFindings(lines, "🛠️ Needs attention", blockers);
+  appendFindings(lines, "🔎 Worth checking", warnings);
+  appendFindings(lines, "🌱 Nice ideas", suggestions);
   lines.push("## ✅ What looks good");
   if (result.positives.length === 0) {
     lines.push("- _No positives were identified by the advisor._");
@@ -883,9 +761,26 @@ export function renderSummary(result: ReviewAdvisorResult): string {
     for (const positive of result.positives.slice(0, 10)) lines.push(`- ${positive}`);
   }
   lines.push("");
-  lines.push("## Review completeness");
-  for (const limitation of result.reviewCompleteness.limitations) lines.push(`- ${limitation}`);
-  lines.push(`- Human maintainer review required: **${result.reviewCompleteness.requiresHumanReview ? "yes" : "yes (advisor output is never authoritative)"}**`);
+
+  return `${lines.join("\n")}\n`;
+}
+
+export function renderDetailedReview(result: ReviewAdvisorResult): string {
+  const lines = renderSummary(result).trimEnd().split("\n");
+  lines.push("");
+  lines.push("## Acceptance coverage");
+  if (result.acceptanceCoverage.length === 0) {
+    lines.push("- _No linked acceptance clauses were analyzed._");
+  } else {
+    for (const clause of result.acceptanceCoverage.slice(0, 100)) {
+      lines.push(`- **${clause.status}** — ${clause.clause}: ${clause.evidence}`);
+    }
+  }
+  lines.push("");
+  lines.push("## Security review");
+  for (const category of result.securityCategories.slice(0, 20)) {
+    lines.push(`- **${category.verdict}** — ${category.category}: ${category.justification}`);
+  }
   lines.push("");
   return `${lines.join("\n")}\n`;
 }
@@ -921,11 +816,10 @@ function unavailableResult(metadata: ReviewMetadata, reason: string, failed: boo
       confidence: "low",
       oneLine: failed ? `PR review advisor failed: ${reason}` : `PR review advisor skipped: ${reason}`,
     },
-    gateStatus: metadata.deterministic.gateStatus,
     findings: failed
       ? [{
           severity: "warning",
-          category: "ci",
+          category: "correctness",
           file: null,
           line: null,
           title: "PR review advisor unavailable",
@@ -941,7 +835,6 @@ function unavailableResult(metadata: ReviewMetadata, reason: string, failed: boo
       justification: "Advisor unavailable; human review required.",
     })),
     testDepth: metadata.deterministic.testDepth,
-    e2eAdvisorStatus: { found: false, requiredJobs: [], passedForHeadSha: [], missingForHeadSha: [], verdict: "not_found" },
     positives: [],
     reviewCompleteness: {
       limitations: [failed ? `Advisor execution failed: ${reason}` : `Advisor execution skipped: ${reason}`],

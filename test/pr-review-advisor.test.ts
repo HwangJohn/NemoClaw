@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import YAML from "yaml";
 
 import { buildComment } from "../tools/pr-review-advisor/comment.mts";
-import { buildSystemPrompt, classifyMonolithDelta, classifyTestDepth, deriveGateStatus, normalizeReviewResult, readTrustedSecurityReviewSkill, renderSummary } from "../tools/pr-review-advisor/analyze.mts";
+import { buildSystemPrompt, classifyMonolithDelta, classifyTestDepth, normalizeReviewResult, readTrustedSecurityReviewSkill, renderDetailedReview, renderSummary } from "../tools/pr-review-advisor/analyze.mts";
 import { githubGraphql } from "../tools/advisors/github.mts";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
@@ -24,12 +24,7 @@ function metadata(overrides: Partial<ReviewMetadata> = {}): ReviewMetadata {
       rationale: "deterministic fallback",
       suggestedTests: ["run unit tests"],
     },
-    gateStatus: {
-      ci: { status: "unknown", evidence: "No statusCheckRollup data was available." },
-      mergeability: { status: "unknown", evidence: "Merge state was unavailable." },
-      reviewThreads: { status: "unknown", evidence: "No review thread state was available." },
-      riskyCodeTested: { status: "pass", evidence: "No risky code areas detected by path heuristics." },
-    },
+    previousAdvisorReview: null,
     workflowSignals: [],
     monolithDeltas: [],
     driftEvidence: [],
@@ -56,12 +51,7 @@ function validResult(overrides = {}) {
       recommendation: "merge_after_fixes",
       confidence: "high",
       oneLine: "Review found one fixable issue.",
-    },
-    gateStatus: {
-      ci: { status: "pass", evidence: "checks passed" },
-      mergeability: { status: "pass", evidence: "clean" },
-      reviewThreads: { status: "pass", evidence: "none unresolved" },
-      riskyCodeTested: { status: "warning", evidence: "risky workflow touched" },
+      topItem: "trusted-code boundary",
     },
     findings: [
       {
@@ -85,13 +75,6 @@ function validResult(overrides = {}) {
       verdict: "mocks_recommended",
       rationale: "GitHub API and filesystem paths are mocked in unit tests.",
       suggestedTests: ["comment builder test"],
-    },
-    e2eAdvisorStatus: {
-      found: false,
-      requiredJobs: [],
-      passedForHeadSha: [],
-      missingForHeadSha: [],
-      verdict: "not_found",
     },
     positives: ["Uses a sticky marker for idempotent comments."],
     reviewCompleteness: {
@@ -120,10 +103,8 @@ describe("PR review advisor", () => {
     const result = normalizeReviewResult(
       {
         summary: { recommendation: "ship_it", confidence: "certain", oneLine: "bad enum" },
-        gateStatus: { ci: { status: "green", evidence: "bad enum" } },
         findings: [{ severity: "critical", category: "style", title: "x" }],
         testDepth: { verdict: "integration_only" },
-        e2eAdvisorStatus: { verdict: "shrug" },
         reviewCompleteness: {},
       },
       metadata(),
@@ -131,14 +112,12 @@ describe("PR review advisor", () => {
 
     expect(result.summary.recommendation).toBe("info_only");
     expect(result.summary.confidence).toBe("medium");
-    expect(result.gateStatus.ci.status).toBe("unknown");
     expect(result.findings[0]).toMatchObject({ severity: "suggestion", category: "correctness" });
     expect(result.testDepth.verdict).toBe("unit_sufficient");
-    expect(result.e2eAdvisorStatus.verdict).toBe("not_found");
   });
 
   it("classifies sandbox and workflow changes as requiring deeper validation", () => {
-    expect(classifyTestDepth(["nemoclaw-blueprint/policies/presets/slack.yaml"]).verdict).toBe("e2e_required");
+    expect(classifyTestDepth(["nemoclaw-blueprint/policies/presets/slack.yaml"]).verdict).toBe("runtime_validation_recommended");
     expect(classifyTestDepth(["src/lib/credentials.ts"]).verdict).toBe("mocks_recommended");
     expect(classifyTestDepth(["docs/get-started/quickstart.mdx"]).verdict).toBe("unit_sufficient");
   });
@@ -153,25 +132,6 @@ describe("PR review advisor", () => {
     expect(classifyMonolithDelta({ file: "src/lib/small.ts", baseLines: 20, headLines: 60, delta: 40 })).toMatchObject({
       severity: "none",
     });
-  });
-
-  it("treats mergeable-but-not-ready GitHub merge states as warnings", () => {
-    for (const mergeStateStatus of ["UNSTABLE", "HAS_HOOKS", "unstable"]) {
-      const gates = deriveGateStatus(
-        { graphQl: { data: { repository: { pullRequest: { mergeStateStatus } } } } } as never,
-        [],
-        [],
-      );
-
-      expect(gates.mergeability).toMatchObject({ status: "warning", evidence: `mergeStateStatus=${mergeStateStatus}` });
-    }
-
-    const clean = deriveGateStatus(
-      { graphQl: { data: { repository: { pullRequest: { mergeStateStatus: "CLEAN" } } } } } as never,
-      [],
-      [],
-    );
-    expect(clean.mergeability.status).toBe("pass");
   });
 
   it("surfaces GitHub GraphQL errors even when the HTTP status is successful", async () => {
@@ -194,7 +154,9 @@ describe("PR review advisor", () => {
     expect(skill).toContain("Category 1: Secrets and Credentials");
     expect(prompt).toContain("Trusted security review skill from main checkout");
     expect(prompt).toContain("For NemoClaw PRs, pay special attention to sandbox escape vectors");
-    expect(prompt).toContain("Do not lead summary.oneLine with administrative GitHub mergeability/branch-protection state");
+    expect(prompt).toContain("Do not report GitHub mergeability, branch protection, CI status, reviewer state, CodeRabbit state, or external E2E job status");
+    expect(prompt).toContain("compare it with the current diff and explicitly decide whether prior code-review findings were addressed");
+    expect(prompt).toContain("any unmet acceptance clause or security fail/warning must be represented as a finding");
   });
 
   it("loads the security review skill from the trusted module checkout, not cwd", () => {
@@ -231,17 +193,50 @@ describe("PR review advisor", () => {
   it("renders summaries and sticky comments with human-review framing", () => {
     const result = normalizeReviewResult(validResult(), metadata());
     const summary = renderSummary(result);
+    const detailed = renderDetailedReview(result);
     const comment = buildComment({ summary, result, runUrl: "https://example.invalid/run" });
 
     expect(summary).toContain("# PR Review Advisor");
     expect(summary).toContain("trusted-code boundary");
+    expect(summary).toContain("🛠️ Needs attention");
+    expect(summary).toContain("🔎 Worth checking");
+    expect(summary).toContain("🌱 Nice ideas");
+    expect(summary).not.toContain("## Acceptance coverage");
+    expect(summary).not.toContain("## Security review");
+    expect(detailed).toContain("## Acceptance coverage");
+    expect(detailed).toContain("## Security review");
+    expect(comment).not.toContain("<details>");
+    expect(comment).not.toContain("Full advisor summary");
+    expect(comment).not.toContain("## Acceptance coverage");
+    expect(comment).not.toContain("## Security review");
+    expect(comment).toContain("[Full AC/security review artifact](https://example.invalid/run)");
     expect(summary).not.toContain("Recommendation: **merge after fixes**");
     expect(summary).not.toContain("Confidence: **high**");
     expect(comment).toContain("<!-- nemoclaw-pr-review-advisor -->");
     expect(comment).toContain("A human maintainer must make the final merge decision");
-    expect(comment).toContain("abc123def456");
+    expect(summary).not.toContain("## Review completeness");
+    expect(summary).not.toContain("Human maintainer review required");
+    expect(comment).toContain("1 needs attention, 0 worth checking, 0 nice ideas");
+    expect(comment).toContain("**Top item:** trusted-code boundary");
+    expect(summary).not.toContain("Base: `origin/main`");
+    expect(summary).not.toContain("Head: `HEAD`");
+    expect(summary).not.toContain("Analyzed SHA: `abc123def456`");
+    expect(comment).not.toContain("abc123def456");
     expect(comment).not.toContain("**Recommendation:** merge after fixes");
     expect(comment).not.toContain("**Confidence:** high");
+
+    const followUp = buildComment({
+      summary,
+      result: normalizeReviewResult(validResult({
+        summary: {
+          recommendation: "merge_after_fixes",
+          confidence: "high",
+          oneLine: "Follow-up review completed.",
+          sinceLastReview: { resolved: 1, stillApplies: 1, newItems: 1 },
+        },
+      }), metadata()),
+    });
+    expect(followUp).toContain("**Since last review:** 1 prior item resolved, 1 still applies, 1 new item found");
   });
 
   it("normalizes output that validates against the JSON schema", () => {
@@ -254,7 +249,7 @@ describe("PR review advisor", () => {
     expect(validate(result)).toBe(true);
   });
 
-  it("keeps the workflow inside the same trusted-code boundary as the E2E advisor", () => {
+  it("keeps the workflow inside the same trusted-code boundary as other advisors", () => {
     const workflow = YAML.parse(
       fs.readFileSync(path.join(ROOT, ".github/workflows/pr-review-advisor.yaml"), "utf8"),
     );
