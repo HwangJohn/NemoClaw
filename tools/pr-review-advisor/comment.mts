@@ -22,7 +22,7 @@ type ReviewAdvisorResult = {
       newItems?: number;
     };
   };
-  findings?: Array<{ severity?: string }>;
+  findings?: Array<{ severity?: string; title?: string }>;
   reviewCompleteness?: {
     limitations?: string[];
   };
@@ -79,8 +79,8 @@ export function buildComment({
   const suggestionCount = result?.findings?.filter((finding) => finding.severity === "suggestion").length ?? 0;
   const secondary = buildSecondarySummary(result);
   const details = runUrl
-    ? `\n[Full AC/security review artifact](${runUrl})`
-    : "\nFull AC/security review is available in the workflow artifacts.";
+    ? `\n[Workflow run details](${runUrl})`
+    : "";
   return `${marker || MARKER}
 ## PR Review Advisor
 

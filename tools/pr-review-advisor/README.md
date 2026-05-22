@@ -5,7 +5,7 @@
 
 The PR Review Advisor is an SDK-powered, NemoClaw-specific pull request reviewer. It runs as a
 trusted GitHub Actions job, inspects PRs as read-only data, and posts a sticky advisory comment with
-needs-attention items, worth-checking items, nice ideas, and code-review follow-up guidance.
+blockers, warnings, suggestions, acceptance coverage, security notes, and code-review follow-up guidance.
 
 It complements the existing PR surfaces by keeping a NemoClaw maintainer code-review lens focused on the patch itself:
 
@@ -25,11 +25,13 @@ It intentionally does not report GitHub mergeability, branch protection, CI stat
 2. Checks out advisor implementation code from trusted `main` into `advisor/`.
 3. Checks out PR content into `pr-workdir/` as inert read-only analysis data.
 4. Installs a pinned Pi SDK package with lifecycle scripts disabled.
-5. Runs `tools/pr-review-advisor/analyze.mts` from the trusted checkout.
-6. Writes artifacts under `artifacts/pr-review-advisor/`.
-7. Posts or updates a sticky PR comment marked by `<!-- nemoclaw-pr-review-advisor -->`.
+5. Waits for repository-required status checks, plus the E2E Advisor recommendation, to leave the pending/in-progress state.
+6. Runs `tools/pr-review-advisor/analyze.mts` from the trusted checkout.
+7. Writes artifacts under `artifacts/pr-review-advisor/`.
+8. Posts or updates a sticky PR comment marked by `<!-- nemoclaw-pr-review-advisor -->`.
 
-The workflow is advisory and must not be configured as a required status check.
+The workflow is advisory and must not be configured as a required status check. Making it required can
+create circular wait behavior and defeats the goal of letting it observe settled required-check state.
 
 ## Safety model
 
@@ -40,6 +42,7 @@ The workflow is advisory and must not be configured as a required status check.
 - Generated advisor credential config is written under `/tmp`, not uploaded artifacts.
 - The job is limited to upstream `NVIDIA/NemoClaw` PRs when model secrets are in scope.
 - The workflow posts advisory comments only; it does not approve, request changes, merge, push, label, or dispatch E2E.
+- Before model analysis, the workflow deterministically waits for required status checks from repository rulesets. If rulesets cannot be read, it falls back to the configured `PR_REVIEW_ADVISOR_REQUIRED_CHECK_FALLBACK_CONTEXTS` list.
 
 ## Required secret
 

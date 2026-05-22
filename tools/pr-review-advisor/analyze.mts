@@ -442,12 +442,14 @@ function collectDriftEvidence(baseRef: string, changedFiles: string[]): DriftEvi
       .map((line) => line.trim())
       .filter(Boolean);
     const normalizedFile = file.replace(/^\.\//, "").replace(/\\/g, "/");
-    const escapedFile = normalizedFile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const filePathPattern = new RegExp(`(^|/)${escapedFile}(\\s|$)`);
     const renameHints = (gitOutput([["log", "--oneline", "--name-status", "--find-renames", "-40", baseRef, "--"]], 120000) || "")
       .split("\n")
       .map((line) => line.trim())
-      .filter((line) => /^(R\d+|A|D|M)\s/.test(line) && filePathPattern.test(line.replace(/\\/g, "/")))
+      .filter((line) => {
+        const [status, ...paths] = line.replace(/\\/g, "/").split("\t");
+        if (!/^(R\d+|A|D|M)$/.test(status || "")) return false;
+        return paths.some((changedPath) => changedPath.replace(/^\.\//, "") === normalizedFile);
+      })
       .slice(0, 20);
     return { file, recentHistory, renameHints };
   });
@@ -751,10 +753,10 @@ export function renderSummary(result: ReviewAdvisorResult): string {
   lines.push("");
   lines.push(result.summary.oneLine);
   lines.push("");
-  appendFindings(lines, "🛠️ Needs attention", blockers);
-  appendFindings(lines, "🔎 Worth checking", warnings);
-  appendFindings(lines, "🌱 Nice ideas", suggestions);
-  lines.push("## ✅ What looks good");
+  appendFindings(lines, "Needs attention", blockers);
+  appendFindings(lines, "Worth checking", warnings);
+  appendFindings(lines, "Nice ideas", suggestions);
+  lines.push("## What looks good");
   if (result.positives.length === 0) {
     lines.push("- _No positives were identified by the advisor._");
   } else {

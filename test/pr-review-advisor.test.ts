@@ -198,9 +198,12 @@ describe("PR review advisor", () => {
 
     expect(summary).toContain("# PR Review Advisor");
     expect(summary).toContain("trusted-code boundary");
-    expect(summary).toContain("🛠️ Needs attention");
-    expect(summary).toContain("🔎 Worth checking");
-    expect(summary).toContain("🌱 Nice ideas");
+    expect(summary).toContain("Needs attention");
+    expect(summary).toContain("Worth checking");
+    expect(summary).toContain("Nice ideas");
+    expect(summary).not.toContain("🛠️");
+    expect(summary).not.toContain("🔎");
+    expect(summary).not.toContain("🌱");
     expect(summary).not.toContain("## Acceptance coverage");
     expect(summary).not.toContain("## Security review");
     expect(detailed).toContain("## Acceptance coverage");
@@ -209,7 +212,8 @@ describe("PR review advisor", () => {
     expect(comment).not.toContain("Full advisor summary");
     expect(comment).not.toContain("## Acceptance coverage");
     expect(comment).not.toContain("## Security review");
-    expect(comment).toContain("[Full AC/security review artifact](https://example.invalid/run)");
+    expect(comment).toContain("[Workflow run details](https://example.invalid/run)");
+    expect(comment).not.toContain("Full AC/security review artifact");
     expect(summary).not.toContain("Recommendation: **merge after fixes**");
     expect(summary).not.toContain("Confidence: **high**");
     expect(comment).toContain("<!-- nemoclaw-pr-review-advisor -->");
@@ -225,16 +229,17 @@ describe("PR review advisor", () => {
     expect(comment).not.toContain("**Recommendation:** merge after fixes");
     expect(comment).not.toContain("**Confidence:** high");
 
+    const followUpResult = normalizeReviewResult(validResult({
+      summary: {
+        recommendation: "merge_after_fixes",
+        confidence: "high",
+        oneLine: "Follow-up review completed.",
+        sinceLastReview: { resolved: 1, stillApplies: 1, newItems: 1 },
+      },
+    }), metadata());
     const followUp = buildComment({
-      summary,
-      result: normalizeReviewResult(validResult({
-        summary: {
-          recommendation: "merge_after_fixes",
-          confidence: "high",
-          oneLine: "Follow-up review completed.",
-          sinceLastReview: { resolved: 1, stillApplies: 1, newItems: 1 },
-        },
-      }), metadata()),
+      summary: renderSummary(followUpResult),
+      result: followUpResult,
     });
     expect(followUp).toContain("**Since last review:** 1 prior item resolved, 1 still applies, 1 new item found");
   });
