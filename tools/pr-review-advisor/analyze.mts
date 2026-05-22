@@ -676,7 +676,7 @@ export function buildSystemPrompt(schema: Record<string, unknown>, securityRevie
     "Use the repository files with read-only tools when needed. Do not ask to execute PR scripts/tests or package-manager commands.",
     "Review rubric:",
     "1. Start with codebase drift: is the PR patching code that still exists, and does it overlap or contradict active work?",
-    "2. Hard gates: CI latest SHA, mergeability, unresolved review/CodeRabbit threads, risky code tests.",
+    "2. Hard gates: CI latest SHA, mergeability, unresolved review/CodeRabbit threads, risky code tests. Report these in gateStatus. Do not lead summary.oneLine with administrative GitHub mergeability/branch-protection state unless it is the only actionable problem; focus summary.oneLine on substantive code, acceptance, security, or test evidence.",
     "3. Security: use the trusted security code review skill embedded below as the authoritative security rubric. Apply every category with PASS/WARNING/FAIL evidence. NemoClaw-specific focus: sandbox escape, SSRF bypass, policy bypass, credential leakage, blueprint tampering, installer trust, and workflow trusted-code boundary.",
     "Trusted security review skill from main checkout:",
     "```markdown",
@@ -841,9 +841,6 @@ export function renderSummary(result: ReviewAdvisorResult): string {
   lines.push(`Base: \`${result.baseRef}\`  `);
   lines.push(`Head: \`${result.headRef}\`  `);
   lines.push(`Analyzed SHA: \`${result.headSha}\`  `);
-  lines.push(`Recommendation: **${formatRecommendation(result.summary.recommendation)}**  `);
-  lines.push(`Confidence: **${result.summary.confidence}**`);
-  lines.push("");
   lines.push(result.summary.oneLine);
   lines.push("");
   lines.push("## Gate status");

@@ -194,6 +194,7 @@ describe("PR review advisor", () => {
     expect(skill).toContain("Category 1: Secrets and Credentials");
     expect(prompt).toContain("Trusted security review skill from main checkout");
     expect(prompt).toContain("For NemoClaw PRs, pay special attention to sandbox escape vectors");
+    expect(prompt).toContain("Do not lead summary.oneLine with administrative GitHub mergeability/branch-protection state");
   });
 
   it("loads the security review skill from the trusted module checkout, not cwd", () => {
@@ -234,9 +235,13 @@ describe("PR review advisor", () => {
 
     expect(summary).toContain("# PR Review Advisor");
     expect(summary).toContain("trusted-code boundary");
+    expect(summary).not.toContain("Recommendation: **merge after fixes**");
+    expect(summary).not.toContain("Confidence: **high**");
     expect(comment).toContain("<!-- nemoclaw-pr-review-advisor -->");
     expect(comment).toContain("A human maintainer must make the final merge decision");
     expect(comment).toContain("abc123def456");
+    expect(comment).not.toContain("**Recommendation:** merge after fixes");
+    expect(comment).not.toContain("**Confidence:** high");
   });
 
   it("normalizes output that validates against the JSON schema", () => {

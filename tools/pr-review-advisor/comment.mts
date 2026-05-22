@@ -71,8 +71,6 @@ export function buildComment({
   const blockerCount = result?.findings?.filter((finding) => finding.severity === "blocker").length ?? 0;
   const warningCount = result?.findings?.filter((finding) => finding.severity === "warning").length ?? 0;
   const suggestionCount = result?.findings?.filter((finding) => finding.severity === "suggestion").length ?? 0;
-  const recommendation = result?.summary?.recommendation ? result.summary.recommendation.replaceAll("_", " ") : "unknown";
-  const confidence = result?.summary?.confidence || "unknown";
   const sha = result?.headSha ? `\n**Analyzed HEAD:** \`${result.headSha}\`` : "";
   const run = runUrl ? `\n\n[Workflow run](${runUrl})` : "";
   const limitations = result?.reviewCompleteness?.limitations?.length
@@ -82,9 +80,7 @@ export function buildComment({
   return `${marker || MARKER}
 ## PR Review Advisor
 
-**Recommendation:** ${recommendation}
-**Confidence:** ${confidence}${sha}
-**Findings:** ${blockerCount} blocker(s), ${warningCount} warning(s), ${suggestionCount} suggestion(s)
+**Findings:** ${blockerCount} blocker(s), ${warningCount} warning(s), ${suggestionCount} suggestion(s)${sha}
 
 This is an automated advisory review. A human maintainer must make the final merge decision.${limitations}${run}
 
