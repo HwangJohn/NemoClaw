@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
+import path from "node:path";
+
 import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from "vitest";
 // Import from compiled dist/ so coverage is attributed correctly.
 import {
@@ -126,6 +129,15 @@ describe("printDashboardUi — regression for #2078 (port 8642 is not a chat UI)
     expect(output).toContain("Token: nemoclaw sandbox-y gateway-token --quiet");
     expect(output).not.toContain("http://127.0.0.1:19000/#token=");
     expect(output).not.toContain(token);
+  });
+});
+
+describe("agent setup session boundaries", () => {
+  it("does not write onboard session state directly", () => {
+    const source = fs.readFileSync(path.join(__dirname, "onboard.ts"), "utf8");
+
+    expect(source).not.toContain("../state/onboard-session");
+    expect(source).not.toMatch(/onboardSession\.markStep/);
   });
 });
 
