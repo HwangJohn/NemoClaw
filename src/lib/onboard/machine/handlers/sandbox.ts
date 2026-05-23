@@ -3,7 +3,7 @@
 
 import type { Session, SessionUpdates } from "../../../state/onboard-session";
 
-export interface SandboxStateOptions<Gpu, Agent, WebSearchConfig, MessagingChannelConfig, SandboxGpuConfig> {
+export interface SandboxStateOptions<Gpu, Agent, WebSearchConfig, MessagingChannelConfig, SandboxGpuConfig, ResourceProfile> {
   resume: boolean;
   fresh: boolean;
   resumeAgentChanged: boolean;
@@ -57,6 +57,7 @@ export interface SandboxStateOptions<Gpu, Agent, WebSearchConfig, MessagingChann
     setupMessagingChannels(agent: Agent, existingChannels: string[] | null): Promise<string[]>;
     readMessagingChannelConfigFromEnv(): MessagingChannelConfig | null;
     promptValidatedSandboxName(agent: Agent): Promise<string>;
+    selectResourceProfileForSandbox(): Promise<ResourceProfile | null>;
     stopStaleDashboardListenersForSandbox(sandboxes: unknown[], sandboxName: string): void;
     listRegistrySandboxes(): { sandboxes: unknown[] };
     createSandbox(
@@ -71,6 +72,7 @@ export interface SandboxStateOptions<Gpu, Agent, WebSearchConfig, MessagingChann
       agent: Agent,
       controlUiPort: number | null,
       sandboxGpuConfig: SandboxGpuConfig,
+      resourceProfile: ResourceProfile | null,
       hermesToolGateways: string[],
     ): Promise<string>;
     updateSandboxRegistry(sandboxName: string, updates: Record<string, unknown>): void;
@@ -101,7 +103,7 @@ function sameEffectiveTelegramRequireMention(left: boolean | null, right: boolea
   return (left ?? false) === (right ?? false);
 }
 
-export async function handleSandboxState<Gpu, Agent, WebSearchConfig, MessagingChannelConfig, SandboxGpuConfig>({
+export async function handleSandboxState<Gpu, Agent, WebSearchConfig, MessagingChannelConfig, SandboxGpuConfig, ResourceProfile>({
   resume,
   fresh,
   resumeAgentChanged,
@@ -126,7 +128,8 @@ export async function handleSandboxState<Gpu, Agent, WebSearchConfig, MessagingC
   Agent,
   WebSearchConfig,
   MessagingChannelConfig,
-  SandboxGpuConfig
+  SandboxGpuConfig,
+  ResourceProfile
 >): Promise<SandboxStateResult<WebSearchConfig>> {
   const webSearchSupportProbePath = fromDockerfile ? deps.resolvePath(fromDockerfile) : null;
   const webSearchSupported = deps.agentSupportsWebSearch(agent, webSearchSupportProbePath, rootDir);
@@ -272,6 +275,7 @@ export async function handleSandboxState<Gpu, Agent, WebSearchConfig, MessagingC
     });
 
     if (!sandboxName) sandboxName = await deps.promptValidatedSandboxName(agent);
+    const resourceProfile = await deps.selectResourceProfileForSandbox();
     if (fresh) deps.stopStaleDashboardListenersForSandbox(deps.listRegistrySandboxes().sandboxes, sandboxName);
     sandboxName = await deps.createSandbox(
       gpu,
@@ -285,6 +289,7 @@ export async function handleSandboxState<Gpu, Agent, WebSearchConfig, MessagingC
       agent,
       controlUiPort,
       sandboxGpuConfig,
+      resourceProfile,
       hermesToolGateways,
     );
     webSearchConfig = nextWebSearchConfig;

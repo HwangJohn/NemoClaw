@@ -48,6 +48,7 @@ const dockerGpuSandboxCreate: typeof import("./onboard/docker-gpu-sandbox-create
 const dockerDriverGatewayLaunch: typeof import("./onboard/docker-driver-gateway-launch") = require("./onboard/docker-driver-gateway-launch");
 const { findReadableNvidiaCdiSpecFiles, parseDockerCdiSpecDirs }: typeof import("./onboard/docker-cdi") = require("./onboard/docker-cdi");
 const { buildSandboxGpuCreateArgs, getSandboxReadyTimeoutSecs }: typeof import("./onboard/sandbox-gpu-create") = require("./onboard/sandbox-gpu-create");
+const { appendResourceFlagsForProfile, selectResourceProfileForSandbox }: typeof import("./onboard/resource-profile-selection") = require("./onboard/resource-profile-selection");
 const {
   isValidProxyHost,
   isValidProxyPort,
@@ -535,8 +536,6 @@ const OPENCLAW_LAUNCH_AGENT_PLIST = "~/Library/LaunchAgents/ai.openclaw.gateway.
 
 const BRAVE_SEARCH_HELP_URL = "https://brave.com/search/api/";
 
-// Re-export shared JSON types under the names used throughout this module.
-// See src/lib/core/json-types.ts for the canonical definitions.
 import type {
   JsonObject as LooseObject,
 } from "./core/json-types";
@@ -2942,6 +2941,7 @@ async function createSandbox(
   agent: AgentDefinition | null = null,
   controlUiPort: number | null = null,
   sandboxGpuConfig: SandboxGpuConfig | null = null,
+  resourceProfile: import("./resources-cmd").ResourceProfile | null = null,
   hermesToolGateways: string[] = [],
 ) {
   step(6, 8, "Creating sandbox");
@@ -3531,8 +3531,6 @@ async function createSandbox(
   };
   process.on("exit", cleanupBuildCtx);
 
-  // Create sandbox (use -- echo to avoid dropping into interactive shell)
-  // Pass the base policy so sandbox starts in proxy mode (required for policy updates later)
   const defaultPolicyPath = path.join(
     ROOT,
     "nemoclaw-blueprint",
@@ -3606,6 +3604,7 @@ async function createSandbox(
     }),
   ];
 
+  appendResourceFlagsForProfile(createArgs, resourceProfile, getOpenshellBinary(), { isNonInteractive, note, prompt, promptOrDefault });
   // Create OpenShell providers for messaging credentials so they flow through
   // the provider/placeholder system instead of raw env vars. The L7 proxy
   // rewrites Authorization headers (Bearer/Bot) and URL-path segments
@@ -7340,6 +7339,7 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
         setupMessagingChannels,
         readMessagingChannelConfigFromEnv,
         promptValidatedSandboxName,
+        selectResourceProfileForSandbox: () => selectResourceProfileForSandbox({ isNonInteractive, note, prompt, promptOrDefault }),
         stopStaleDashboardListenersForSandbox,
         listRegistrySandboxes: registry.listSandboxes,
         createSandbox,

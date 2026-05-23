@@ -11,8 +11,9 @@ type Agent = { displayName?: string } | null;
 type WebSearchConfig = { fetchEnabled: true };
 type MessagingChannelConfig = Record<string, string>;
 type SandboxGpuConfig = { sandboxGpuEnabled: boolean; mode: string };
+type ResourceProfile = { cpu: string; memory: string };
 
-function createDeps(overrides: Partial<SandboxStateOptions<Gpu, Agent, WebSearchConfig, MessagingChannelConfig, SandboxGpuConfig>["deps"]> = {}) {
+function createDeps(overrides: Partial<SandboxStateOptions<Gpu, Agent, WebSearchConfig, MessagingChannelConfig, SandboxGpuConfig, ResourceProfile>["deps"]> = {}) {
   let session = createSession();
   const calls = {
     note: vi.fn(),
@@ -30,6 +31,7 @@ function createDeps(overrides: Partial<SandboxStateOptions<Gpu, Agent, WebSearch
     getRecordedChannels: vi.fn(() => null),
     setupMessaging: vi.fn(async () => [] as string[]),
     promptName: vi.fn(async () => "my-assistant"),
+    selectResourceProfile: vi.fn(async () => null as ResourceProfile | null),
     stopStale: vi.fn(),
     createSandbox: vi.fn(async () => "my-assistant"),
     updateSandbox: vi.fn(),
@@ -72,6 +74,7 @@ function createDeps(overrides: Partial<SandboxStateOptions<Gpu, Agent, WebSearch
       setupMessagingChannels: calls.setupMessaging,
       readMessagingChannelConfigFromEnv: () => null,
       promptValidatedSandboxName: calls.promptName,
+      selectResourceProfileForSandbox: calls.selectResourceProfile,
       stopStaleDashboardListenersForSandbox: calls.stopStale,
       listRegistrySandboxes: () => ({ sandboxes: [{ name: "old" }] }),
       createSandbox: calls.createSandbox,
@@ -92,9 +95,9 @@ function createDeps(overrides: Partial<SandboxStateOptions<Gpu, Agent, WebSearch
 }
 
 function baseOptions(
-  deps: SandboxStateOptions<Gpu, Agent, WebSearchConfig, MessagingChannelConfig, SandboxGpuConfig>["deps"],
+  deps: SandboxStateOptions<Gpu, Agent, WebSearchConfig, MessagingChannelConfig, SandboxGpuConfig, ResourceProfile>["deps"],
   session: Session | null = createSession(),
-): SandboxStateOptions<Gpu, Agent, WebSearchConfig, MessagingChannelConfig, SandboxGpuConfig> {
+): SandboxStateOptions<Gpu, Agent, WebSearchConfig, MessagingChannelConfig, SandboxGpuConfig, ResourceProfile> {
   return {
     resume: false,
     fresh: false,
@@ -143,6 +146,7 @@ describe("handleSandboxState", () => {
       null,
       null,
       { sandboxGpuEnabled: false, mode: "0" },
+      null,
       [],
     );
     expect(calls.updateSandbox).toHaveBeenCalledWith("my-assistant", expect.objectContaining({ model: "model", provider: "provider" }));
@@ -286,6 +290,7 @@ describe("handleSandboxState", () => {
       null,
       null,
       { sandboxGpuEnabled: false, mode: "0" },
+      null,
       [],
     );
     expect(result.webSearchConfig).toBeNull();
