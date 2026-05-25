@@ -6,12 +6,6 @@ import type {
   MessagingHookOutputMap,
   MessagingHookRegistration,
 } from "../types";
-import {
-  getCredential,
-  normalizeCredentialValue,
-  prompt as promptCredential,
-  saveCredential,
-} from "../../../credentials/store";
 import { getChannelDef } from "../../../sandbox/channels";
 import type { ChannelHookOutputSpec } from "../../manifest";
 
@@ -76,11 +70,9 @@ async function resolveTokenValue(
   options: TokenPasteHookOptions,
 ): Promise<string> {
   const env = options.env ?? process.env;
-  const readCredential =
-    options.getCredential ??
-    ((key: string) => normalizeCredentialValue(env[key]) || getCredential(key));
-  const writeCredential = options.saveCredential ?? saveCredential;
-  const prompt = options.prompt ?? promptCredential;
+  const readCredential = options.getCredential ?? (() => null);
+  const writeCredential = options.saveCredential ?? (() => {});
+  const prompt = options.prompt ?? missingPhaseOnePrompt;
   const log = options.log ?? ((message: string) => console.log(message));
 
   let token = normalizeCredentialValue(env[field.envKey]) || readCredential(field.envKey);
@@ -102,6 +94,17 @@ async function resolveTokenValue(
   writeCredential(field.envKey, token);
   env[field.envKey] = token;
   return token;
+}
+
+async function missingPhaseOnePrompt(): Promise<string> {
+  throw new Error(
+    "Token-paste hook requires an injected prompt implementation in phase 1.",
+  );
+}
+
+function normalizeCredentialValue(value: string | null | undefined): string {
+  if (typeof value !== "string") return "";
+  return value.replace(/\r/g, "").trim();
 }
 
 function resolveTokenPasteField(

@@ -21,6 +21,24 @@ describe("common token-paste hook implementation", () => {
     expect(slackManifest.hooks[0]?.handler).toBe(COMMON_TOKEN_PASTE_HOOK_HANDLER_ID);
   });
 
+  it("requires an injected prompt when no env or credential value is available", async () => {
+    const registry = new MessagingHookRegistry([
+      {
+        id: COMMON_TOKEN_PASTE_HOOK_HANDLER_ID,
+        handler: createTokenPasteHook({ env: {}, log: () => {} }),
+      },
+    ]);
+    const hook = telegramManifest.hooks[0];
+
+    if (!hook) throw new Error("missing Telegram token-paste hook");
+
+    await expect(
+      runMessagingHook(hook, registry, {
+        channelId: "telegram",
+      }),
+    ).rejects.toThrow("requires an injected prompt implementation");
+  });
+
   it("shows the single-token enrollment output shape", async () => {
     const registry = new MessagingHookRegistry([
       {

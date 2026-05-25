@@ -99,6 +99,7 @@ describe("built-in channel manifests", () => {
       "src/lib/messaging/channels/wechat/hooks/seed-openclaw-account.ts",
       "src/lib/messaging/channels/slack/manifest.ts",
       "src/lib/messaging/channels/whatsapp/manifest.ts",
+      "src/lib/messaging/hooks/common/token-paste.ts",
     ];
     const forbiddenImports = [
       "credentials/store",
