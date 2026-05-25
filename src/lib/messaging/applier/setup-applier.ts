@@ -585,7 +585,24 @@ function mergeObjects(
       );
       continue;
     }
+    validateSafeMergeValue(value);
     target[key] = value;
+  }
+}
+
+function validateSafeMergeValue(value: MessagingSerializableValue): void {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      validateSafeMergeValue(entry);
+    }
+    return;
+  }
+  if (!isObject(value)) return;
+  for (const [key, entry] of Object.entries(value)) {
+    if (key === "__proto__" || key === "prototype" || key === "constructor") {
+      throw new Error(`Messaging build-file merge rejected unsafe object key '${key}'.`);
+    }
+    validateSafeMergeValue(entry as MessagingSerializableValue);
   }
 }
 

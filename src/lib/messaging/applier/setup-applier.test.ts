@@ -400,24 +400,29 @@ describe("MessagingSetupApplier", () => {
       }
       return { status: 1 };
     };
-    const unsafeMerge = JSON.parse('{"__proto__":{"polluted":true}}');
+    const unsafeMerges = [
+      JSON.parse('{"__proto__":{"polluted":true}}'),
+      JSON.parse('{"safe":{"__proto__":{"polluted":true}}}'),
+    ];
 
-    await expect(
-      MessagingSetupApplier.applyAgentConfigAtOpenShell(plan, {
-        runOpenshell,
-        runHook: () => ({
-          outputs: {
-            openclawConfigPatch: {
-              kind: "build-file",
-              value: {
-                path: "openclaw.json",
-                merge: unsafeMerge,
+    for (const unsafeMerge of unsafeMerges) {
+      await expect(
+        MessagingSetupApplier.applyAgentConfigAtOpenShell(plan, {
+          runOpenshell,
+          runHook: () => ({
+            outputs: {
+              openclawConfigPatch: {
+                kind: "build-file",
+                value: {
+                  path: "openclaw.json",
+                  merge: unsafeMerge,
+                },
               },
             },
-          },
+          }),
         }),
-      }),
-    ).rejects.toThrow("unsafe object key '__proto__'");
+      ).rejects.toThrow("unsafe object key '__proto__'");
+    }
     expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
   });
 
