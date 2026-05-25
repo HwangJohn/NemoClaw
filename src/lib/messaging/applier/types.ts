@@ -7,6 +7,7 @@ import type {
   ChannelHookPhase,
   MessagingAgentId,
   MessagingChannelId,
+  SandboxMessagingNetworkPolicyEntryPlan,
   SandboxMessagingHookReferencePlan,
   SandboxMessagingPlan,
 } from "../manifest";
@@ -86,12 +87,23 @@ export interface MessagingCredentialApplyResult {
   readonly sandboxCreateProviderArgs: readonly string[];
 }
 
+export interface MessagingPolicyApplyContext {
+  readonly agent: MessagingAgentId;
+  readonly entries: readonly SandboxMessagingNetworkPolicyEntryPlan[];
+  readonly policyKeys: readonly string[];
+}
+
 export interface MessagingPolicyApplyOptions {
-  readonly applyPresets: (sandboxName: string, presetNames: string[]) => boolean;
+  readonly applyPresets: (
+    sandboxName: string,
+    presetNames: string[],
+    context: MessagingPolicyApplyContext,
+  ) => boolean;
 }
 
 export interface MessagingPolicyApplyResult {
   readonly appliedPresets: readonly string[];
+  readonly appliedPolicyKeys: readonly string[];
 }
 
 export type MessagingSerializablePlan = SandboxMessagingPlan;

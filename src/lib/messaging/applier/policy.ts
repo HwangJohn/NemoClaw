@@ -9,12 +9,23 @@ export function applyPolicyAtOpenShell(
   options: MessagingPolicyApplyOptions,
 ): MessagingPolicyApplyResult {
   const activePresets = uniqueStrings(plan.networkPolicy.presets);
-  if (activePresets.length > 0 && !options.applyPresets(plan.sandboxName, activePresets)) {
+  const activePolicyKeys = uniqueStrings(
+    plan.networkPolicy.entries.flatMap((entry) => entry.policyKeys),
+  );
+  if (
+    activePresets.length > 0 &&
+    !options.applyPresets(plan.sandboxName, activePresets, {
+      agent: plan.agent,
+      entries: plan.networkPolicy.entries,
+      policyKeys: activePolicyKeys,
+    })
+  ) {
     throw new Error(`Failed to apply messaging policy preset(s): ${activePresets.join(", ")}`);
   }
 
   return {
     appliedPresets: activePresets,
+    appliedPolicyKeys: activePolicyKeys,
   };
 }
 

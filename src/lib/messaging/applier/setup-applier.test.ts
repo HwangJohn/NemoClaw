@@ -7,9 +7,13 @@ import { createBuiltInChannelManifestRegistry } from "../channels";
 import { MessagingWorkflowPlanner } from "../compiler";
 import { createBuiltInMessagingHookRegistry, runMessagingHook } from "../hooks";
 import type { ChannelHookSpec } from "../manifest";
-import type { SandboxMessagingPlan } from "../manifest";
+import type { MessagingAgentId, SandboxMessagingPlan } from "../manifest";
 import { MessagingSetupApplier } from "./setup-applier";
-import { MESSAGING_SETUP_APPLIER_ENV_KEY, type MessagingOpenShellRunner } from "./types";
+import {
+  MESSAGING_SETUP_APPLIER_ENV_KEY,
+  type MessagingOpenShellRunner,
+  type MessagingPolicyApplyContext,
+} from "./types";
 
 const TEST_CREDENTIALS: Readonly<Record<string, string>> = {
   TELEGRAM_BOT_TOKEN: "123456:test-telegram-token",
@@ -88,11 +92,12 @@ function planner(): MessagingWorkflowPlanner {
 async function planOnboard(
   env: Readonly<Record<string, string | undefined>>,
   selectedChannels: readonly string[],
+  agent: MessagingAgentId = "openclaw",
 ): Promise<SandboxMessagingPlan> {
   return withEnv(env, () =>
     planner().planOnboard({
       sandboxName: "demo",
-      agent: "openclaw",
+      agent,
       isInteractive: false,
       selectedChannels,
     }),
@@ -507,6 +512,42 @@ describe("MessagingSetupApplier", () => {
     expect(policyCalls).toEqual([["demo", "telegram"]]);
     expect(result).toEqual({
       appliedPresets: ["telegram"],
+      appliedPolicyKeys: ["telegram_bot"],
+    });
+  });
+
+  it("passes concrete policy keys for agent-aware preset application", async () => {
+    const plan = await planOnboard(
+      {
+        DISCORD_BOT_TOKEN: "test-discord-token",
+        WECHAT_BOT_TOKEN: "test-wechat-token",
+        WECHAT_ACCOUNT_ID: "wechat-account",
+        SLACK_BOT_TOKEN: "xoxb-slack-token",
+        SLACK_APP_TOKEN: "xapp-slack-token",
+      },
+      ["discord", "wechat", "slack"],
+      "hermes",
+    );
+    const policyCalls: string[][] = [];
+    let applyContext: MessagingPolicyApplyContext | null = null;
+
+    const result = MessagingSetupApplier.applyPolicyAtOpenShell(plan, {
+      applyPresets: (sandboxName, presetNames, context) => {
+        policyCalls.push([sandboxName, ...presetNames]);
+        applyContext = context;
+        return true;
+      },
+    });
+
+    expect(policyCalls).toEqual([["demo", "discord", "wechat", "slack"]]);
+    expect(applyContext).toEqual({
+      agent: "hermes",
+      entries: plan.networkPolicy.entries,
+      policyKeys: ["discord", "wechat_bridge", "slack"],
+    });
+    expect(result).toEqual({
+      appliedPresets: ["discord", "wechat", "slack"],
+      appliedPolicyKeys: ["discord", "wechat_bridge", "slack"],
     });
   });
 });
