@@ -223,6 +223,9 @@ describe("ManifestCompiler", () => {
     expect(plan.healthChecks.every((check) => check.requiredBefore === "lifecycle-success")).toBe(
       true,
     );
+    expect(plan.healthChecks.find((check) => check.channelId === "wechat")?.hookIds).toEqual([
+      "wechat-health-check",
+    ]);
     expect(
       plan.agentRender.find(
         (render) => render.channelId === "telegram" && render.kind === "json-fragment",

@@ -63,6 +63,7 @@ describe("MessagingHookRegistry", () => {
       "telegram.getMeReachability",
       "wechat.ilinkLogin",
       "wechat.seedOpenClawAccount",
+      "wechat.healthCheck",
     ]);
   });
 

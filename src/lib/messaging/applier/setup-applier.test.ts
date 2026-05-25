@@ -527,7 +527,7 @@ describe("MessagingSetupApplier", () => {
     expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
   });
 
-  it("rejects build-file hook outputs that traverse outside the agent config directory", async () => {
+  it("rejects unsafe build-file hook output paths and modes", async () => {
     const plan = await planOnboard({ WECHAT_ACCOUNT_ID: "wechat-account" }, ["wechat"]);
     const runOpenshell: MessagingOpenShellRunner = (args, options) => {
       if (args.includes("cat") && options?.input === undefined) {
@@ -535,23 +535,48 @@ describe("MessagingSetupApplier", () => {
       }
       return { status: 0 };
     };
+    const unsafeFiles = [
+      {
+        value: { path: "openclaw-weixin/accounts/../../openclaw.json", content: {} },
+        error: "must not traverse directories",
+      },
+      {
+        value: { path: "/tmp/openclaw.json", content: {} },
+        error: "must be a safe relative path",
+      },
+      {
+        value: { path: "openclaw-weixin//accounts.json", content: {} },
+        error: "must not contain empty segments",
+      },
+      {
+        value: { path: "openclaw-weixin/\u0001accounts.json", content: {} },
+        error: "must be a safe relative path",
+      },
+      {
+        value: { path: "openclaw-weixin/accounts.json", mode: "0777", content: {} },
+        error: "must not be group/world writable",
+      },
+      {
+        value: { path: "openclaw-weixin/accounts.json", mode: "u+s", content: {} },
+        error: "mode must be an octal file mode",
+      },
+    ];
 
-    await expect(
-      MessagingSetupApplier.applyAgentConfigAtOpenShell(plan, {
-        runOpenshell,
-        runHook: () => ({
-          outputs: {
-            openclawWeixinAccountFile: {
-              kind: "build-file",
-              value: {
-                path: "openclaw-weixin/accounts/../../openclaw.json",
-                content: {},
+    for (const { value, error } of unsafeFiles) {
+      await expect(
+        MessagingSetupApplier.applyAgentConfigAtOpenShell(plan, {
+          runOpenshell,
+          runHook: () => ({
+            outputs: {
+              openclawWeixinAccountFile: {
+                kind: "build-file",
+                value,
               },
             },
-          },
+          }),
         }),
-      }),
-    ).rejects.toThrow("must not traverse directories");
+      ).rejects.toThrow(error);
+    }
   });
 
   it("applies policy presets directly from the serializable plan", async () => {

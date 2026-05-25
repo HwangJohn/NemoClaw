@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { MessagingHookRegistry, runMessagingHook } from "../../../hooks";
 import { wechatManifest } from "../manifest";
+import { createWechatHealthCheckHook, WECHAT_HEALTH_CHECK_HOOK_ID } from "./health-check";
 import { createWechatIlinkLoginHook, WECHAT_ILINK_LOGIN_HOOK_ID } from "./ilink-login";
 import {
   buildWechatSeedOpenClawAccountOutputs,
@@ -100,11 +101,42 @@ describe("WeChat hook implementations", () => {
   });
 
   it("rejects unsafe WeChat account ids before using them as build-file names", () => {
-    expect(() =>
-      buildWechatSeedOpenClawAccountOutputs({
-        "wechatConfig.accountId": "../../openclaw",
+    for (const accountId of ["../../openclaw", "nested/account", "control\u0001id"]) {
+      expect(() =>
+        buildWechatSeedOpenClawAccountOutputs({
+          "wechatConfig.accountId": accountId,
+        }),
+      ).toThrow("unsafe filename characters");
+    }
+  });
+
+  it("declares a health-check hook that requires captured account metadata", async () => {
+    const hook = wechatManifest.hooks.find((entry) => entry.id === "wechat-health-check");
+    const registry = new MessagingHookRegistry([
+      {
+        id: WECHAT_HEALTH_CHECK_HOOK_ID,
+        handler: createWechatHealthCheckHook(),
+      },
+    ]);
+
+    if (!hook) throw new Error("missing WeChat health-check hook");
+
+    await expect(
+      runMessagingHook(hook, registry, {
+        channelId: "wechat",
+        inputs: {
+          "wechatConfig.accountId": "wechat-account",
+        },
       }),
-    ).toThrow("unsafe filename characters");
+    ).resolves.toMatchObject({
+      handlerId: WECHAT_HEALTH_CHECK_HOOK_ID,
+      outputs: {},
+    });
+    await expect(
+      runMessagingHook(hook, registry, {
+        channelId: "wechat",
+      }),
+    ).rejects.toThrow("WeChat health check requires wechatConfig.accountId.");
   });
 
   it("generates OpenClaw account seed build-file outputs from captured metadata", async () => {

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { MessagingHookRegistration } from "../../../hooks/types";
+import { createWechatHealthCheckHookRegistration } from "./health-check";
 import {
   createWechatIlinkLoginHookRegistration,
   type WechatIlinkLoginHookOptions,
@@ -11,6 +12,7 @@ import {
   type WechatSeedOpenClawAccountHookOptions,
 } from "./seed-openclaw-account";
 
+export * from "./health-check";
 export * from "./ilink-login";
 export * from "./seed-openclaw-account";
 
@@ -25,5 +27,6 @@ export function createWechatHookRegistrations(
   return [
     createWechatIlinkLoginHookRegistration(options.ilinkLogin),
     createWechatSeedOpenClawAccountHookRegistration(options.seedOpenClawAccount),
+    createWechatHealthCheckHookRegistration(),
   ] as const;
 }

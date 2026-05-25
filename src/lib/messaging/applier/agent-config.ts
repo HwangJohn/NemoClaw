@@ -338,8 +338,11 @@ function readHookBuildFile(value: MessagingSerializableValue): {
   if (file.content === undefined && file.merge === undefined) {
     throw new Error(`Messaging build-file '${path}' must include content or merge.`);
   }
-  if (mode !== undefined && typeof mode !== "string") {
-    throw new Error(`Messaging build-file '${path}' mode must be a string.`);
+  if (mode !== undefined) {
+    if (typeof mode !== "string") {
+      throw new Error(`Messaging build-file '${path}' mode must be a string.`);
+    }
+    assertSafeFileMode(path, mode);
   }
   return {
     path,
@@ -412,28 +415,32 @@ function serializeHookBuildFileContent(
 
 function resolveHookBuildFileTarget(filePath: string, agent: MessagingAgentId): string {
   const normalizedPath = normalizeRelativeBuildFilePath(filePath);
+  const root = sandboxAgentConfigRoot(agent);
+  let target: string;
   if (normalizedPath === "openclaw.json") {
-    return resolveSandboxAgentConfigTarget(normalizedPath, "openclaw");
+    target = resolveSandboxAgentConfigTarget(normalizedPath, "openclaw");
+  } else if (normalizedPath === "config.yaml" && agent === "hermes") {
+    target = resolveSandboxAgentConfigTarget("~/.hermes/config.yaml", agent);
+  } else if (normalizedPath === ".env" && agent === "hermes") {
+    target = resolveSandboxAgentConfigTarget("~/.hermes/.env", agent);
+  } else {
+    target = `${root}/${normalizedPath}`;
   }
-  if (normalizedPath === "config.yaml" && agent === "hermes") {
-    return resolveSandboxAgentConfigTarget("~/.hermes/config.yaml", agent);
-  }
-  if (normalizedPath === ".env" && agent === "hermes") {
-    return resolveSandboxAgentConfigTarget("~/.hermes/.env", agent);
-  }
-  if (agent === "openclaw") return `/sandbox/.openclaw/${normalizedPath}`;
-  if (agent === "hermes") return `/sandbox/.hermes/${normalizedPath}`;
-  throw new Error(`Cannot resolve messaging build-file target '${filePath}' for ${agent}.`);
+  assertSandboxPathUnderRoot(target, root, filePath);
+  return target;
 }
 
 function normalizeRelativeBuildFilePath(filePath: string): string {
   if (filePath.trim().length === 0) {
     throw new Error("Messaging build-file path must not be empty.");
   }
-  if (filePath.startsWith("/") || filePath.includes("\\") || filePath.includes("\0")) {
+  if (filePath.startsWith("/") || filePath.includes("\\") || /[\0-\x1F\x7F]/.test(filePath)) {
     throw new Error(`Messaging build-file path '${filePath}' must be a safe relative path.`);
   }
   const segments = filePath.split("/");
+  if (segments.some((segment) => segment.length === 0 || segment === ".")) {
+    throw new Error(`Messaging build-file path '${filePath}' must not contain empty segments.`);
+  }
   if (segments.some((segment) => segment === "..")) {
     throw new Error(`Messaging build-file path '${filePath}' must not traverse directories.`);
   }
@@ -447,6 +454,32 @@ function normalizeRelativeBuildFilePath(filePath: string): string {
     throw new Error(`Messaging build-file path '${filePath}' must stay inside agent config.`);
   }
   return normalizedPath;
+}
+
+function sandboxAgentConfigRoot(agent: MessagingAgentId): string {
+  if (agent === "openclaw") return "/sandbox/.openclaw";
+  if (agent === "hermes") return "/sandbox/.hermes";
+  throw new Error(`Cannot resolve messaging build-file root for ${agent}.`);
+}
+
+function assertSandboxPathUnderRoot(target: string, root: string, sourcePath: string): void {
+  const relative = path.relative(root, target);
+  if (relative.length === 0 || relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`Messaging build-file path '${sourcePath}' must stay inside ${root}.`);
+  }
+}
+
+function assertSafeFileMode(filePath: string, mode: string): void {
+  if (!/^[0-7]{3,4}$/.test(mode)) {
+    throw new Error(`Messaging build-file '${filePath}' mode must be an octal file mode.`);
+  }
+  if (mode.length === 4 && mode[0] !== "0") {
+    throw new Error(`Messaging build-file '${filePath}' mode must not set special bits.`);
+  }
+  const parsedMode = Number.parseInt(mode, 8);
+  if ((parsedMode & 0o022) !== 0) {
+    throw new Error(`Messaging build-file '${filePath}' mode must not be group/world writable.`);
+  }
 }
 
 function resolveSandboxAgentConfigTarget(target: string, agent: MessagingAgentId): string {

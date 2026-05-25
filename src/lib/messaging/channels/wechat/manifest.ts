@@ -166,5 +166,12 @@ export const wechatManifest = {
       ],
       onFailure: "abort",
     },
+    {
+      id: "wechat-health-check",
+      phase: "health-check",
+      handler: "wechat.healthCheck",
+      inputs: ["wechatConfig.accountId"],
+      onFailure: "abort",
+    },
   ],
 } as const satisfies ChannelManifest;

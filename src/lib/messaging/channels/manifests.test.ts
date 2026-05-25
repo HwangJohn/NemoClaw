@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -78,6 +80,38 @@ describe("built-in channel manifests", () => {
       "slack",
       "whatsapp",
     ]);
+  });
+
+  it("keeps built-in manifests fully JSON-serializable", () => {
+    expect(JSON.parse(JSON.stringify(BUILT_IN_CHANNEL_MANIFESTS))).toEqual(
+      BUILT_IN_CHANNEL_MANIFESTS,
+    );
+  });
+
+  it("keeps manifest files declarative and free of side-effect imports", () => {
+    const manifestPaths = [
+      "src/lib/messaging/channels/telegram/manifest.ts",
+      "src/lib/messaging/channels/discord/manifest.ts",
+      "src/lib/messaging/channels/wechat/manifest.ts",
+      "src/lib/messaging/channels/slack/manifest.ts",
+      "src/lib/messaging/channels/whatsapp/manifest.ts",
+    ];
+    const forbiddenImports = [
+      "credentials/store",
+      "state/registry",
+      "adapters/openshell",
+      "host-qr-handlers",
+      "ext/wechat",
+      "node:fs",
+      "node:child_process",
+    ];
+
+    for (const manifestPath of manifestPaths) {
+      const source = readFileSync(manifestPath, "utf8");
+      for (const forbiddenImport of forbiddenImports) {
+        expect(source).not.toContain(forbiddenImport);
+      }
+    }
   });
 
   it("matches current sandbox channel metadata for prompts, auth, and policy presets", () => {
@@ -328,6 +362,7 @@ describe("built-in channel manifests", () => {
     expect(wechatManifest.hooks.map((hook) => hook.handler)).toEqual([
       "wechat.ilinkLogin",
       "wechat.seedOpenClawAccount",
+      "wechat.healthCheck",
     ]);
     expect(wechatManifest.hooks[1]?.outputs).toEqual(
       expect.arrayContaining([
@@ -341,6 +376,13 @@ describe("built-in channel manifests", () => {
         }),
       ]),
     );
+    expect(wechatManifest.hooks[2]).toMatchObject({
+      id: "wechat-health-check",
+      phase: "health-check",
+      handler: "wechat.healthCheck",
+      inputs: ["wechatConfig.accountId"],
+      onFailure: "abort",
+    });
   });
 
   it("declares WhatsApp as in-sandbox QR with no host-side token bindings", () => {
