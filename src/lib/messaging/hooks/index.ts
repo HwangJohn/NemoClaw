@@ -4,4 +4,5 @@
 export * from "./hook-runner";
 export * from "./registry";
 export * from "./common";
+export * from "./builtins";
 export type * from "./types";

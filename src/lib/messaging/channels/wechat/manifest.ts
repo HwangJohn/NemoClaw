@@ -109,6 +109,7 @@ export const wechatManifest = {
       id: "wechat-host-qr",
       phase: "enroll",
       handler: "wechat.ilinkLogin",
+      inputs: ["allowedIds"],
       outputs: [
         {
           id: "botToken",
@@ -126,6 +127,10 @@ export const wechatManifest = {
         },
         {
           id: "userId",
+          kind: "config",
+        },
+        {
+          id: "allowedIds",
           kind: "config",
         },
       ],

@@ -4,20 +4,60 @@
 import { describe, expect, it } from "vitest";
 
 import { createBuiltInChannelManifestRegistry } from "../channels";
-import { FAKE_TELEGRAM_HOOK_REGISTRATIONS } from "../channels/telegram/hooks/fakes";
-import { FAKE_WECHAT_HOOK_REGISTRATIONS } from "../channels/wechat/hooks/fakes";
-import { MessagingHookRegistry } from "../hooks";
-import { FAKE_COMMON_HOOK_REGISTRATIONS } from "../hooks/common";
+import { createBuiltInMessagingHookRegistry, MessagingHookRegistry } from "../hooks";
 import { MessagingWorkflowPlanner } from "./workflow-planner";
+
+const TEST_CREDENTIALS: Readonly<Record<string, string>> = {
+  TELEGRAM_BOT_TOKEN: "123456:test-telegram-token",
+  DISCORD_BOT_TOKEN: "test-discord-token",
+  WECHAT_BOT_TOKEN: "test-wechat-token",
+  SLACK_BOT_TOKEN: "xoxb-test-slack-token",
+  SLACK_APP_TOKEN: "xapp-test-slack-token",
+};
+const TEST_WECHAT_LOGIN = {
+  token: "test-wechat-token",
+  accountId: "test-wechat-account",
+  baseUrl: "https://ilinkai.wechat.example",
+  userId: "test-wechat-user",
+} as const;
 
 function planner(): MessagingWorkflowPlanner {
   return new MessagingWorkflowPlanner(
     createBuiltInChannelManifestRegistry(),
-    new MessagingHookRegistry([
-      ...FAKE_COMMON_HOOK_REGISTRATIONS,
-      ...FAKE_TELEGRAM_HOOK_REGISTRATIONS,
-      ...FAKE_WECHAT_HOOK_REGISTRATIONS,
-    ]),
+    createBuiltInMessagingHookRegistry({
+      common: {
+        env: {},
+        getCredential: (key) => TEST_CREDENTIALS[key] ?? null,
+        saveCredential: () => {},
+        prompt: async () => "unused",
+        log: () => {},
+      },
+      telegram: {
+        fetch: async () => ({
+          ok: true,
+          status: 200,
+          async json() {
+            return { ok: true };
+          },
+          async text() {
+            return "";
+          },
+        }),
+      },
+      wechat: {
+        ilinkLogin: {
+          env: {},
+          saveCredential: () => {},
+          runLogin: async () => ({
+            kind: "ok",
+            credentials: TEST_WECHAT_LOGIN,
+          }),
+        },
+        seedOpenClawAccount: {
+          now: () => "2026-01-01T00:00:00.000Z",
+        },
+      },
+    }),
   );
 }
 
@@ -97,7 +137,7 @@ describe("MessagingWorkflowPlanner", () => {
         ?.inputs.find((input) => input.inputId === "accountId"),
     ).toMatchObject({
       kind: "config",
-      value: "fake-wechat-account",
+      value: "test-wechat-account",
     });
     expect(plan.networkPolicy.entries.map((entry) => entry.channelId)).toEqual([
       "telegram",
@@ -144,7 +184,7 @@ describe("MessagingWorkflowPlanner", () => {
             if (output.kind === "secret") {
               outputs[output.id] = {
                 kind: "secret",
-                value: `fake-${context.channelId}-${output.id}`,
+                value: `test-${context.channelId}-${output.id}`,
               };
             }
           }

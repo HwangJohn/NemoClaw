@@ -4,15 +4,20 @@
 import { describe, expect, it } from "vitest";
 
 import { createBuiltInChannelManifestRegistry } from "../channels";
-import { FAKE_TELEGRAM_HOOK_REGISTRATIONS } from "../channels/telegram/hooks/fakes";
-import { FAKE_WECHAT_HOOK_REGISTRATIONS } from "../channels/wechat/hooks/fakes";
 import { MessagingWorkflowPlanner } from "../compiler";
-import { MessagingHookRegistry, runMessagingHook } from "../hooks";
-import { FAKE_COMMON_HOOK_REGISTRATIONS } from "../hooks/common";
+import { createBuiltInMessagingHookRegistry, runMessagingHook } from "../hooks";
 import type { ChannelHookSpec } from "../manifest";
 import type { SandboxMessagingPlan } from "../manifest";
 import { MessagingSetupApplier } from "./setup-applier";
 import { MESSAGING_SETUP_APPLIER_ENV_KEY, type MessagingOpenShellRunner } from "./types";
+
+const TEST_CREDENTIALS: Readonly<Record<string, string>> = {
+  TELEGRAM_BOT_TOKEN: "123456:test-telegram-token",
+  DISCORD_BOT_TOKEN: "test-discord-token",
+  WECHAT_BOT_TOKEN: "test-wechat-token",
+  SLACK_BOT_TOKEN: "xoxb-test-slack-token",
+  SLACK_APP_TOKEN: "xapp-test-slack-token",
+};
 
 async function withEnv<T>(
   values: Readonly<Record<string, string | undefined>>,
@@ -44,11 +49,39 @@ async function withEnv<T>(
 function planner(): MessagingWorkflowPlanner {
   return new MessagingWorkflowPlanner(
     createBuiltInChannelManifestRegistry(),
-    new MessagingHookRegistry([
-      ...FAKE_COMMON_HOOK_REGISTRATIONS,
-      ...FAKE_TELEGRAM_HOOK_REGISTRATIONS,
-      ...FAKE_WECHAT_HOOK_REGISTRATIONS,
-    ]),
+    createBuiltInMessagingHookRegistry({
+      common: {
+        env: {},
+        getCredential: (key) => TEST_CREDENTIALS[key] ?? null,
+        saveCredential: () => {},
+        prompt: async () => "unused",
+        log: () => {},
+      },
+      telegram: {
+        fetch: async () => ({
+          ok: true,
+          status: 200,
+          async json() {
+            return { ok: true };
+          },
+          async text() {
+            return "";
+          },
+        }),
+      },
+      wechat: {
+        ilinkLogin: {
+          env: {},
+          saveCredential: () => {},
+          runLogin: async () => ({
+            kind: "timeout",
+          }),
+        },
+        seedOpenClawAccount: {
+          now: () => "2026-01-01T00:00:00.000Z",
+        },
+      },
+    }),
   );
 }
 
@@ -307,7 +340,39 @@ describe("MessagingSetupApplier", () => {
       },
       ["wechat"],
     );
-    const registry = new MessagingHookRegistry(FAKE_WECHAT_HOOK_REGISTRATIONS);
+    const registry = createBuiltInMessagingHookRegistry({
+      common: {
+        env: {},
+        getCredential: (key) => TEST_CREDENTIALS[key] ?? null,
+        saveCredential: () => {},
+        prompt: async () => "unused",
+        log: () => {},
+      },
+      telegram: {
+        fetch: async () => ({
+          ok: true,
+          status: 200,
+          async json() {
+            return { ok: true };
+          },
+          async text() {
+            return "";
+          },
+        }),
+      },
+      wechat: {
+        ilinkLogin: {
+          env: {},
+          saveCredential: () => {},
+          runLogin: async () => ({
+            kind: "timeout",
+          }),
+        },
+        seedOpenClawAccount: {
+          now: () => "2026-01-01T00:00:00.000Z",
+        },
+      },
+    });
     const files: Record<string, string> = {
       "/sandbox/.openclaw/openclaw.json": JSON.stringify({
         plugins: {
@@ -368,7 +433,7 @@ describe("MessagingSetupApplier", () => {
     expect(openclawConfig.plugins.entries.acpx.enabled).toBe(false);
     expect(openclawConfig.plugins.entries["openclaw-weixin"].enabled).toBe(true);
     expect(openclawConfig.plugins.installs["openclaw-weixin"].spec).toBe(
-      "@tencent-weixin/openclaw-weixin@2.4.2",
+      "@tencent-weixin/openclaw-weixin@2.4.3",
     );
     expect(openclawConfig.plugins.load.paths).toEqual([
       "/sandbox/.openclaw/extensions/openclaw-weixin",

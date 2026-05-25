@@ -4,7 +4,11 @@
 import { describe, expect, it } from "vitest";
 
 import type { ChannelHookSpec } from "../manifest";
-import { MessagingHookRegistry, runMessagingHook } from "./index";
+import {
+  createBuiltInMessagingHookRegistry,
+  MessagingHookRegistry,
+  runMessagingHook,
+} from "./index";
 
 const HOST_QR_HOOK = {
   id: "wechat-host-qr",
@@ -25,7 +29,44 @@ const HOST_QR_HOOK = {
 } as const satisfies ChannelHookSpec;
 
 describe("MessagingHookRegistry", () => {
-  it("registers fake handlers by stable handler id", async () => {
+  it("constructs the production built-in hook registry", () => {
+    const registry = createBuiltInMessagingHookRegistry({
+      common: {
+        prompt: async () => "unused",
+      },
+      telegram: {
+        fetch: async () => ({
+          ok: true,
+          status: 200,
+          async json() {
+            return { ok: true };
+          },
+          async text() {
+            return "";
+          },
+        }),
+      },
+      wechat: {
+        ilinkLogin: {
+          runLogin: async () => ({
+            kind: "timeout",
+          }),
+        },
+        seedOpenClawAccount: {
+          now: () => "2026-01-01T00:00:00.000Z",
+        },
+      },
+    });
+
+    expect(registry.listIds()).toEqual([
+      "common.tokenPaste",
+      "telegram.getMeReachability",
+      "wechat.ilinkLogin",
+      "wechat.seedOpenClawAccount",
+    ]);
+  });
+
+  it("registers handlers by stable handler id", async () => {
     const registry = new MessagingHookRegistry([
       {
         id: "wechat.ilinkLogin",
@@ -65,7 +106,7 @@ describe("MessagingHookRegistry", () => {
     });
   });
 
-  it("passes hook metadata, phase, and serializable inputs to fake handlers", async () => {
+  it("passes hook metadata, phase, and serializable inputs to registered handlers", async () => {
     const calls: unknown[] = [];
     const hook = {
       id: "wechat-seed-openclaw-account",
