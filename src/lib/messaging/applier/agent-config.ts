@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { posix as path } from "node:path";
+
 import YAML from "yaml";
 
 import { redact } from "../../security/redact";
@@ -240,6 +242,7 @@ function setJsonPath(
   }
   let cursor: Record<string, MessagingSerializableValue> = root;
   for (const segment of segments.slice(0, -1)) {
+    assertSafeObjectKey(segment, "Messaging render path");
     const next = cursor[segment];
     if (!isObject(next)) {
       const created: Record<string, MessagingSerializableValue> = {};
@@ -249,7 +252,9 @@ function setJsonPath(
       cursor = next as Record<string, MessagingSerializableValue>;
     }
   }
-  cursor[segments[segments.length - 1] as string] = value;
+  const finalSegment = segments[segments.length - 1] as string;
+  assertSafeObjectKey(finalSegment, "Messaging render path");
+  cursor[finalSegment] = value;
 }
 
 function applyEnvLines(
@@ -405,18 +410,43 @@ function serializeHookBuildFileContent(
   return `${JSON.stringify(content, null, 2)}\n`;
 }
 
-function resolveHookBuildFileTarget(path: string, agent: MessagingAgentId): string {
-  if (path.startsWith("/")) return path;
-  if (path === "openclaw.json") return resolveSandboxAgentConfigTarget(path, "openclaw");
-  if (path === "config.yaml" && agent === "hermes") {
+function resolveHookBuildFileTarget(filePath: string, agent: MessagingAgentId): string {
+  const normalizedPath = normalizeRelativeBuildFilePath(filePath);
+  if (normalizedPath === "openclaw.json") {
+    return resolveSandboxAgentConfigTarget(normalizedPath, "openclaw");
+  }
+  if (normalizedPath === "config.yaml" && agent === "hermes") {
     return resolveSandboxAgentConfigTarget("~/.hermes/config.yaml", agent);
   }
-  if (path === ".env" && agent === "hermes") {
+  if (normalizedPath === ".env" && agent === "hermes") {
     return resolveSandboxAgentConfigTarget("~/.hermes/.env", agent);
   }
-  if (agent === "openclaw") return `/sandbox/.openclaw/${path}`;
-  if (agent === "hermes") return `/sandbox/.hermes/${path}`;
-  throw new Error(`Cannot resolve messaging build-file target '${path}' for ${agent}.`);
+  if (agent === "openclaw") return `/sandbox/.openclaw/${normalizedPath}`;
+  if (agent === "hermes") return `/sandbox/.hermes/${normalizedPath}`;
+  throw new Error(`Cannot resolve messaging build-file target '${filePath}' for ${agent}.`);
+}
+
+function normalizeRelativeBuildFilePath(filePath: string): string {
+  if (filePath.trim().length === 0) {
+    throw new Error("Messaging build-file path must not be empty.");
+  }
+  if (filePath.startsWith("/") || filePath.includes("\\") || filePath.includes("\0")) {
+    throw new Error(`Messaging build-file path '${filePath}' must be a safe relative path.`);
+  }
+  const segments = filePath.split("/");
+  if (segments.some((segment) => segment === "..")) {
+    throw new Error(`Messaging build-file path '${filePath}' must not traverse directories.`);
+  }
+  const normalizedPath = path.normalize(filePath);
+  if (
+    normalizedPath === "." ||
+    normalizedPath === ".." ||
+    normalizedPath.startsWith("../") ||
+    normalizedPath.startsWith("/")
+  ) {
+    throw new Error(`Messaging build-file path '${filePath}' must stay inside agent config.`);
+  }
+  return normalizedPath;
 }
 
 function resolveSandboxAgentConfigTarget(target: string, agent: MessagingAgentId): string {
@@ -490,6 +520,12 @@ function compactOutput(result: { readonly stdout?: unknown; readonly stderr?: un
     .replace(/\r/g, "")
     .trim();
   return output || "OpenShell command failed.";
+}
+
+function assertSafeObjectKey(key: string, context: string): void {
+  if (key === "__proto__" || key === "prototype" || key === "constructor") {
+    throw new Error(`${context} rejected unsafe object key '${key}'.`);
+  }
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

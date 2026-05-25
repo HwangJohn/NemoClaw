@@ -42,6 +42,7 @@ export function buildWechatSeedOpenClawAccountOutputs(
   options: WechatSeedOpenClawAccountHookOptions = {},
 ): MessagingHookOutputMap {
   const accountId = requiredInputString(inputs, "wechatConfig.accountId");
+  assertSafeWechatAccountId(accountId);
   const baseUrl = optionalInputString(inputs, "wechatConfig.baseUrl");
   const userId = optionalInputString(inputs, "wechatConfig.userId");
   const token = optionalInputString(
@@ -110,6 +111,17 @@ export function buildWechatSeedOpenClawAccountOutputs(
       },
     },
   };
+}
+
+function assertSafeWechatAccountId(accountId: string): void {
+  if (
+    accountId === "." ||
+    accountId === ".." ||
+    /[\\/\0-\x1F\x7F]/.test(accountId) ||
+    accountId.includes("..")
+  ) {
+    throw new Error("WeChat account id contains unsafe filename characters.");
+  }
 }
 
 function requiredInputString(

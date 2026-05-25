@@ -43,9 +43,10 @@ export class ManifestCompiler {
     const inputRegistry = new Map(
       channels.map((channel) => [channel.channelId, channel.inputs] as const),
     );
-    const activeManifests = manifests.filter((manifest) =>
-      isChannelActive(manifest.id, context),
+    const activeChannelIds = new Set(
+      channels.filter((channel) => channel.active).map((channel) => channel.channelId),
     );
+    const activeManifests = manifests.filter((manifest) => activeChannelIds.has(manifest.id));
     const credentialBindings = activeManifests.flatMap((manifest) =>
       planCredentialBindings(manifest, context, inputRegistry.get(manifest.id) ?? []),
     );
@@ -106,7 +107,16 @@ export class ManifestCompiler {
     const selected = context.selectedChannels.includes(manifest.id);
     const configured = context.configuredChannels?.includes(manifest.id) ?? false;
     const disabled = context.disabledChannels?.includes(manifest.id) ?? false;
-    const active = !disabled && (selected || configured);
+    const requestedActive = !disabled && (selected || configured);
+    const resolvedInputs = await resolveChannelInputs(manifest, context, this.hooks, {
+      runEnrollment:
+        selected &&
+        requestedActive &&
+        isEnrollmentWorkflow(context.workflow) &&
+        context.isInteractive,
+      runEnrollmentChecks: selected && requestedActive && isEnrollmentWorkflow(context.workflow),
+    });
+    const active = requestedActive && !resolvedInputs.skipped;
 
     return {
       channelId: manifest.id,
@@ -114,13 +124,9 @@ export class ManifestCompiler {
       authMode: manifest.auth.mode,
       active,
       selected,
-      configured,
-      disabled,
-      inputs: await resolveChannelInputs(manifest, context, this.hooks, {
-        runEnrollment:
-          selected && active && isEnrollmentWorkflow(context.workflow) && context.isInteractive,
-        runEnrollmentChecks: selected && active && isEnrollmentWorkflow(context.workflow),
-      }),
+      configured: configured && !resolvedInputs.skipped,
+      disabled: disabled || resolvedInputs.skipped,
+      inputs: resolvedInputs.inputs,
       hooks: active
         ? manifest.hooks
             .filter((hook) => isHookForAgent(hook, context.agent))
@@ -146,17 +152,6 @@ function isEnrollmentWorkflow(workflow: ManifestCompilerContext["workflow"]): bo
   return workflow === "onboard" || workflow === "add-channel";
 }
 
-function isChannelActive(
-  channelId: MessagingChannelId,
-  context: ManifestCompilerContext,
-): boolean {
-  if (context.disabledChannels?.includes(channelId)) return false;
-  return (
-    context.selectedChannels.includes(channelId) ||
-    (context.configuredChannels ?? []).includes(channelId)
-  );
-}
-
 function cloneHookReference(
   channelId: MessagingChannelId,
   hook: ChannelManifest["hooks"][number],
@@ -178,7 +173,10 @@ async function resolveChannelInputs(
   context: ManifestCompilerContext,
   hooks: MessagingHookRegistry,
   options: { readonly runEnrollment: boolean; readonly runEnrollmentChecks: boolean },
-): Promise<SandboxMessagingInputReference[]> {
+): Promise<{
+  readonly inputs: SandboxMessagingInputReference[];
+  readonly skipped: boolean;
+}> {
   let inputs = manifest.inputs.map((input) => resolveChannelInput(manifest, input, context));
   let hookInputs = buildCompilerHookInputs(manifest, inputs);
   inputs = applyCredentialAvailability(manifest, inputs, context);
@@ -188,9 +186,13 @@ async function resolveChannelInputs(
         .filter((hook) => hook.phase === "enroll")
     : [];
 
+  let skipped = false;
   for (const hook of enrollmentHooks) {
     const result = await runCompilerHook(manifest, hook, hooks, hookInputs);
-    if (!result) continue;
+    if (!result) {
+      skipped = true;
+      break;
+    }
     hookInputs = mergeHookOutputsIntoInputs(manifest, hookInputs, result.outputs);
     inputs = applyCredentialAvailability(
       manifest,
@@ -199,7 +201,7 @@ async function resolveChannelInputs(
     );
   }
 
-  if (options.runEnrollmentChecks && hasRequiredInputsAvailable(manifest, inputs)) {
+  if (!skipped && options.runEnrollmentChecks && hasRequiredInputsAvailable(manifest, inputs)) {
     for (const hook of manifest.hooks
       .filter((entry) => isHookForAgent(entry, context.agent))
       .filter((entry) => entry.phase === "reachability-check")
@@ -208,7 +210,7 @@ async function resolveChannelInputs(
     }
   }
 
-  return inputs;
+  return { inputs, skipped };
 }
 
 async function runCompilerHook(

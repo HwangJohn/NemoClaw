@@ -496,6 +496,64 @@ describe("MessagingSetupApplier", () => {
     expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
   });
 
+  it("rejects prototype-polluting JSON render paths", async () => {
+    const plan = await planOnboard({ TELEGRAM_BOT_TOKEN: "123456:telegram-token" }, [
+      "telegram",
+    ]);
+    const unsafePlan = {
+      ...plan,
+      agentRender: [
+        {
+          channelId: "telegram",
+          kind: "json-fragment",
+          agent: "openclaw",
+          target: "openclaw.json",
+          path: "__proto__.polluted",
+          value: true,
+          templateRefs: [],
+        },
+      ],
+    } satisfies SandboxMessagingPlan;
+    const runOpenshell: MessagingOpenShellRunner = (args, options) => {
+      if (args.includes("cat") && options?.input === undefined) {
+        return { status: 0, stdout: "{}" };
+      }
+      return { status: 0 };
+    };
+
+    await expect(
+      MessagingSetupApplier.applyAgentConfigAtOpenShell(unsafePlan, { runOpenshell }),
+    ).rejects.toThrow("Messaging render path rejected unsafe object key '__proto__'");
+    expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
+  });
+
+  it("rejects build-file hook outputs that traverse outside the agent config directory", async () => {
+    const plan = await planOnboard({ WECHAT_ACCOUNT_ID: "wechat-account" }, ["wechat"]);
+    const runOpenshell: MessagingOpenShellRunner = (args, options) => {
+      if (args.includes("cat") && options?.input === undefined) {
+        return { status: 0, stdout: "{}" };
+      }
+      return { status: 0 };
+    };
+
+    await expect(
+      MessagingSetupApplier.applyAgentConfigAtOpenShell(plan, {
+        runOpenshell,
+        runHook: () => ({
+          outputs: {
+            openclawWeixinAccountFile: {
+              kind: "build-file",
+              value: {
+                path: "openclaw-weixin/accounts/../../openclaw.json",
+                content: {},
+              },
+            },
+          },
+        }),
+      }),
+    ).rejects.toThrow("must not traverse directories");
+  });
+
   it("applies policy presets directly from the serializable plan", async () => {
     const plan = await planOnboard({ TELEGRAM_BOT_TOKEN: "123456:telegram-token" }, [
       "telegram",

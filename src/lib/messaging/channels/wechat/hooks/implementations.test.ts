@@ -7,6 +7,7 @@ import { MessagingHookRegistry, runMessagingHook } from "../../../hooks";
 import { wechatManifest } from "../manifest";
 import { createWechatIlinkLoginHook, WECHAT_ILINK_LOGIN_HOOK_ID } from "./ilink-login";
 import {
+  buildWechatSeedOpenClawAccountOutputs,
   createWechatSeedOpenClawAccountHook,
   WECHAT_PLUGIN_SPEC,
   WECHAT_SEED_OPENCLAW_ACCOUNT_HOOK_ID,
@@ -96,6 +97,14 @@ describe("WeChat hook implementations", () => {
     ).rejects.toThrow("WeChat host QR login failed: QR login timed out.");
     expect(saved).toEqual([]);
     expect(env.WECHAT_BOT_TOKEN).toBeUndefined();
+  });
+
+  it("rejects unsafe WeChat account ids before using them as build-file names", () => {
+    expect(() =>
+      buildWechatSeedOpenClawAccountOutputs({
+        "wechatConfig.accountId": "../../openclaw",
+      }),
+    ).toThrow("unsafe filename characters");
   });
 
   it("generates OpenClaw account seed build-file outputs from captured metadata", async () => {

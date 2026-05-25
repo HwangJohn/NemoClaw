@@ -295,6 +295,49 @@ describe("ManifestCompiler", () => {
     });
   });
 
+  it("disables a channel and suppresses side effects when enrollment opts to skip it", async () => {
+    const hooks = new MessagingHookRegistry([
+      {
+        id: "common.tokenPaste",
+        handler: () => {
+          throw new Error("operator cancelled token entry");
+        },
+      },
+      {
+        id: "telegram.getMeReachability",
+        handler: () => {
+          throw new Error("reachability should not run for skipped channels");
+        },
+      },
+    ]);
+    const plan = await new ManifestCompiler(
+      createBuiltInChannelManifestRegistry(),
+      hooks,
+    ).compile({
+      sandboxName: "demo",
+      agent: "openclaw",
+      workflow: "onboard",
+      isInteractive: true,
+      selectedChannels: ["telegram"],
+      configuredChannels: ["telegram"],
+    });
+
+    expect(plan.channels[0]).toMatchObject({
+      channelId: "telegram",
+      active: false,
+      selected: true,
+      configured: false,
+      disabled: true,
+    });
+    expect(plan.channels[0]?.hooks).toEqual([]);
+    expect(plan.credentialBindings).toEqual([]);
+    expect(plan.networkPolicy.entries).toEqual([]);
+    expect(plan.agentRender).toEqual([]);
+    expect(plan.buildSteps).toEqual([]);
+    expect(plan.stateUpdates).toEqual([]);
+    expect(plan.healthChecks).toEqual([]);
+  });
+
   it("skips token-paste and QR enrollment hooks for non-interactive create plans", async () => {
     const hooks = new MessagingHookRegistry([
       {
