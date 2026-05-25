@@ -1,20 +1,26 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  normalizeCredentialValue,
-  saveCredential as saveProcessCredential,
-} from "../../../../credentials/store";
-import {
-  runWechatHostQrLogin,
-  type WechatLoginResult,
-} from "../../../../../ext/wechat/login";
 import type {
   MessagingHookHandler,
   MessagingHookOutputMap,
   MessagingHookRegistration,
 } from "../../../hooks/types";
 import type { MessagingSerializableValue } from "../../../manifest";
+
+export interface WechatLoginCredentials {
+  readonly token: string;
+  readonly accountId: string;
+  readonly baseUrl?: string;
+  readonly userId?: string;
+}
+
+export type WechatLoginResult =
+  | { readonly kind: "ok"; readonly credentials: WechatLoginCredentials }
+  | { readonly kind: "timeout" }
+  | { readonly kind: "expired"; readonly reason?: string }
+  | { readonly kind: "aborted" }
+  | { readonly kind: "error"; readonly message?: string };
 
 export const WECHAT_ILINK_LOGIN_HOOK_ID = "wechat.ilinkLogin";
 
@@ -28,14 +34,24 @@ export function createWechatIlinkLoginHook(
   options: WechatIlinkLoginHookOptions = {},
 ): MessagingHookHandler {
   return async (context) => {
-    const runLogin = options.runLogin ?? (() => runWechatHostQrLogin());
+    const runLogin = options.runLogin;
+    if (!runLogin) {
+      throw new Error(
+        "WeChat host QR login hook requires an injected runLogin implementation in phase 1.",
+      );
+    }
     const result = await runLogin();
     if (result.kind !== "ok") {
       throw new Error(`WeChat host QR login failed: ${wechatFailureReason(result)}.`);
     }
 
     const env = options.env ?? process.env;
-    const saveCredential = options.saveCredential ?? saveProcessCredential;
+    const saveCredential = options.saveCredential;
+    if (!saveCredential) {
+      throw new Error(
+        "WeChat host QR login hook requires an injected saveCredential implementation in phase 1.",
+      );
+    }
     const { token, accountId, baseUrl, userId } = result.credentials;
 
     saveCredential("WECHAT_BOT_TOKEN", token);
@@ -68,7 +84,7 @@ export function createWechatIlinkLoginHook(
       };
     }
     if (declaresOutput(context.outputDeclarations, "allowedIds")) {
-      const allowedIds = mergeCsvValues(readString(context.inputs?.allowedIds), userId);
+      const allowedIds = mergeCsvValues(readString(context.inputs?.allowedIds), userId ?? "");
       if (allowedIds) {
         env.WECHAT_ALLOWED_IDS = allowedIds;
         outputs.allowedIds = {
@@ -110,13 +126,19 @@ function readString(value: MessagingSerializableValue | undefined): string {
 }
 
 function mergeCsvValues(existing: string, next: string): string {
-  const values = new Set(
-    normalizeCredentialValue(existing)
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean),
-  );
+  const values = new Set(normalizeCsvValues(existing));
   const normalized = normalizeCredentialValue(next);
   if (normalized) values.add(normalized);
   return Array.from(values).join(",");
+}
+
+function normalizeCsvValues(value: string): string[] {
+  return normalizeCredentialValue(value)
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function normalizeCredentialValue(value: string): string {
+  return value.replace(/\r/g, "").trim();
 }

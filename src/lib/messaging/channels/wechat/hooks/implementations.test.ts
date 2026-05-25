@@ -15,6 +15,24 @@ import {
 } from "./seed-openclaw-account";
 
 describe("WeChat hook implementations", () => {
+  it("requires injected host QR dependencies in phase 1", async () => {
+    const registry = new MessagingHookRegistry([
+      {
+        id: WECHAT_ILINK_LOGIN_HOOK_ID,
+        handler: createWechatIlinkLoginHook(),
+      },
+    ]);
+    const hook = wechatManifest.hooks[0];
+
+    if (!hook) throw new Error("missing WeChat host QR hook");
+
+    await expect(
+      runMessagingHook(hook, registry, {
+        channelId: "wechat",
+      }),
+    ).rejects.toThrow("requires an injected runLogin implementation");
+  });
+
   it("runs host QR enrollment and stages token plus non-secret account metadata", async () => {
     const env: NodeJS.ProcessEnv = {};
     const saved: Array<{ readonly key: string; readonly value: string }> = [];

@@ -88,11 +88,15 @@ describe("built-in channel manifests", () => {
     );
   });
 
-  it("keeps manifest files declarative and free of side-effect imports", () => {
+  it("keeps phase-1 manifest and hook files free of production side-effect imports", () => {
     const manifestPaths = [
       "src/lib/messaging/channels/telegram/manifest.ts",
       "src/lib/messaging/channels/discord/manifest.ts",
       "src/lib/messaging/channels/wechat/manifest.ts",
+      "src/lib/messaging/channels/wechat/hooks/health-check.ts",
+      "src/lib/messaging/channels/wechat/hooks/ilink-login.ts",
+      "src/lib/messaging/channels/wechat/hooks/index.ts",
+      "src/lib/messaging/channels/wechat/hooks/seed-openclaw-account.ts",
       "src/lib/messaging/channels/slack/manifest.ts",
       "src/lib/messaging/channels/whatsapp/manifest.ts",
     ];
