@@ -574,7 +574,9 @@ function mergeObjects(
   patch: Record<string, MessagingSerializableValue>,
 ): void {
   for (const [key, value] of Object.entries(patch)) {
-    assertSafeObjectKey(key);
+    if (key === "__proto__" || key === "prototype" || key === "constructor") {
+      throw new Error(`Messaging build-file merge rejected unsafe object key '${key}'.`);
+    }
     const existing = target[key];
     if (isObject(existing) && isObject(value)) {
       mergeObjects(
@@ -584,12 +586,6 @@ function mergeObjects(
       continue;
     }
     target[key] = value;
-  }
-}
-
-function assertSafeObjectKey(key: string): void {
-  if (key === "__proto__" || key === "prototype" || key === "constructor") {
-    throw new Error(`Messaging build-file merge rejected unsafe object key '${key}'.`);
   }
 }
 
