@@ -235,7 +235,7 @@ const telegramPlan = {
         channelId: "telegram",
         presetName: "telegram",
         policyKeys: ["telegram_bot"],
-        source: "builtin",
+        source: "manifest",
       },
     ],
   },

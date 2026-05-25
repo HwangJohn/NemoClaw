@@ -65,7 +65,7 @@ export const wechatManifest = {
       placeholder: "openshell:resolve:env:WECHAT_BOT_TOKEN",
     },
   ],
-  policyPresets: ["wechat"],
+  policyPresets: [{ name: "wechat", policyKeys: ["wechat_bridge"] }],
   render: [
     {
       id: "wechat-hermes-env",

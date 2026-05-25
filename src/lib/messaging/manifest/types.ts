@@ -37,11 +37,21 @@ export interface ChannelManifest {
   readonly auth: ChannelAuthSpec;
   readonly inputs: readonly ChannelInputSpec[];
   readonly credentials: readonly ChannelCredentialSpec[];
-  /** Built-in policy presets needed when this channel is active. */
-  readonly policyPresets?: readonly string[];
+  /** Policy presets needed when this channel is active. */
+  readonly policyPresets?: readonly ChannelPolicyPresetReference[];
   readonly render: readonly ChannelRenderSpec[];
   readonly state: ChannelStateSpec;
   readonly hooks: readonly ChannelHookSpec[];
+}
+
+/** Manifest-owned network policy preset metadata. */
+export type ChannelPolicyPresetReference = string | ChannelPolicyPresetSpec;
+
+/** Concrete network policy keys may differ from the operator-facing preset name. */
+export interface ChannelPolicyPresetSpec {
+  readonly name: string;
+  readonly policyKeys?: readonly string[];
+  readonly agentPolicyKeys?: Partial<Record<MessagingAgentId, readonly string[]>>;
 }
 
 /** How a channel obtains credential or session material. */
@@ -234,7 +244,7 @@ export interface SandboxMessagingNetworkPolicyEntryPlan {
   readonly channelId: MessagingChannelId;
   readonly presetName: string;
   readonly policyKeys: readonly string[];
-  readonly source: "builtin" | "agent-alias" | "manifest";
+  readonly source: "agent-alias" | "manifest";
 }
 
 /** Compiled render output for supported target formats. */

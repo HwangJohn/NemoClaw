@@ -149,31 +149,31 @@ describe("ManifestCompiler", () => {
         channelId: "telegram",
         presetName: "telegram",
         policyKeys: ["telegram_bot"],
-        source: "builtin",
+        source: "manifest",
       },
       {
         channelId: "discord",
         presetName: "discord",
         policyKeys: ["discord"],
-        source: "builtin",
+        source: "manifest",
       },
       {
         channelId: "wechat",
         presetName: "wechat",
         policyKeys: ["wechat_bridge"],
-        source: "builtin",
+        source: "manifest",
       },
       {
         channelId: "slack",
         presetName: "slack",
         policyKeys: ["slack"],
-        source: "builtin",
+        source: "manifest",
       },
       {
         channelId: "whatsapp",
         presetName: "whatsapp",
         policyKeys: ["whatsapp"],
-        source: "builtin",
+        source: "manifest",
       },
     ]);
     expect(plan.agentRender.map((render) => `${render.channelId}:${render.kind}`)).toEqual([
@@ -230,7 +230,7 @@ describe("ManifestCompiler", () => {
     ).toEqual(expect.arrayContaining(["proxyUrl", "allowedIds.telegram.values"]));
   });
 
-  it("compiles Hermes render and WeChat agent policy alias intent", async () => {
+  it("compiles Hermes render and manifest-owned WeChat policy intent", async () => {
     const plan = await compiler().compile({
       sandboxName: "demo",
       agent: "hermes",
@@ -243,7 +243,7 @@ describe("ManifestCompiler", () => {
       channelId: "wechat",
       presetName: "wechat",
       policyKeys: ["wechat_bridge"],
-      source: "agent-alias",
+      source: "manifest",
     });
     expect(plan.agentRender.map((render) => `${render.channelId}:${render.target}`)).toEqual([
       "telegram:~/.hermes/.env",

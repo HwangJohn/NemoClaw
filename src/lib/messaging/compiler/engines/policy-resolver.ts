@@ -3,28 +3,12 @@
 
 import type {
   ChannelManifest,
-  MessagingAgentId,
+  ChannelPolicyPresetReference,
+  ChannelPolicyPresetSpec,
   SandboxMessagingNetworkPolicyEntryPlan,
   SandboxMessagingNetworkPolicyPlan,
 } from "../../manifest";
 import type { ManifestCompilerContext } from "../types";
-
-const BUILTIN_POLICY_KEYS: Readonly<Record<string, readonly string[]>> = {
-  telegram: ["telegram_bot"],
-  discord: ["discord"],
-  slack: ["slack"],
-  wechat: ["wechat_bridge"],
-  whatsapp: ["whatsapp"],
-};
-
-const AGENT_POLICY_KEY_ALIASES: Readonly<
-  Record<MessagingAgentId, Readonly<Record<string, readonly string[]>>>
-> = {
-  openclaw: {},
-  hermes: {
-    wechat: ["wechat_bridge"],
-  },
-};
 
 export function planNetworkPolicy(
   manifests: readonly ChannelManifest[],
@@ -41,25 +25,29 @@ function planManifestPolicyEntries(
   manifest: ChannelManifest,
   context: ManifestCompilerContext,
 ): SandboxMessagingNetworkPolicyEntryPlan[] {
-  return (manifest.policyPresets ?? []).map((presetName) => {
-    const agentAlias = AGENT_POLICY_KEY_ALIASES[context.agent][presetName];
-    if (agentAlias) {
+  return (manifest.policyPresets ?? []).map((preset) => {
+    const policy = normalizePolicyPreset(preset);
+    const agentPolicyKeys = policy.agentPolicyKeys?.[context.agent];
+    if (agentPolicyKeys) {
       return {
         channelId: manifest.id,
-        presetName,
-        policyKeys: agentAlias,
+        presetName: policy.name,
+        policyKeys: agentPolicyKeys,
         source: "agent-alias",
       };
     }
 
-    const builtinKeys = BUILTIN_POLICY_KEYS[presetName];
     return {
       channelId: manifest.id,
-      presetName,
-      policyKeys: builtinKeys ?? [presetName],
-      source: builtinKeys ? "builtin" : "manifest",
+      presetName: policy.name,
+      policyKeys: policy.policyKeys ?? [policy.name],
+      source: "manifest",
     };
   });
+}
+
+function normalizePolicyPreset(preset: ChannelPolicyPresetReference): ChannelPolicyPresetSpec {
+  return typeof preset === "string" ? { name: preset } : preset;
 }
 
 function unique(values: readonly string[]): string[] {

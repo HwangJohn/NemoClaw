@@ -36,6 +36,12 @@ function renderJson(manifest: ChannelManifest): string {
   return JSON.stringify(manifest.render);
 }
 
+function policyPresetNames(manifest: ChannelManifest): string[] {
+  return (manifest.policyPresets ?? []).map((preset) =>
+    typeof preset === "string" ? preset : preset.name,
+  );
+}
+
 function expectTokenPasteEnrollHook(manifest: ChannelManifest, outputIds: readonly string[]): void {
   expect(manifest.hooks).toContainEqual({
     id: `${manifest.id}-token-paste`,
@@ -86,7 +92,7 @@ describe("built-in channel manifests", () => {
     for (const [channelId, manifest] of Object.entries(manifests)) {
       const legacy = KNOWN_CHANNELS[channelId];
       expect(manifest.description).toBe(legacy.description);
-      expect(manifest.policyPresets).toEqual([channelId]);
+      expect(policyPresetNames(manifest)).toEqual([channelId]);
       expect(manifest.supportedAgents).toEqual(["openclaw", "hermes"]);
       expect(manifest.auth.mode).toBe(legacy.loginMethod ?? "token-paste");
     }

@@ -56,7 +56,7 @@ export const telegramManifest = {
       placeholder: "openshell:resolve:env:TELEGRAM_BOT_TOKEN",
     },
   ],
-  policyPresets: ["telegram"],
+  policyPresets: [{ name: "telegram", policyKeys: ["telegram_bot"] }],
   render: [
     {
       id: "telegram-openclaw-account",
