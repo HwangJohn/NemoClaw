@@ -413,8 +413,12 @@ function serializeHookBuildFileContent(
   return `${JSON.stringify(content, null, 2)}\n`;
 }
 
+// Source-of-truth boundary for sandbox file writes: plans and hook outputs are
+// serialized data that can outlive their producing manifest/hook code. Validate
+// every target here before invoking OpenShell so future channels cannot bypass
+// the agent-owned /sandbox config roots by returning raw paths.
 function resolveHookBuildFileTarget(filePath: string, agent: MessagingAgentId): string {
-  const normalizedPath = normalizeRelativeBuildFilePath(filePath);
+  const normalizedPath = normalizeRelativeAgentPath(filePath, "Messaging build-file path");
   const root = sandboxAgentConfigRoot(agent);
   let target: string;
   if (normalizedPath === "openclaw.json") {
@@ -426,23 +430,23 @@ function resolveHookBuildFileTarget(filePath: string, agent: MessagingAgentId): 
   } else {
     target = `${root}/${normalizedPath}`;
   }
-  assertSandboxPathUnderRoot(target, root, filePath);
+  assertSandboxPathUnderRoot(target, root, filePath, "Messaging build-file path");
   return target;
 }
 
-function normalizeRelativeBuildFilePath(filePath: string): string {
+function normalizeRelativeAgentPath(filePath: string, context: string): string {
   if (filePath.trim().length === 0) {
-    throw new Error("Messaging build-file path must not be empty.");
+    throw new Error(`${context} must not be empty.`);
   }
   if (filePath.startsWith("/") || filePath.includes("\\") || /[\0-\x1F\x7F]/.test(filePath)) {
-    throw new Error(`Messaging build-file path '${filePath}' must be a safe relative path.`);
+    throw new Error(`${context} '${filePath}' must be a safe relative path.`);
   }
   const segments = filePath.split("/");
   if (segments.some((segment) => segment.length === 0 || segment === ".")) {
-    throw new Error(`Messaging build-file path '${filePath}' must not contain empty segments.`);
+    throw new Error(`${context} '${filePath}' must not contain empty segments.`);
   }
   if (segments.some((segment) => segment === "..")) {
-    throw new Error(`Messaging build-file path '${filePath}' must not traverse directories.`);
+    throw new Error(`${context} '${filePath}' must not traverse directories.`);
   }
   const normalizedPath = path.normalize(filePath);
   if (
@@ -451,7 +455,7 @@ function normalizeRelativeBuildFilePath(filePath: string): string {
     normalizedPath.startsWith("../") ||
     normalizedPath.startsWith("/")
   ) {
-    throw new Error(`Messaging build-file path '${filePath}' must stay inside agent config.`);
+    throw new Error(`${context} '${filePath}' must stay inside agent config.`);
   }
   return normalizedPath;
 }
@@ -462,10 +466,15 @@ function sandboxAgentConfigRoot(agent: MessagingAgentId): string {
   throw new Error(`Cannot resolve messaging build-file root for ${agent}.`);
 }
 
-function assertSandboxPathUnderRoot(target: string, root: string, sourcePath: string): void {
+function assertSandboxPathUnderRoot(
+  target: string,
+  root: string,
+  sourcePath: string,
+  context: string,
+): void {
   const relative = path.relative(root, target);
   if (relative.length === 0 || relative.startsWith("..") || path.isAbsolute(relative)) {
-    throw new Error(`Messaging build-file path '${sourcePath}' must stay inside ${root}.`);
+    throw new Error(`${context} '${sourcePath}' must stay inside ${root}.`);
   }
 }
 
@@ -483,15 +492,38 @@ function assertSafeFileMode(filePath: string, mode: string): void {
 }
 
 function resolveSandboxAgentConfigTarget(target: string, agent: MessagingAgentId): string {
-  if (target.startsWith("/")) return target;
+  const root = sandboxAgentConfigRoot(agent);
+  if (target.startsWith("/")) {
+    const normalizedTarget = path.normalize(target);
+    assertSandboxPathUnderRoot(normalizedTarget, root, target, "Messaging render target");
+    return normalizedTarget;
+  }
   if (agent === "openclaw" && target === "openclaw.json") {
     return "/sandbox/.openclaw/openclaw.json";
   }
   if (target.startsWith("~/.openclaw/")) {
-    return `/sandbox/.openclaw/${target.slice("~/.openclaw/".length)}`;
+    if (agent !== "openclaw") {
+      throw new Error(`Cannot apply OpenClaw messaging target '${target}' for ${agent}.`);
+    }
+    const suffix = normalizeRelativeAgentPath(
+      target.slice("~/.openclaw/".length),
+      "Messaging render target",
+    );
+    const resolved = `${root}/${suffix}`;
+    assertSandboxPathUnderRoot(resolved, root, target, "Messaging render target");
+    return resolved;
   }
   if (target.startsWith("~/.hermes/")) {
-    return `/sandbox/.hermes/${target.slice("~/.hermes/".length)}`;
+    if (agent !== "hermes") {
+      throw new Error(`Cannot apply Hermes messaging target '${target}' for ${agent}.`);
+    }
+    const suffix = normalizeRelativeAgentPath(
+      target.slice("~/.hermes/".length),
+      "Messaging render target",
+    );
+    const resolved = `${root}/${suffix}`;
+    assertSandboxPathUnderRoot(resolved, root, target, "Messaging render target");
+    return resolved;
   }
   throw new Error(`Cannot resolve messaging agent config target '${target}' for ${agent}.`);
 }

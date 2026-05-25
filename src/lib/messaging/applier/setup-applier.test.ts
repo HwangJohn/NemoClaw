@@ -7,7 +7,11 @@ import { createBuiltInChannelManifestRegistry } from "../channels";
 import { MessagingWorkflowPlanner } from "../compiler";
 import { createBuiltInMessagingHookRegistry, runMessagingHook } from "../hooks";
 import type { ChannelHookSpec } from "../manifest";
-import type { MessagingAgentId, SandboxMessagingPlan } from "../manifest";
+import type {
+  MessagingAgentId,
+  MessagingSerializableObject,
+  SandboxMessagingPlan,
+} from "../manifest";
 import { MessagingSetupApplier } from "./setup-applier";
 import {
   MESSAGING_SETUP_APPLIER_ENV_KEY,
@@ -527,6 +531,44 @@ describe("MessagingSetupApplier", () => {
     expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
   });
 
+  it("rejects render targets outside the selected agent config root", async () => {
+    const plan = await planOnboard({ TELEGRAM_BOT_TOKEN: "123456:telegram-token" }, [
+      "telegram",
+    ]);
+    const runOpenshell: MessagingOpenShellRunner = (args, options) => {
+      if (args.includes("cat") && options?.input === undefined) {
+        return { status: 0, stdout: "{}" };
+      }
+      return { status: 0 };
+    };
+    const unsafeTargets = [
+      { target: "/tmp/openclaw.json", error: "must stay inside /sandbox/.openclaw" },
+      { target: "~/.openclaw/../openclaw.json", error: "must not traverse directories" },
+      { target: "~/.hermes/config.yaml", error: "Cannot apply Hermes messaging target" },
+    ];
+
+    for (const { target, error } of unsafeTargets) {
+      const unsafePlan = {
+        ...plan,
+        agentRender: [
+          {
+            channelId: "telegram",
+            kind: "json-fragment",
+            agent: "openclaw",
+            target,
+            path: "channels.telegram.enabled",
+            value: true,
+            templateRefs: [],
+          },
+        ],
+      } satisfies SandboxMessagingPlan;
+
+      await expect(
+        MessagingSetupApplier.applyAgentConfigAtOpenShell(unsafePlan, { runOpenshell }),
+      ).rejects.toThrow(error);
+    }
+  });
+
   it("rejects unsafe build-file hook output paths and modes", async () => {
     const plan = await planOnboard({ WECHAT_ACCOUNT_ID: "wechat-account" }, ["wechat"]);
     const runOpenshell: MessagingOpenShellRunner = (args, options) => {
@@ -535,7 +577,10 @@ describe("MessagingSetupApplier", () => {
       }
       return { status: 0 };
     };
-    const unsafeFiles = [
+    const unsafeFiles: Array<{
+      readonly value: MessagingSerializableObject;
+      readonly error: string;
+    }> = [
       {
         value: { path: "openclaw-weixin/accounts/../../openclaw.json", content: {} },
         error: "must not traverse directories",
