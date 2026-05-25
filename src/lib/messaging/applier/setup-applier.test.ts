@@ -384,6 +384,43 @@ describe("MessagingSetupApplier", () => {
     expect(result.appliedHooks).toEqual(["wechat:wechat-seed-openclaw-account"]);
   });
 
+  it("rejects prototype-polluting build-file merge keys", async () => {
+    const plan = await planOnboard({ WECHAT_ACCOUNT_ID: "wechat-account" }, ["wechat"]);
+    const files: Record<string, string> = {
+      "/sandbox/.openclaw/openclaw.json": "{}",
+    };
+    const runOpenshell: MessagingOpenShellRunner = (args, options) => {
+      const target = String(args.at(-1));
+      if (args.includes("cat") && options?.input === undefined) {
+        return { status: files[target] === undefined ? 1 : 0, stdout: files[target] ?? "" };
+      }
+      if (options?.input !== undefined) {
+        files[target] = options.input;
+        return { status: 0 };
+      }
+      return { status: 1 };
+    };
+    const unsafeMerge = JSON.parse('{"__proto__":{"polluted":true}}');
+
+    await expect(
+      MessagingSetupApplier.applyAgentConfigAtOpenShell(plan, {
+        runOpenshell,
+        runHook: () => ({
+          outputs: {
+            openclawConfigPatch: {
+              kind: "build-file",
+              value: {
+                path: "openclaw.json",
+                merge: unsafeMerge,
+              },
+            },
+          },
+        }),
+      }),
+    ).rejects.toThrow("unsafe object key '__proto__'");
+    expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
+  });
+
   it("applies policy presets directly from the serializable plan", async () => {
     const plan = await planOnboard({ TELEGRAM_BOT_TOKEN: "123456:telegram-token" }, [
       "telegram",

@@ -372,6 +372,7 @@ describe("ManifestCompiler", () => {
     expect(plan.buildSteps).toEqual([]);
     expect(plan.stateUpdates).toEqual([]);
     expect(plan.healthChecks).toEqual([]);
+    expect(plan.channels[0]?.hooks).toEqual([]);
   });
 
   it("compiles a non-built-in channel manifest through the same generic path", async () => {

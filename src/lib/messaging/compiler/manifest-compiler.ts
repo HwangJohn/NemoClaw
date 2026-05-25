@@ -121,9 +121,11 @@ export class ManifestCompiler {
           selected && active && isEnrollmentWorkflow(context.workflow) && context.isInteractive,
         runEnrollmentChecks: selected && active && isEnrollmentWorkflow(context.workflow),
       }),
-      hooks: manifest.hooks
-        .filter((hook) => isHookForAgent(hook, context.agent))
-        .map((hook) => cloneHookReference(manifest.id, hook)),
+      hooks: active
+        ? manifest.hooks
+            .filter((hook) => isHookForAgent(hook, context.agent))
+            .map((hook) => cloneHookReference(manifest.id, hook))
+        : [],
     };
   }
 }

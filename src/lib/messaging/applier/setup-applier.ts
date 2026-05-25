@@ -362,7 +362,7 @@ function assertJsonSerializable(
     });
     return;
   }
-  if (typeof value === "object" && value !== null) {
+  if (typeof value === "object") {
     assertAcyclicObject(value, path, visiting, () => {
       for (const [key, entry] of Object.entries(value)) {
         assertJsonSerializable(entry, `${path}.${key}`, visiting);
@@ -574,6 +574,7 @@ function mergeObjects(
   patch: Record<string, MessagingSerializableValue>,
 ): void {
   for (const [key, value] of Object.entries(patch)) {
+    assertSafeObjectKey(key);
     const existing = target[key];
     if (isObject(existing) && isObject(value)) {
       mergeObjects(
@@ -583,6 +584,12 @@ function mergeObjects(
       continue;
     }
     target[key] = value;
+  }
+}
+
+function assertSafeObjectKey(key: string): void {
+  if (key === "__proto__" || key === "prototype" || key === "constructor") {
+    throw new Error(`Messaging build-file merge rejected unsafe object key '${key}'.`);
   }
 }
 
