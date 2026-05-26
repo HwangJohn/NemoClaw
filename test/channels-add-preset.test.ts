@@ -30,6 +30,7 @@ function runScript(scriptBody: string, extraEnv: Record<string, string> = {}): S
       SLACK_BOT_TOKEN: "slack-bot-token-for-test",
       SLACK_APP_TOKEN: "slack-app-token-for-test",
       DISCORD_BOT_TOKEN: "test-discord-token",
+      NEMOCLAW_SKIP_TELEGRAM_REACHABILITY: "1",
       ...extraEnv,
     },
     timeout: 15000,
@@ -97,6 +98,22 @@ onboard.isNonInteractive = () => true;
 const onboardProviders = require(${j("onboard/providers.js")});
 const providerCalls = [];
 onboardProviders.upsertMessagingProviders = (defs) => { providerCalls.push(...defs); };
+
+const workflowPlanner = require(${j("messaging/compiler/workflow-planner.js")});
+const originalPlanAddChannel = workflowPlanner.MessagingWorkflowPlanner.prototype.planAddChannel;
+const planAddCalls = [];
+workflowPlanner.MessagingWorkflowPlanner.prototype.planAddChannel = async function(context) {
+  planAddCalls.push({
+    sandboxName: context.sandboxName,
+    agent: context.agent,
+    channelId: context.channelId,
+    isInteractive: context.isInteractive,
+    configuredChannels: context.configuredChannels,
+    disabledChannels: context.disabledChannels,
+    supportedChannelIds: context.supportedChannelIds,
+  });
+  return originalPlanAddChannel.call(this, context);
+};
 
 const registry = require(${j("state/registry.js")});
 const registryUpdates = [];
@@ -177,11 +194,45 @@ console.log = (...args) => {
 
 const channelModule = require(${j("actions/sandbox/policy-channel.js")});
 
-module.exports = { channelModule, appliedCalls, removedCalls, callOrder, providerCalls, registryUpdates, sessionUpdates, getSessionState: () => sessionState };
+module.exports = { channelModule, appliedCalls, removedCalls, callOrder, providerCalls, registryUpdates, sessionUpdates, planAddCalls, getSessionState: () => sessionState };
 `;
 }
 
 describe("channels add applies matching policy preset (issue #3437)", () => {
+  it("plans channel enrollment through the messaging manifest workflow", () => {
+    const script = `${buildPreamble()}
+const ctx = module.exports;
+(async () => {
+  try {
+    await ctx.channelModule.addSandboxChannel("test-sb", { channel: "slack" });
+    process.stdout.write("\\n__RESULT__" + JSON.stringify({
+      planAddCalls: ctx.planAddCalls,
+    }) + "\\n");
+  } catch (err) {
+    process.stdout.write("\\n__RESULT__" + JSON.stringify({ error: err.message, stack: err.stack }) + "\\n");
+  }
+})();
+`;
+    const result = runScript(script);
+    assert.equal(result.status, 0, `script failed: ${result.stderr}\n${result.stdout}`);
+    const marker = result.stdout.lastIndexOf("__RESULT__");
+    assert.ok(marker >= 0, `no __RESULT__ marker in stdout:\n${result.stdout}`);
+    const payload = JSON.parse(result.stdout.slice(marker + "__RESULT__".length).trim());
+    assert.ok(!payload.error, `unexpected error: ${payload.error}\n${payload.stack || ""}`);
+
+    assert.deepEqual(payload.planAddCalls, [
+      {
+        sandboxName: "test-sb",
+        agent: "openclaw",
+        channelId: "slack",
+        isInteractive: false,
+        configuredChannels: [],
+        disabledChannels: [],
+        supportedChannelIds: ["telegram", "discord", "wechat", "slack", "whatsapp"],
+      },
+    ]);
+  });
+
   for (const channel of ["telegram", "slack", "discord"]) {
     it(`applies the '${channel}' preset before triggering rebuild`, () => {
       const script = `${buildPreamble()}
