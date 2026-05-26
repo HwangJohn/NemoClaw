@@ -168,7 +168,7 @@ export const wechatManifest = {
     },
     {
       id: "wechat-health-check",
-      phase: "health-check",
+      phase: "validation",
       handler: "wechat.healthCheck",
       inputs: ["wechatConfig.accountId"],
       onFailure: "abort",

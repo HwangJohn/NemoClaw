@@ -34,7 +34,7 @@ describe("Telegram getMe reachability hook implementation", () => {
         }),
       },
     ]);
-    const hook = telegramManifest.hooks.find((entry) => entry.phase === "reachability-check");
+    const hook = telegramManifest.hooks.find((entry) => entry.phase === "validation");
 
     if (!hook) throw new Error("missing Telegram reachability hook");
 
@@ -48,7 +48,7 @@ describe("Telegram getMe reachability hook implementation", () => {
     ).resolves.toEqual({
       hookId: "telegram-reachability",
       handlerId: TELEGRAM_GET_ME_REACHABILITY_HOOK_ID,
-      phase: "reachability-check",
+      phase: "validation",
       outputs: {},
     });
     expect(urls).toEqual(["https://telegram.test/bot123456:telegram-token/getMe"]);
@@ -73,7 +73,7 @@ describe("Telegram getMe reachability hook implementation", () => {
         }),
       },
     ]);
-    const hook = telegramManifest.hooks.find((entry) => entry.phase === "reachability-check");
+    const hook = telegramManifest.hooks.find((entry) => entry.phase === "validation");
 
     if (!hook) throw new Error("missing Telegram reachability hook");
 

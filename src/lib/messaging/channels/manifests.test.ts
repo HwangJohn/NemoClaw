@@ -196,7 +196,7 @@ describe("built-in channel manifests", () => {
     expectTokenPasteEnrollHook(telegramManifest, ["botToken"]);
     expect(telegramManifest.hooks).toContainEqual({
       id: "telegram-reachability",
-      phase: "reachability-check",
+      phase: "validation",
       handler: "telegram.getMeReachability",
       inputs: ["botToken"],
       onFailure: "abort",
@@ -383,7 +383,7 @@ describe("built-in channel manifests", () => {
     );
     expect(wechatManifest.hooks[2]).toMatchObject({
       id: "wechat-health-check",
-      phase: "health-check",
+      phase: "validation",
       handler: "wechat.healthCheck",
       inputs: ["wechatConfig.accountId"],
       onFailure: "abort",

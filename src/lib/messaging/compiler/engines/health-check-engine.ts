@@ -7,10 +7,10 @@ export function planHealthChecks(manifest: ChannelManifest): SandboxMessagingHea
   return [
     {
       channelId: manifest.id,
-      phase: "health-check",
+      phase: "validation",
       requiredBefore: "lifecycle-success",
       hookIds: manifest.hooks
-        .filter((hook) => hook.phase === "health-check")
+        .filter((hook) => hook.phase === "validation")
         .map((hook) => hook.id),
     },
   ];

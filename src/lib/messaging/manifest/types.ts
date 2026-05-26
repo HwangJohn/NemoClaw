@@ -145,10 +145,9 @@ export interface ChannelRebuildHydrationSpec {
 /** Lifecycle phase where a referenced hook may run. */
 export type ChannelHookPhase =
   | "enroll"
-  | "reachability-check"
+  | "validation"
   | "apply"
   | "post-agent-install"
-  | "health-check"
   | "diagnostic"
   | "status";
 
@@ -334,10 +333,10 @@ export interface SandboxMessagingRebuildHydrationStateUpdatePlan {
   readonly env: string;
 }
 
-/** Health gates that must run before a lifecycle can report success. */
+/** Validation gates that must run before a lifecycle can report success. */
 export interface SandboxMessagingHealthCheckPlan {
   readonly channelId: MessagingChannelId;
-  readonly phase: "health-check";
+  readonly phase: "validation";
   readonly requiredBefore: "lifecycle-success";
   readonly hookIds: readonly string[];
 }

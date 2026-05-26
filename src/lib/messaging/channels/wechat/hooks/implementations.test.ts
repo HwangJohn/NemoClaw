@@ -128,7 +128,7 @@ describe("WeChat hook implementations", () => {
     }
   });
 
-  it("declares a health-check hook that requires captured account metadata", async () => {
+  it("declares a validation hook that requires captured account metadata", async () => {
     const hook = wechatManifest.hooks.find((entry) => entry.id === "wechat-health-check");
     const registry = new MessagingHookRegistry([
       {
@@ -137,7 +137,7 @@ describe("WeChat hook implementations", () => {
       },
     ]);
 
-    if (!hook) throw new Error("missing WeChat health-check hook");
+    if (!hook) throw new Error("missing WeChat validation hook");
 
     await expect(
       runMessagingHook(hook, registry, {

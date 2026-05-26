@@ -114,7 +114,7 @@ export class ManifestCompiler {
         requestedActive &&
         isEnrollmentWorkflow(context.workflow) &&
         context.isInteractive,
-      runEnrollmentChecks: selected && requestedActive && isEnrollmentWorkflow(context.workflow),
+      runValidation: selected && requestedActive && isEnrollmentWorkflow(context.workflow),
     });
     const active = requestedActive && !resolvedInputs.skipped;
 
@@ -172,7 +172,7 @@ async function resolveChannelInputs(
   manifest: ChannelManifest,
   context: ManifestCompilerContext,
   hooks: MessagingHookRegistry,
-  options: { readonly runEnrollment: boolean; readonly runEnrollmentChecks: boolean },
+  options: { readonly runEnrollment: boolean; readonly runValidation: boolean },
 ): Promise<{
   readonly inputs: SandboxMessagingInputReference[];
   readonly skipped: boolean;
@@ -201,10 +201,10 @@ async function resolveChannelInputs(
     );
   }
 
-  if (!skipped && options.runEnrollmentChecks && hasRequiredInputsAvailable(manifest, inputs)) {
+  if (!skipped && options.runValidation && hasRequiredInputsAvailable(manifest, inputs)) {
     for (const hook of manifest.hooks
       .filter((entry) => isHookForAgent(entry, context.agent))
-      .filter((entry) => entry.phase === "reachability-check")
+      .filter((entry) => entry.phase === "validation")
       .filter((entry) => hasDeclaredHookInputs(hookInputs, entry))) {
       await runCompilerHook(manifest, hook, hooks, hookInputs);
     }
