@@ -7,8 +7,8 @@ import {
   normalizeCredentialValue,
 } from "../credentials/store";
 import {
-  type ChannelManifest,
   type ChannelInputSpec,
+  type ChannelManifest,
   type ChannelSecretInputSpec,
   createBuiltInChannelManifestRegistry,
   getMessagingManifestAvailabilityContext,
@@ -29,7 +29,6 @@ export interface SetupMessagingChannelsDeps {
   readonly step?: (current: number, total: number, label: string) => void;
   readonly note?: (message: string) => void;
   readonly isNonInteractive?: () => boolean;
-  readonly checkTelegramReachability?: (token: string) => Promise<void>;
 }
 
 const getMessagingToken = (envKey: string): string | null =>
@@ -51,7 +50,6 @@ export async function setupMessagingChannels(
   const note = deps.note ?? console.log;
   const isNonInteractive =
     deps.isNonInteractive ?? (() => process.env.NEMOCLAW_NON_INTERACTIVE === "1");
-  const checkTelegramReachability = deps.checkTelegramReachability ?? (async () => {});
   const manifestRegistry = createBuiltInChannelManifestRegistry();
   const availabilityContext = getMessagingManifestAvailabilityContext(agent);
   const availableChannels = manifestRegistry.listAvailable(availabilityContext);
@@ -74,12 +72,6 @@ export async function setupMessagingChannels(
         agent,
         interactive: false,
       });
-      if (enabled.has("telegram")) {
-        const telegramToken = getMessagingToken("TELEGRAM_BOT_TOKEN");
-        if (telegramToken) {
-          await checkTelegramReachability(telegramToken);
-        }
-      }
     } else {
       note("  [non-interactive] No complete messaging channel inputs configured. Skipping.");
     }
@@ -121,13 +113,6 @@ export async function setupMessagingChannels(
 
   await setupSelectedMessagingChannels(selected, enabled, availableChannels, { agent });
   console.log("");
-
-  if (!isNonInteractive() && enabled.has("telegram")) {
-    const telegramToken = getMessagingToken("TELEGRAM_BOT_TOKEN");
-    if (telegramToken) {
-      await checkTelegramReachability(telegramToken);
-    }
-  }
 
   return Array.from(enabled);
 }
@@ -177,37 +162,27 @@ export async function setupSelectedMessagingChannels(
       printExistingSecretStatus(manifest);
       printEnrollmentNotes(manifest);
     }
-    const enrolledPlan = await planner.planOnboard({
-      sandboxName,
-      agent,
-      isInteractive: true,
-      selectedChannels: [channelId],
-      supportedChannelIds,
-      credentialAvailability: buildCredentialAvailability(registry, [channelId]),
-    });
-    const enrolledChannel = enrolledPlan.channels.find((channel) => channel.channelId === channelId);
-    if (!enrolledChannel?.active) {
-      enabled.delete(channelId);
-      continue;
-    }
-    if (manifest.auth.mode === "in-sandbox-qr") printInSandboxQrStatus(manifest);
   }
 
-  const finalSelectedChannels = selectedChannels.filter((channelId) => enabled.has(channelId));
-  const finalPlan = await planner.planOnboard({
+  const plan = await planner.planOnboard({
     sandboxName,
     agent,
-    isInteractive: false,
-    selectedChannels: finalSelectedChannels,
+    isInteractive: true,
+    selectedChannels,
     supportedChannelIds,
-    credentialAvailability: buildCredentialAvailability(registry, finalSelectedChannels),
+    credentialAvailability: buildCredentialAvailability(registry, selectedChannels),
   });
 
-  for (const channel of finalPlan.channels) {
-    if (!channel.active) enabled.delete(channel.channelId);
+  for (const channel of plan.channels) {
+    if (!channel.active) {
+      enabled.delete(channel.channelId);
+      continue;
+    }
+    const manifest = registry.get(channel.channelId);
+    if (manifest?.auth.mode === "in-sandbox-qr") printInSandboxQrStatus(manifest);
   }
 
-  return finalPlan;
+  return plan;
 }
 
 function readMessagingChannelSelection(

@@ -17,34 +17,43 @@ interface TelegramFetchResponse {
 type TelegramFetch = (url: string) => Promise<TelegramFetchResponse>;
 
 export interface TelegramGetMeReachabilityHookOptions {
+  readonly env?: NodeJS.ProcessEnv;
   readonly fetch?: TelegramFetch;
   readonly apiBaseUrl?: string;
+  readonly log?: (message: string) => void;
 }
 
 export function createTelegramGetMeReachabilityHook(
   options: TelegramGetMeReachabilityHookOptions = {},
 ): MessagingHookHandler {
   return async (context) => {
+    const env = options.env ?? process.env;
+    if (env.NEMOCLAW_SKIP_TELEGRAM_REACHABILITY === "1") {
+      return {};
+    }
+
     const rawToken = context.inputs?.botToken;
     const token = normalizeCredentialValue(typeof rawToken === "string" ? rawToken : "");
     if (!token) {
       throw new Error("Telegram reachability check requires botToken.");
     }
 
+    const log = options.log ?? console.log;
     const response = await fetchTelegramGetMe(token, options).catch(() => {
-      throw new Error("Telegram reachability check failed: Bot API request failed.");
+      const message = "Telegram reachability check failed: Bot API request failed.";
+      if (env.NEMOCLAW_NON_INTERACTIVE === "1") throw new Error(message);
+      log(`  ⚠ ${message}`);
+      return null;
     });
+    if (!response) return {};
     if (!response.ok) {
-      throw new Error(
-        `Telegram reachability check failed with HTTP ${response.status}${
-          response.statusText ? ` ${response.statusText}` : ""
-        }.`,
-      );
+      logTelegramHttpWarning(response, log);
+      return {};
     }
 
     const payload = await readTelegramJson(response);
     if (!isObject(payload) || payload.ok !== true) {
-      throw new Error("Telegram reachability check failed: Bot API rejected the token.");
+      log("  ⚠ Bot token was rejected by Telegram — verify the token is correct.");
     }
 
     return {};
@@ -88,4 +97,19 @@ async function readTelegramJson(response: TelegramFetchResponse): Promise<unknow
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function logTelegramHttpWarning(
+  response: TelegramFetchResponse,
+  log: (message: string) => void,
+): void {
+  if (response.status === 401 || response.status === 404) {
+    log("  ⚠ Bot token was rejected by Telegram — verify the token is correct.");
+    return;
+  }
+  log(
+    `  ⚠ Telegram API returned HTTP ${response.status}${
+      response.statusText ? ` ${response.statusText}` : ""
+    } — the bot may not work correctly.`,
+  );
 }

@@ -6,8 +6,8 @@ import { describe, expect, it } from "vitest";
 import { createBuiltInChannelManifestRegistry } from "../channels";
 import { createBuiltInMessagingHookRegistry, MessagingHookRegistry } from "../hooks";
 import {
-  ChannelManifestRegistry,
   type ChannelManifest,
+  ChannelManifestRegistry,
   type SandboxMessagingPlan,
 } from "../manifest";
 import { ManifestCompiler } from "./manifest-compiler";
@@ -386,7 +386,8 @@ describe("ManifestCompiler", () => {
     expect(plan.healthChecks).toEqual([]);
   });
 
-  it("skips token-paste and QR enrollment hooks for non-interactive create plans", async () => {
+  it("skips enrollment hooks but runs manifest reachability checks for non-interactive create plans", async () => {
+    const hookCalls: string[] = [];
     const hooks = new MessagingHookRegistry([
       {
         id: "common.tokenPaste",
@@ -396,27 +397,35 @@ describe("ManifestCompiler", () => {
       },
       {
         id: "telegram.getMeReachability",
-        handler: () => ({}),
+        handler: (context) => {
+          hookCalls.push(`reachability:${String(context.inputs?.botToken)}`);
+          return {};
+        },
       },
     ]);
-    const plan = await new ManifestCompiler(
-      createBuiltInChannelManifestRegistry(),
-      hooks,
-    ).compile({
-      sandboxName: "demo",
-      agent: "openclaw",
-      workflow: "onboard",
-      isInteractive: false,
-      selectedChannels: ["telegram"],
-      credentialAvailability: {
-        TELEGRAM_BOT_TOKEN: true,
+    const plan = await withEnv(
+      {
+        TELEGRAM_BOT_TOKEN: "123456:raw-telegram-token",
       },
-    });
+      () =>
+        new ManifestCompiler(createBuiltInChannelManifestRegistry(), hooks).compile({
+          sandboxName: "demo",
+          agent: "openclaw",
+          workflow: "onboard",
+          isInteractive: false,
+          selectedChannels: ["telegram"],
+          credentialAvailability: {
+            TELEGRAM_BOT_TOKEN: true,
+          },
+        }),
+    );
 
     expect(plan.channels[0]?.inputs.find((input) => input.inputId === "botToken")).toMatchObject({
       kind: "secret",
       credentialAvailable: true,
     });
+    expect(hookCalls).toEqual(["reachability:123456:raw-telegram-token"]);
+    expect(JSON.stringify(plan)).not.toContain("123456:raw-telegram-token");
   });
 
   it("reads input values from env keys before returning non-interactive plans", async () => {

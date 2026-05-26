@@ -165,5 +165,12 @@ export const telegramManifest = {
         },
       ],
     },
+    {
+      id: "telegram-get-me-reachability",
+      phase: "reachability-check",
+      handler: "telegram.getMeReachability",
+      inputs: ["botToken"],
+      onFailure: "abort",
+    },
   ],
 } as const satisfies ChannelManifest;

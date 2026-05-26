@@ -290,9 +290,12 @@ fi
 pass "Pre-cleanup complete"
 
 if [ -z "${NEMOCLAW_SKIP_TELEGRAM_REACHABILITY:-}" ]; then
-  if ! curl -fsS --max-time 10 https://api.telegram.org/ >/dev/null 2>&1; then
+  if [[ "$TELEGRAM_TOKEN" == test-fake-telegram-token-* ]]; then
     export NEMOCLAW_SKIP_TELEGRAM_REACHABILITY=1
-    info "Host cannot reach api.telegram.org; skipping onboarding Telegram reachability probe for fake-token E2E"
+    info "Using fake Telegram token; skipping manifest Telegram reachability check"
+  elif ! curl -fsS --max-time 10 https://api.telegram.org/ >/dev/null 2>&1; then
+    export NEMOCLAW_SKIP_TELEGRAM_REACHABILITY=1
+    info "Host cannot reach api.telegram.org; skipping manifest Telegram reachability check"
   fi
 fi
 

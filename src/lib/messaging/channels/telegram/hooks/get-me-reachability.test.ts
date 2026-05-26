@@ -3,8 +3,8 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { ChannelHookSpec } from "../../../manifest";
 import { MessagingHookRegistry, runMessagingHook } from "../../../hooks";
+import type { ChannelHookSpec } from "../../../manifest";
 import {
   createTelegramGetMeReachabilityHook,
   TELEGRAM_GET_ME_REACHABILITY_HOOK_ID,
@@ -58,15 +58,17 @@ describe("Telegram getMe reachability hook implementation", () => {
     expect(urls).toEqual(["https://telegram.test/bot123456:telegram-token/getMe"]);
   });
 
-  it("fails closed when Telegram rejects the token", async () => {
+  it("warns and continues when Telegram rejects the token", async () => {
+    const logs: string[] = [];
     const registry = new MessagingHookRegistry([
       {
         id: TELEGRAM_GET_ME_REACHABILITY_HOOK_ID,
         handler: createTelegramGetMeReachabilityHook({
+          log: (message) => logs.push(message),
           fetch: async () => ({
             ok: false,
-            status: 401,
-            statusText: "Unauthorized",
+            status: 404,
+            statusText: "Not Found",
             async json() {
               return { ok: false };
             },
@@ -84,6 +86,67 @@ describe("Telegram getMe reachability hook implementation", () => {
           botToken: "bad-token",
         },
       }),
-    ).rejects.toThrow("Telegram reachability check failed with HTTP 401 Unauthorized.");
+    ).resolves.toMatchObject({
+      hookId: "telegram-reachability",
+      outputs: {},
+    });
+    expect(logs).toEqual([
+      "  ⚠ Bot token was rejected by Telegram — verify the token is correct.",
+    ]);
+  });
+
+  it("fails closed when the Bot API request fails in non-interactive mode", async () => {
+    const registry = new MessagingHookRegistry([
+      {
+        id: TELEGRAM_GET_ME_REACHABILITY_HOOK_ID,
+        handler: createTelegramGetMeReachabilityHook({
+          env: {
+            NEMOCLAW_NON_INTERACTIVE: "1",
+          },
+          fetch: async () => {
+            throw new Error("network unavailable");
+          },
+        }),
+      },
+    ]);
+    await expect(
+      runMessagingHook(TELEGRAM_REACHABILITY_HOOK, registry, {
+        channelId: "telegram",
+        inputs: {
+          botToken: "123456:telegram-token",
+        },
+      }),
+    ).rejects.toThrow("Telegram reachability check failed: Bot API request failed.");
+  });
+
+  it("honors the explicit skip env without calling Telegram", async () => {
+    const urls: string[] = [];
+    const registry = new MessagingHookRegistry([
+      {
+        id: TELEGRAM_GET_ME_REACHABILITY_HOOK_ID,
+        handler: createTelegramGetMeReachabilityHook({
+          env: {
+            NEMOCLAW_SKIP_TELEGRAM_REACHABILITY: "1",
+          },
+          fetch: async (url) => {
+            urls.push(url);
+            throw new Error("fetch should not run");
+          },
+        }),
+      },
+    ]);
+
+    await expect(
+      runMessagingHook(TELEGRAM_REACHABILITY_HOOK, registry, {
+        channelId: "telegram",
+        inputs: {
+          botToken: "123456:telegram-token",
+        },
+      }),
+    ).resolves.toMatchObject({
+      hookId: "telegram-reachability",
+      outputs: {},
+    });
+    expect(urls).toEqual([]);
   });
 });

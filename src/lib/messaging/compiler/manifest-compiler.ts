@@ -2,29 +2,29 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type {
-  ChannelHookSpec,
-  ChannelHookOutputSpec,
-  ChannelInputSpec,
-  ChannelManifest,
-  ChannelManifestRegistry,
-  MessagingChannelId,
-  MessagingStatePath,
-  MessagingSerializableValue,
-  SandboxMessagingChannelPlan,
-  SandboxMessagingHookReferencePlan,
-  SandboxMessagingInputReference,
-  SandboxMessagingPlan,
-} from "../manifest";
+  MessagingHookInputMap,
+  MessagingHookOutputMap,
+  MessagingHookRunResult,
+} from "../hooks";
 import {
   BUILT_IN_MESSAGING_HOOK_REGISTRY,
   MessagingHookRegistry,
   runMessagingHook,
 } from "../hooks";
 import type {
-  MessagingHookInputMap,
-  MessagingHookOutputMap,
-  MessagingHookRunResult,
-} from "../hooks";
+  ChannelHookOutputSpec,
+  ChannelHookSpec,
+  ChannelInputSpec,
+  ChannelManifest,
+  ChannelManifestRegistry,
+  MessagingChannelId,
+  MessagingSerializableValue,
+  MessagingStatePath,
+  SandboxMessagingChannelPlan,
+  SandboxMessagingHookReferencePlan,
+  SandboxMessagingInputReference,
+  SandboxMessagingPlan,
+} from "../manifest";
 import { planAgentRender } from "./engines/agent-render-engine";
 import { planBuildSteps } from "./engines/build-step-engine";
 import { planCredentialBindings } from "./engines/credential-binding-engine";
@@ -119,7 +119,10 @@ export class ManifestCompiler {
         requestedActive &&
         isEnrollmentWorkflow(context.workflow) &&
         context.isInteractive,
-      runEnrollmentChecks: selected && requestedActive && isEnrollmentWorkflow(context.workflow),
+      runEnrollmentChecks:
+        selected &&
+        requestedActive &&
+        isEnrollmentWorkflow(context.workflow),
     });
     const requiredInputsAvailable = hasRequiredInputsAvailable(manifest, resolvedInputs.inputs);
     const active = requestedActive && !resolvedInputs.skipped && requiredInputsAvailable;

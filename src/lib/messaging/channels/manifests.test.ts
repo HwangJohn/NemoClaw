@@ -76,6 +76,16 @@ function expectConfigPromptEnrollHook(
   });
 }
 
+function expectReachabilityHook(manifest: ChannelManifest, inputIds: readonly string[]): void {
+  expect(manifest.hooks).toContainEqual({
+    id: `${manifest.id}-get-me-reachability`,
+    phase: "reachability-check",
+    handler: `${manifest.id}.getMeReachability`,
+    inputs: inputIds,
+    onFailure: "abort",
+  });
+}
+
 describe("built-in channel manifests", () => {
   it("registers the phase-1 built-in manifests without consuming them in workflows", () => {
     const registry = createBuiltInChannelManifestRegistry();
@@ -214,6 +224,7 @@ describe("built-in channel manifests", () => {
     expect(renderJson(telegramManifest)).toContain("telegramConfig.requireMention");
     expectTokenPasteEnrollHook(telegramManifest, ["botToken"]);
     expectConfigPromptEnrollHook(telegramManifest, ["requireMention", "allowedIds"]);
+    expectReachabilityHook(telegramManifest, ["botToken"]);
   });
 
   it("declares Discord guild and allowlist render intent for both agents", () => {
