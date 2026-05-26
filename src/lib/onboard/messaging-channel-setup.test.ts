@@ -37,16 +37,34 @@ function manifests(...channelIds: string[]) {
   });
 }
 
+function stubTelegramReachability(): void {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      async json() {
+        return { ok: true };
+      },
+      async text() {
+        return "";
+      },
+    })),
+  );
+}
+
 describe("setupSelectedMessagingChannels", () => {
   beforeEach(() => {
     process.env = { ...ORIGINAL_ENV };
     vi.clearAllMocks();
     vi.mocked(getCredential).mockReturnValue(null);
     vi.mocked(prompt).mockResolvedValue("");
+    stubTelegramReachability();
   });
 
   afterEach(() => {
     process.env = { ...ORIGINAL_ENV };
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -216,10 +234,12 @@ describe("setupMessagingChannels", () => {
     vi.clearAllMocks();
     vi.mocked(getCredential).mockReturnValue(null);
     vi.mocked(prompt).mockResolvedValue("");
+    stubTelegramReachability();
   });
 
   afterEach(() => {
     process.env = { ...ORIGINAL_ENV };
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -229,13 +249,11 @@ describe("setupMessagingChannels", () => {
     process.env.SLACK_APP_TOKEN = "xapp-test-slack-token";
     const steps: string[] = [];
     const notes: string[] = [];
-    const checkTelegramReachability = vi.fn(async () => {});
 
     const result = await setupMessagingChannels(null, null, {
       step: (current, total, label) => steps.push(`${current}/${total} ${label}`),
       note: (message) => notes.push(message),
       isNonInteractive: () => true,
-      checkTelegramReachability,
     });
 
     expect(result).toEqual(["telegram", "slack"]);
@@ -243,7 +261,6 @@ describe("setupMessagingChannels", () => {
     expect(notes).toEqual([
       "  [non-interactive] Messaging channel inputs detected: telegram, slack",
     ]);
-    expect(checkTelegramReachability).toHaveBeenCalledWith("123456:telegram-token");
     expect(prompt).not.toHaveBeenCalled();
   });
 

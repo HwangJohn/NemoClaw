@@ -475,7 +475,10 @@ install_for_active_agent() {
   export NEMOCLAW_FRESH=1
 
   if [ -z "${NEMOCLAW_SKIP_TELEGRAM_REACHABILITY:-}" ]; then
-    if ! curl -fsS --max-time 10 https://api.telegram.org/ >/dev/null 2>&1; then
+    if [[ "${TELEGRAM_BOT_TOKEN:-}" == test-fake-telegram-token-* ]]; then
+      export NEMOCLAW_SKIP_TELEGRAM_REACHABILITY=1
+      info "Using fake Telegram token; setting NEMOCLAW_SKIP_TELEGRAM_REACHABILITY=1"
+    elif ! curl -fsS --max-time 10 https://api.telegram.org/ >/dev/null 2>&1; then
       export NEMOCLAW_SKIP_TELEGRAM_REACHABILITY=1
       info "api.telegram.org unreachable from host; setting NEMOCLAW_SKIP_TELEGRAM_REACHABILITY=1"
     fi

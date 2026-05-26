@@ -1582,7 +1582,6 @@ const { createSandbox } = require(${onboardPath});
       const scriptPath = path.join(tmpDir, "messaging-noninteractive.js");
       const onboardPath = JSON.stringify(path.join(repoRoot, "dist", "lib", "onboard.js"));
       const runnerPath = JSON.stringify(path.join(repoRoot, "dist", "lib", "runner.js"));
-      const httpProbePath = JSON.stringify(path.join(repoRoot, "dist", "lib", "adapters", "http", "probe.js"));
 
       fs.mkdirSync(fakeBin, { recursive: true });
       fs.writeFileSync(path.join(fakeBin, "openshell"), "#!/usr/bin/env bash\nexit 0\n", {
@@ -1595,17 +1594,13 @@ const _n = (c) => (Array.isArray(c) ? c.join(" ") : String(c)).replace(/'/g, "")
 runner.run = () => ({ status: 0 });
 runner.runCapture = () => "";
 
-// Stub the Telegram reachability probe so this test doesn't make a real network
-// call — on networks where api.telegram.org is blocked, the non-interactive
-// preflight would otherwise abort the test.
-const httpProbe = require(${httpProbePath});
-httpProbe.runCurlProbe = () => ({
+// Stub the manifest-driven Telegram reachability hook so this test does not
+// make a real network call.
+global.fetch = async () => ({
   ok: true,
-  httpStatus: 200,
-  curlStatus: 0,
-  body: '{"ok":true,"result":{"id":1,"is_bot":true}}',
-  stderr: "",
-  message: "",
+  status: 200,
+  json: async () => ({ ok: true, result: { id: 1, is_bot: true } }),
+  text: async () => "",
 });
 
 const { setupMessagingChannels } = require(${onboardPath});
