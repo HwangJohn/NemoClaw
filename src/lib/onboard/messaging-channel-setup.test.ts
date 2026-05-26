@@ -226,6 +226,7 @@ describe("setupMessagingChannels", () => {
   it("orchestrates non-interactive manifest selection with injected onboard deps", async () => {
     process.env.TELEGRAM_BOT_TOKEN = "123456:telegram-token";
     process.env.SLACK_BOT_TOKEN = "xoxb-test-slack-token";
+    process.env.SLACK_APP_TOKEN = "xapp-test-slack-token";
     const steps: string[] = [];
     const notes: string[] = [];
     const checkTelegramReachability = vi.fn(async () => {});
@@ -243,6 +244,22 @@ describe("setupMessagingChannels", () => {
       "  [non-interactive] Messaging tokens detected: telegram, slack",
     ]);
     expect(checkTelegramReachability).toHaveBeenCalledWith("123456:telegram-token");
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it("skips partially configured multi-secret channels in non-interactive mode", async () => {
+    process.env.SLACK_BOT_TOKEN = "xoxb-test-slack-token";
+    const notes: string[] = [];
+
+    const result = await setupMessagingChannels(null, null, {
+      note: (message) => notes.push(message),
+      isNonInteractive: () => true,
+    });
+
+    expect(result).toEqual([]);
+    expect(notes).toEqual([
+      "  [non-interactive] No messaging tokens configured. Skipping.",
+    ]);
     expect(prompt).not.toHaveBeenCalled();
   });
 });

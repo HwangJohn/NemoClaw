@@ -27,11 +27,19 @@ export function createWechatHookRegistrations(
 ): readonly MessagingHookRegistration[] {
   const ilinkLoginOptions = {
     ...createDefaultWechatHostQrLoginOptions(),
-    ...options.ilinkLogin,
+    ...withoutUndefinedValues(options.ilinkLogin),
   };
   return [
     createWechatIlinkLoginHookRegistration(ilinkLoginOptions),
     createWechatSeedOpenClawAccountHookRegistration(options.seedOpenClawAccount),
     createWechatHealthCheckHookRegistration(),
   ] as const;
+}
+
+function withoutUndefinedValues(
+  options: WechatIlinkLoginHookOptions | undefined,
+): WechatIlinkLoginHookOptions {
+  return Object.fromEntries(
+    Object.entries(options ?? {}).filter(([, value]) => value !== undefined),
+  ) as WechatIlinkLoginHookOptions;
 }

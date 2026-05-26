@@ -1244,6 +1244,7 @@ const { createSandbox } = require(${onboardPath});
   process.env.OPENSHELL_GATEWAY = "nemoclaw";
   process.env.DISCORD_BOT_TOKEN = "test-discord-token";
   process.env.SLACK_BOT_TOKEN = "xoxb-test-slack-token";
+  process.env.SLACK_APP_TOKEN = "xapp-test-slack-token";
   const sandboxName = await createSandbox(null, "gpt-5.4", "nvidia-prod", null, "my-assistant");
   console.log(JSON.stringify({ sandboxName, commands }));
 })().catch((error) => {
@@ -1613,6 +1614,7 @@ const { setupMessagingChannels } = require(${onboardPath});
   // Only set telegram and slack tokens — discord should be absent
   process.env.TELEGRAM_BOT_TOKEN = "123456:ABC-test-telegram-token";
   process.env.SLACK_BOT_TOKEN = "xoxb-test-slack-token";
+  process.env.SLACK_APP_TOKEN = "xapp-test-slack-token";
   const result = await setupMessagingChannels();
   console.log(JSON.stringify(result));
 })().catch((error) => {

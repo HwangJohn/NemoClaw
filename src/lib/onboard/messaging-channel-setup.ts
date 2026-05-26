@@ -1,22 +1,23 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { AgentDefinition } from "../agent/defs";
 import {
   getCredential,
   normalizeCredentialValue,
 } from "../credentials/store";
 import {
+  type ChannelManifest,
+  type ChannelSecretInputSpec,
   createBuiltInChannelManifestRegistry,
   getMessagingManifestAvailabilityContext,
+  hasMessagingManifestCredentials,
   hasMessagingManifestPrimaryCredential,
   MessagingWorkflowPlanner,
   resolveMessagingManifestSeed,
-  toMessagingAgentId,
-  type ChannelManifest,
-  type ChannelSecretInputSpec,
   type SandboxMessagingPlan,
+  toMessagingAgentId,
 } from "../messaging";
-import type { AgentDefinition } from "../agent/defs";
 
 export interface SetupSelectedMessagingChannelsOptions {
   readonly agent?: { readonly name?: string } | null;
@@ -51,6 +52,8 @@ export async function setupMessagingChannels(
   const availabilityContext = getMessagingManifestAvailabilityContext(agent);
   const availableChannels = manifestRegistry.listAvailable(availabilityContext);
   const hasManifestCredentials = (manifest: ChannelManifest) =>
+    hasMessagingManifestCredentials(manifest, getMessagingToken);
+  const hasManifestPrimaryCredential = (manifest: ChannelManifest) =>
     hasMessagingManifestPrimaryCredential(manifest, getMessagingToken);
   const seedFromState = (includeAllExisting = false): string[] =>
     resolveMessagingManifestSeed(
@@ -94,7 +97,7 @@ export async function setupMessagingChannels(
     output.write("  Available messaging channels:\n");
     availableChannels.forEach((manifest, i) => {
       const marker = enabled.has(manifest.id) ? "●" : "○";
-      const status = hasManifestCredentials(manifest) ? " (configured)" : "";
+      const status = hasManifestPrimaryCredential(manifest) ? " (configured)" : "";
       output.write(
         `    [${i + 1}] ${marker} ${manifest.id} — ${
           manifest.description ?? manifest.displayName

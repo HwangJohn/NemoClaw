@@ -19,7 +19,7 @@ export const slackManifest = {
       required: true,
       envKey: "SLACK_BOT_TOKEN",
       formatPattern: "^xoxb-[A-Za-z0-9_-]+$",
-      formatHint: "Slack bot tokens start with 'xoxb-' (e.g. xoxb-1234-5678-abcdef).",
+      formatHint: "Slack bot tokens start with 'xoxb-' (e.g. xoxb-<workspace>-<bot>-<redacted>).",
       prompt: {
         label: "Slack Bot Token",
         help: "Slack API → Your Apps → OAuth & Permissions → Bot User OAuth Token (xoxb-...).",
@@ -32,7 +32,7 @@ export const slackManifest = {
       required: true,
       envKey: "SLACK_APP_TOKEN",
       formatPattern: "^xapp-[A-Za-z0-9_-]+$",
-      formatHint: "Slack app tokens start with 'xapp-' (e.g. xapp-1-A0000-12345-abcdef).",
+      formatHint: "Slack app tokens start with 'xapp-' (e.g. xapp-<version>-<app-id>-<team-id>-<redacted>).",
       prompt: {
         label: "Slack App Token (Socket Mode)",
         help: "Slack API → Your Apps → Basic Information → App-Level Tokens (xapp-...).",
