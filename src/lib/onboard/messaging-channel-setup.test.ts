@@ -3,6 +3,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { prompt } from "../credentials/store";
 import { KNOWN_CHANNELS } from "../sandbox/channels";
 import { setupSelectedMessagingChannels } from "./messaging-channel-setup";
 
@@ -51,5 +52,30 @@ describe("setupSelectedMessagingChannels", () => {
     expect(output).toContain("/setprivacy -> your bot -> Disable");
     expect(output).toContain("remove and re-add the bot to each group");
     expect(output).toContain("reply mode already set: @mentions only");
+  });
+
+  it("prompts for Slack channel IDs with channel-specific copy", async () => {
+    process.env.SLACK_BOT_TOKEN = "xoxb-1234-test";
+    process.env.SLACK_APP_TOKEN = "xapp-1-A0000-12345-test";
+    process.env.SLACK_ALLOWED_USERS = "U01ABC2DEF3";
+    vi.mocked(prompt).mockResolvedValueOnce("C012AB3CD,C987ZY6XW");
+    const logs: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((message = "") => {
+      logs.push(String(message));
+    });
+
+    await setupSelectedMessagingChannels(
+      ["slack"],
+      new Set(["slack"]),
+      [{ name: "slack", ...KNOWN_CHANNELS.slack }],
+    );
+
+    expect(process.env.SLACK_ALLOWED_CHANNELS).toBe("C012AB3CD,C987ZY6XW");
+    expect(vi.mocked(prompt)).toHaveBeenCalledWith(
+      "  Slack Channel IDs (comma-separated allowlist): ",
+    );
+    const output = logs.join("\n");
+    expect(output).toContain("Slack channel IDs");
+    expect(output).toContain("channel IDs saved");
   });
 });

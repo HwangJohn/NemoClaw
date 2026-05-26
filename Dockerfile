@@ -395,6 +395,11 @@ ARG NEMOCLAW_TELEGRAM_CONFIG_B64=e30=
 # metadata only — the bot token flows through the OpenShell provider, never
 # baked into the image. Default: empty map.
 ARG NEMOCLAW_WECHAT_CONFIG_B64=e30=
+# Base64-encoded JSON Slack config (e.g.
+# {"allowedChannels":["C012AB3CD","C987ZY6XW"]}).
+# Channel IDs scope Slack channel @mention handling. User allowlists still come
+# from NEMOCLAW_MESSAGING_ALLOWED_IDS_B64. Default: empty map.
+ARG NEMOCLAW_SLACK_CONFIG_B64=e30=
 # Set to "1" to force-disable device-pairing auth. Also auto-disabled when
 # CHAT_UI_URL is a non-loopback address (Brev Launchable, remote deployments)
 # since terminal-based pairing is impossible in those contexts.
@@ -442,6 +447,7 @@ ENV NEMOCLAW_MODEL=${NEMOCLAW_MODEL} \
     NEMOCLAW_DISCORD_GUILDS_B64=${NEMOCLAW_DISCORD_GUILDS_B64} \
     NEMOCLAW_TELEGRAM_CONFIG_B64=${NEMOCLAW_TELEGRAM_CONFIG_B64} \
     NEMOCLAW_WECHAT_CONFIG_B64=${NEMOCLAW_WECHAT_CONFIG_B64} \
+    NEMOCLAW_SLACK_CONFIG_B64=${NEMOCLAW_SLACK_CONFIG_B64} \
     NEMOCLAW_OPENCLAW_WECHAT_PLUGIN_PREINSTALLED=1 \
     NEMOCLAW_DISABLE_DEVICE_AUTH=${NEMOCLAW_DISABLE_DEVICE_AUTH} \
     NEMOCLAW_PROXY_HOST=${NEMOCLAW_PROXY_HOST} \

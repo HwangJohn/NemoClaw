@@ -174,5 +174,21 @@ export async function setupSelectedMessagingChannels(
         }
       }
     }
+    if (ch.channelIdEnvKey && (!ch.serverIdEnvKey || process.env[ch.serverIdEnvKey])) {
+      const existingChannelIds = getMessagingConfigValue(ch.channelIdEnvKey) || "";
+      if (existingChannelIds) {
+        process.env[ch.channelIdEnvKey] = existingChannelIds;
+        console.log(`  ✓ ${ch.name} — channel IDs already set: ${existingChannelIds}`);
+      } else {
+        console.log(`  ${ch.channelIdHelp}`);
+        const channelIds = (await prompt(`  ${ch.channelIdLabel}: `)).trim();
+        if (channelIds) {
+          process.env[ch.channelIdEnvKey] = channelIds;
+          console.log(`  ✓ ${ch.name} channel IDs saved`);
+        } else {
+          console.log(`  Skipped ${ch.name} channel IDs (channel @mentions stay disabled)`);
+        }
+      }
+    }
   }
 }
