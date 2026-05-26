@@ -8,6 +8,7 @@ import type {
 } from "../hooks";
 import {
   BUILT_IN_MESSAGING_HOOK_REGISTRY,
+  COMMON_TOKEN_PASTE_HOOK_HANDLER_ID,
   MessagingHookRegistry,
   runMessagingHook,
 } from "../hooks";
@@ -337,6 +338,8 @@ function shouldRunEnrollmentHook(
   hook: ChannelHookSpec,
   inputs: readonly SandboxMessagingInputReference[],
 ): boolean {
+  if (hook.handler === COMMON_TOKEN_PASTE_HOOK_HANDLER_ID) return true;
+
   const outputs = hook.outputs ?? [];
   if (outputs.length === 0) return true;
 

@@ -9,7 +9,6 @@ import {
 import {
   type ChannelInputSpec,
   type ChannelManifest,
-  type ChannelSecretInputSpec,
   createBuiltInChannelManifestRegistry,
   getMessagingManifestAvailabilityContext,
   hasMessagingManifestRequiredInputs,
@@ -160,15 +159,6 @@ export async function setupSelectedMessagingChannels(
     return plan;
   }
 
-  for (const channelId of selectedChannels) {
-    const manifest = registry.get(channelId);
-    if (!manifest) continue;
-    if (hasMessagingManifestRequiredInputs(manifest, getMessagingInputValue)) {
-      printExistingSecretStatus(manifest);
-      printEnrollmentNotes(manifest);
-    }
-  }
-
   const plan = await planner.planOnboard({
     sandboxName,
     agent,
@@ -309,34 +299,11 @@ function buildCredentialAvailability(
   return availability;
 }
 
-function printExistingSecretStatus(manifest: ChannelManifest): void {
-  const secretInputs = manifest.inputs.filter(
-    (entry): entry is ChannelSecretInputSpec => entry.kind === "secret",
-  );
-  for (const input of secretInputs) {
-    if (input.id === "botToken") {
-      console.log(`  ✓ ${manifest.id} — already configured`);
-    } else {
-      console.log(`  ✓ ${manifest.id} ${tokenNoun(input.id)} — already configured`);
-    }
-  }
-}
-
-function printEnrollmentNotes(manifest: ChannelManifest): void {
-  for (const line of manifest.enrollmentNotes ?? []) {
-    console.log(`  ${line}`);
-  }
-}
-
 function printInSandboxQrStatus(manifest: ChannelManifest): void {
   logEnrollmentHelp(manifest);
   console.log(
     `  ✓ ${manifest.id} enabled — complete QR pairing from inside the sandbox after rebuild.`,
   );
-}
-
-function tokenNoun(inputId: string): string {
-  return inputId === "appToken" ? "app token" : "token";
 }
 
 function resolveMessagingSetupSandboxName(
