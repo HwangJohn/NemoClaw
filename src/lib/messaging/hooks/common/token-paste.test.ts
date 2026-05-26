@@ -7,15 +7,17 @@ import { slackManifest, telegramManifest } from "../../channels";
 import { runMessagingHook } from "../hook-runner";
 import { MessagingHookRegistry } from "../registry";
 import {
+  COMMON_CONFIG_PROMPT_HOOK_HANDLER_ID,
   COMMON_TOKEN_PASTE_HOOK_HANDLER_ID,
   COMMON_HOOK_REGISTRATIONS,
   createTokenPasteHook,
-} from "./token-paste";
+} from "./index";
 
 describe("common token-paste hook implementation", () => {
   it("uses the shared handler id declared by token-paste channel manifests", () => {
     expect(COMMON_HOOK_REGISTRATIONS.map((registration) => registration.id)).toEqual([
       COMMON_TOKEN_PASTE_HOOK_HANDLER_ID,
+      COMMON_CONFIG_PROMPT_HOOK_HANDLER_ID,
     ]);
     expect(telegramManifest.hooks[0]?.handler).toBe(COMMON_TOKEN_PASTE_HOOK_HANDLER_ID);
     expect(slackManifest.hooks[0]?.handler).toBe(COMMON_TOKEN_PASTE_HOOK_HANDLER_ID);

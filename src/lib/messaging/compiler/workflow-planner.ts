@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { MessagingHookRegistry } from "../hooks";
+import { BUILT_IN_MESSAGING_HOOK_REGISTRY } from "../hooks";
 import type {
   ChannelManifestRegistry,
   MessagingAgentId,
@@ -38,11 +38,8 @@ export interface MessagingWorkflowPlannerChannelContext
 export class MessagingWorkflowPlanner {
   private readonly compiler: ManifestCompiler;
 
-  constructor(
-    private readonly registry: ChannelManifestRegistry,
-    hooks = new MessagingHookRegistry(),
-  ) {
-    this.compiler = new ManifestCompiler(registry, hooks);
+  constructor(private readonly registry: ChannelManifestRegistry) {
+    this.compiler = new ManifestCompiler(registry, BUILT_IN_MESSAGING_HOOK_REGISTRY);
   }
 
   async planOnboard(

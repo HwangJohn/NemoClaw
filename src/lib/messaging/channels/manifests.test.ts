@@ -10,7 +10,10 @@ import {
   buildMessagingEnvLines,
 } from "../../../../agents/hermes/config/messaging-config.ts";
 import { getChannelTokenKeys, KNOWN_CHANNELS, knownChannelNames } from "../../sandbox/channels";
-import { COMMON_TOKEN_PASTE_HOOK_HANDLER_ID } from "../hooks/common";
+import {
+  COMMON_CONFIG_PROMPT_HOOK_HANDLER_ID,
+  COMMON_TOKEN_PASTE_HOOK_HANDLER_ID,
+} from "../hooks/common";
 import type { ChannelInputSpec, ChannelManifest, ChannelRenderSpec } from "../manifest";
 import {
   BUILT_IN_CHANNEL_MANIFESTS,
@@ -58,6 +61,21 @@ function expectTokenPasteEnrollHook(manifest: ChannelManifest, outputIds: readon
   });
 }
 
+function expectConfigPromptEnrollHook(
+  manifest: ChannelManifest,
+  outputIds: readonly string[],
+): void {
+  expect(manifest.hooks).toContainEqual({
+    id: `${manifest.id}-config-prompt`,
+    phase: "enroll",
+    handler: COMMON_CONFIG_PROMPT_HOOK_HANDLER_ID,
+    outputs: outputIds.map((id) => ({
+      id,
+      kind: "config",
+    })),
+  });
+}
+
 describe("built-in channel manifests", () => {
   it("registers the phase-1 built-in manifests without consuming them in workflows", () => {
     const registry = createBuiltInChannelManifestRegistry();
@@ -99,6 +117,7 @@ describe("built-in channel manifests", () => {
       "src/lib/messaging/channels/wechat/hooks/seed-openclaw-account.ts",
       "src/lib/messaging/channels/slack/manifest.ts",
       "src/lib/messaging/channels/whatsapp/manifest.ts",
+      "src/lib/messaging/hooks/common/config-prompt.ts",
       "src/lib/messaging/hooks/common/token-paste.ts",
     ];
     const forbiddenImports = [
@@ -194,13 +213,7 @@ describe("built-in channel manifests", () => {
     expect(renderJson(telegramManifest)).toContain("channels.telegram.groups");
     expect(renderJson(telegramManifest)).toContain("telegramConfig.requireMention");
     expectTokenPasteEnrollHook(telegramManifest, ["botToken"]);
-    expect(telegramManifest.hooks).toContainEqual({
-      id: "telegram-reachability",
-      phase: "reachability-check",
-      handler: "telegram.getMeReachability",
-      inputs: ["botToken"],
-      onFailure: "abort",
-    });
+    expectConfigPromptEnrollHook(telegramManifest, ["requireMention", "allowedIds"]);
   });
 
   it("declares Discord guild and allowlist render intent for both agents", () => {
@@ -253,6 +266,7 @@ describe("built-in channel manifests", () => {
     expect(renderJson(discordManifest)).toContain("discord.guilds");
     expect(renderJson(discordManifest)).toContain("require_mention");
     expectTokenPasteEnrollHook(discordManifest, ["botToken"]);
+    expectConfigPromptEnrollHook(discordManifest, ["serverId", "requireMention", "userId"]);
   });
 
   it("declares Slack Bolt-compatible placeholders and allowlist render intent", () => {
@@ -300,6 +314,7 @@ describe("built-in channel manifests", () => {
     expect(renderJson(slackManifest)).toContain("channels.slack.accounts.default");
     expect(renderJson(slackManifest)).toContain("allowedIds.slack.channels");
     expectTokenPasteEnrollHook(slackManifest, ["botToken", "appToken"]);
+    expectConfigPromptEnrollHook(slackManifest, ["allowedUsers"]);
   });
 
   it("declares WeChat host-QR hooks, state hydration, provider binding, and Hermes env intent", () => {
@@ -366,10 +381,12 @@ describe("built-in channel manifests", () => {
     expect(renderJson(wechatManifest)).toContain("credential.wechatBotToken.placeholder");
     expect(wechatManifest.hooks.map((hook) => hook.handler)).toEqual([
       "wechat.ilinkLogin",
+      "common.configPrompt",
       "wechat.seedOpenClawAccount",
       "wechat.healthCheck",
     ]);
-    expect(wechatManifest.hooks[1]?.outputs).toEqual(
+    expectConfigPromptEnrollHook(wechatManifest, ["allowedIds"]);
+    expect(wechatManifest.hooks[2]?.outputs).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           id: "openclawWeixinAccountFile",
@@ -381,7 +398,7 @@ describe("built-in channel manifests", () => {
         }),
       ]),
     );
-    expect(wechatManifest.hooks[2]).toMatchObject({
+    expect(wechatManifest.hooks[3]).toMatchObject({
       id: "wechat-health-check",
       phase: "health-check",
       handler: "wechat.healthCheck",

@@ -1675,6 +1675,7 @@ const { setupMessagingChannels } = require(${onboardPath});
   delete process.env.TELEGRAM_BOT_TOKEN;
   delete process.env.DISCORD_BOT_TOKEN;
   delete process.env.SLACK_BOT_TOKEN;
+  delete process.env.SLACK_APP_TOKEN;
   const result = await setupMessagingChannels();
   console.log(JSON.stringify(result));
 })().catch((error) => {
@@ -1695,6 +1696,7 @@ const { setupMessagingChannels } = require(${onboardPath});
           TELEGRAM_BOT_TOKEN: "",
           DISCORD_BOT_TOKEN: "",
           SLACK_BOT_TOKEN: "",
+          SLACK_APP_TOKEN: "",
         },
       });
 

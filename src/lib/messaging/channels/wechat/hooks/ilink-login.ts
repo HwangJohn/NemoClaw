@@ -16,7 +16,11 @@ export interface WechatLoginCredentials {
 }
 
 export type WechatLoginResult =
-  | { readonly kind: "ok"; readonly credentials: WechatLoginCredentials }
+  | {
+      readonly kind: "ok";
+      readonly credentials: WechatLoginCredentials;
+      readonly summary?: string;
+    }
   | { readonly kind: "timeout" }
   | { readonly kind: "expired"; readonly reason?: string }
   | { readonly kind: "aborted" }
@@ -28,6 +32,7 @@ export interface WechatIlinkLoginHookOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly runLogin?: () => Promise<WechatLoginResult>;
   readonly saveCredential?: (key: string, value: string) => void;
+  readonly log?: (message: string) => void;
 }
 
 export function createWechatIlinkLoginHook(
@@ -42,7 +47,9 @@ export function createWechatIlinkLoginHook(
     }
     const result = await runLogin();
     if (result.kind !== "ok") {
-      throw new Error(`WeChat host QR login failed: ${wechatFailureReason(result)}.`);
+      const reason = wechatFailureReason(result);
+      (options.log ?? console.log)(`  Skipped ${context.channelId} (${reason})`);
+      throw new Error(`WeChat host QR login failed: ${reason}.`);
     }
 
     const env = options.env ?? process.env;
@@ -59,6 +66,8 @@ export function createWechatIlinkLoginHook(
     env.WECHAT_ACCOUNT_ID = accountId;
     if (baseUrl) env.WECHAT_BASE_URL = baseUrl;
     if (userId) env.WECHAT_USER_ID = userId;
+    const suffix = result.summary ? ` (${result.summary})` : "";
+    (options.log ?? console.log)(`  ✓ ${context.channelId} token saved${suffix}`);
 
     const outputs: Record<string, MessagingHookOutputMap[string]> = {
       botToken: {

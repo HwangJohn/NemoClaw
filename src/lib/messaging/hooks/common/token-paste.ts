@@ -6,8 +6,12 @@ import type {
   MessagingHookOutputMap,
   MessagingHookRegistration,
 } from "../types";
-import { getChannelDef } from "../../../sandbox/channels";
-import type { ChannelHookOutputSpec } from "../../manifest";
+import { createBuiltInChannelManifestRegistry } from "../../channels";
+import type {
+  ChannelHookOutputSpec,
+  ChannelManifest,
+  ChannelSecretInputSpec,
+} from "../../manifest";
 
 export const COMMON_TOKEN_PASTE_HOOK_HANDLER_ID = "common.tokenPaste";
 
@@ -34,6 +38,7 @@ export interface TokenPasteHookOptions {
 export function createTokenPasteHook(options: TokenPasteHookOptions = {}): MessagingHookHandler {
   return async (context) => {
     const outputs: Record<string, MessagingHookOutputMap[string]> = {};
+    const manifest = createBuiltInChannelManifestRegistry().get(context.channelId);
 
     for (const output of context.outputDeclarations ?? []) {
       if (output.kind !== "secret") continue;
@@ -43,32 +48,36 @@ export function createTokenPasteHook(options: TokenPasteHookOptions = {}): Messa
           `No token-paste field registered for ${context.channelId}.${output.id}`,
         );
       }
-      const token = await resolveTokenValue(field, options);
+      const resolved = await resolveTokenValue(context.channelId, output, field, options);
       outputs[output.id] = {
         kind: "secret",
-        value: token,
+        value: resolved.token,
       };
+      logTokenStatus(context.channelId, output, resolved.source, options);
+      if (isPrimarySecretOutput(manifest, output)) {
+        logEnrollmentNotes(manifest, options);
+      }
     }
 
     return { outputs };
   };
 }
 
-export function createCommonHookRegistrations(
+export function createTokenPasteHookRegistration(
   options: TokenPasteHookOptions = {},
-): readonly MessagingHookRegistration[] {
-  return [
-    {
-      id: COMMON_TOKEN_PASTE_HOOK_HANDLER_ID,
-      handler: createTokenPasteHook(options),
-    },
-  ] as const;
+): MessagingHookRegistration {
+  return {
+    id: COMMON_TOKEN_PASTE_HOOK_HANDLER_ID,
+    handler: createTokenPasteHook(options),
+  };
 }
 
 async function resolveTokenValue(
+  channelId: string,
+  output: ChannelHookOutputSpec,
   field: TokenPasteField,
   options: TokenPasteHookOptions,
-): Promise<string> {
+): Promise<{ readonly token: string; readonly source: "existing" | "prompted" }> {
   const env = options.env ?? process.env;
   const readCredential = options.getCredential ?? (() => null);
   const writeCredential = options.saveCredential ?? (() => {});
@@ -76,14 +85,24 @@ async function resolveTokenValue(
   const log = options.log ?? ((message: string) => console.log(message));
 
   let token = normalizeCredentialValue(env[field.envKey]) || readCredential(field.envKey);
+  let source: "existing" | "prompted" = "existing";
   if (!token) {
-    if (field.help) log(`  ${field.help}`);
+    if (field.help) {
+      log("");
+      log(`  ${field.help}`);
+    }
     token = normalizeCredentialValue(await prompt(`  ${field.label}: `, { secret: true }));
+    source = "prompted";
   }
   if (!token) {
+    log(formatSkippedNoTokenMessage(channelId, output));
     throw new Error(`No token entered for ${field.envKey}.`);
   }
   if (field.format && !field.format.test(token)) {
+    log(
+      `  ✗ Invalid format. ${field.formatHint || "Check the token and try again."}`,
+    );
+    log(formatSkippedInvalidTokenMessage(channelId, output));
     throw new Error(
       `Invalid token format for ${field.envKey}. ${
         field.formatHint || "Check the token and try again."
@@ -93,7 +112,7 @@ async function resolveTokenValue(
 
   writeCredential(field.envKey, token);
   env[field.envKey] = token;
-  return token;
+  return { token, source };
 }
 
 async function missingPhaseOnePrompt(): Promise<string> {
@@ -115,30 +134,90 @@ function resolveTokenPasteField(
   const custom = options.resolveField?.(channelId, output);
   if (custom) return custom;
 
-  const channel = getChannelDef(channelId);
-  if (!channel) return null;
-  if (output.id === "botToken" && "envKey" in channel && channel.envKey) {
-    return {
-      envKey: channel.envKey,
-      label: channel.label,
-      help: channel.help,
-      format: channel.tokenFormat,
-      formatHint: channel.tokenFormatHint,
-    };
-  }
-  if (output.id === "appToken" && "appTokenEnvKey" in channel && channel.appTokenEnvKey) {
-    return {
-      envKey: channel.appTokenEnvKey,
-      label: channel.appTokenLabel ?? `${channel.label} App Token`,
-      help: channel.appTokenHelp,
-      format: channel.appTokenFormat,
-      formatHint: channel.appTokenFormatHint,
-    };
-  }
-  return null;
+  const manifest = createBuiltInChannelManifestRegistry().get(channelId);
+  return manifest ? resolveManifestTokenPasteField(manifest, output) : null;
+}
+
+function resolveManifestTokenPasteField(
+  manifest: ChannelManifest,
+  output: ChannelHookOutputSpec,
+): TokenPasteField | null {
+  const input = manifest.inputs.find(
+    (entry): entry is ChannelSecretInputSpec =>
+      entry.kind === "secret" && entry.id === output.id,
+  );
+  if (!input?.envKey) return null;
+  return {
+    envKey: input.envKey,
+    label: input.prompt?.label ?? input.envKey,
+    help: input.prompt?.help,
+    format: input.formatPattern ? new RegExp(input.formatPattern) : undefined,
+    formatHint: input.formatHint,
+  };
 }
 
 export const tokenPasteHook = createTokenPasteHook();
 
-export const COMMON_HOOK_REGISTRATIONS: readonly MessagingHookRegistration[] =
-  createCommonHookRegistrations();
+function logTokenStatus(
+  channelId: string,
+  output: ChannelHookOutputSpec,
+  source: "existing" | "prompted",
+  options: TokenPasteHookOptions,
+): void {
+  const log = options.log ?? ((message: string) => console.log(message));
+  if (source === "existing") {
+    log(
+      output.id === "botToken"
+        ? `  ✓ ${channelId} — already configured`
+        : `  ✓ ${channelId} ${tokenNoun(output)} — already configured`,
+    );
+    return;
+  }
+  log(`  ✓ ${channelId} ${tokenNoun(output)} saved`);
+}
+
+function logEnrollmentNotes(
+  manifest: ChannelManifest | undefined,
+  options: TokenPasteHookOptions,
+): void {
+  const log = options.log ?? ((message: string) => console.log(message));
+  for (const line of manifest?.enrollmentNotes ?? []) {
+    log(`  ${line}`);
+  }
+}
+
+function isPrimarySecretOutput(
+  manifest: ChannelManifest | undefined,
+  output: ChannelHookOutputSpec,
+): boolean {
+  return (
+    manifest?.inputs.find(
+      (input): input is ChannelSecretInputSpec =>
+        input.kind === "secret" && input.required && Boolean(input.envKey),
+    )?.id === output.id
+  );
+}
+
+function tokenNoun(output: ChannelHookOutputSpec): string {
+  return output.id === "appToken" ? "app token" : "token";
+}
+
+function formatSkippedNoTokenMessage(
+  channelId: string,
+  output: ChannelHookOutputSpec,
+): string {
+  if (output.id === "appToken") {
+    return `  Skipped ${channelId} app token (Socket Mode requires both tokens)`;
+  }
+  return `  Skipped ${channelId} (no token entered)`;
+}
+
+function formatSkippedInvalidTokenMessage(
+  channelId: string,
+  output: ChannelHookOutputSpec,
+): string {
+  if (output.id === "appToken") {
+    return `  Skipped ${channelId} app token (invalid token format)`;
+  }
+  return `  Skipped ${channelId} (invalid token format)`;
+}

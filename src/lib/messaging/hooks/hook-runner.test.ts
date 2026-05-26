@@ -30,36 +30,11 @@ const HOST_QR_HOOK = {
 
 describe("MessagingHookRegistry", () => {
   it("constructs the production built-in hook registry", () => {
-    const registry = createBuiltInMessagingHookRegistry({
-      common: {
-        prompt: async () => "unused",
-      },
-      telegram: {
-        fetch: async () => ({
-          ok: true,
-          status: 200,
-          async json() {
-            return { ok: true };
-          },
-          async text() {
-            return "";
-          },
-        }),
-      },
-      wechat: {
-        ilinkLogin: {
-          runLogin: async () => ({
-            kind: "timeout",
-          }),
-        },
-        seedOpenClawAccount: {
-          now: () => "2026-01-01T00:00:00.000Z",
-        },
-      },
-    });
+    const registry = createBuiltInMessagingHookRegistry();
 
     expect(registry.listIds()).toEqual([
       "common.tokenPaste",
+      "common.configPrompt",
       "telegram.getMeReachability",
       "wechat.ilinkLogin",
       "wechat.seedOpenClawAccount",

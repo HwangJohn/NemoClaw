@@ -3,6 +3,7 @@
 
 import type {
   ChannelHookSpec,
+  ChannelHookOutputSpec,
   ChannelInputSpec,
   ChannelManifest,
   ChannelManifestRegistry,
@@ -14,7 +15,11 @@ import type {
   SandboxMessagingInputReference,
   SandboxMessagingPlan,
 } from "../manifest";
-import { MessagingHookRegistry, runMessagingHook } from "../hooks";
+import {
+  BUILT_IN_MESSAGING_HOOK_REGISTRY,
+  MessagingHookRegistry,
+  runMessagingHook,
+} from "../hooks";
 import type {
   MessagingHookInputMap,
   MessagingHookOutputMap,
@@ -31,7 +36,7 @@ import type { ManifestCompilerContext } from "./types";
 export class ManifestCompiler {
   constructor(
     private readonly registry: ChannelManifestRegistry,
-    private readonly hooks = new MessagingHookRegistry(),
+    private readonly hooks = BUILT_IN_MESSAGING_HOOK_REGISTRY,
   ) {}
 
   async compile(context: ManifestCompilerContext): Promise<SandboxMessagingPlan> {
@@ -178,8 +183,8 @@ async function resolveChannelInputs(
   readonly skipped: boolean;
 }> {
   let inputs = manifest.inputs.map((input) => resolveChannelInput(manifest, input, context));
-  let hookInputs = buildCompilerHookInputs(manifest, inputs);
   inputs = applyCredentialAvailability(manifest, inputs, context);
+  let hookInputs = buildCompilerHookInputs(manifest, inputs);
   const enrollmentHooks = options.runEnrollment
     ? manifest.hooks
         .filter((hook) => isHookForAgent(hook, context.agent))
@@ -188,6 +193,7 @@ async function resolveChannelInputs(
 
   let skipped = false;
   for (const hook of enrollmentHooks) {
+    if (!shouldRunEnrollmentHook(hook, inputs)) continue;
     const result = await runCompilerHook(manifest, hook, hooks, hookInputs);
     if (!result) {
       skipped = true;
@@ -315,6 +321,37 @@ function hasRequiredInputsAvailable(
       ? resolved.credentialAvailable === true
       : resolved.value !== undefined;
   });
+}
+
+function shouldRunEnrollmentHook(
+  hook: ChannelHookSpec,
+  inputs: readonly SandboxMessagingInputReference[],
+): boolean {
+  const outputs = hook.outputs ?? [];
+  if (outputs.length === 0) return true;
+
+  const requiredOutputs = outputs.filter((output) => output.required);
+  if (requiredOutputs.length > 0) {
+    return requiredOutputs.some((output) => !isHookOutputAvailable(output, inputs));
+  }
+
+  if (outputs.every((output) => output.kind === "config")) return true;
+  return outputs.some((output) => !isHookOutputAvailable(output, inputs));
+}
+
+function isHookOutputAvailable(
+  output: ChannelHookOutputSpec,
+  inputs: readonly SandboxMessagingInputReference[],
+): boolean {
+  const input = inputs.find((entry) => entry.inputId === output.id);
+  if (!input) return false;
+  if (output.kind === "secret") {
+    return input.kind === "secret" && input.credentialAvailable === true;
+  }
+  if (output.kind === "config") {
+    return input.kind === "config" && input.value !== undefined;
+  }
+  return false;
 }
 
 function buildCompilerHookInputs(

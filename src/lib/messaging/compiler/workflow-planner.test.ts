@@ -1,64 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createBuiltInChannelManifestRegistry } from "../channels";
-import { createBuiltInMessagingHookRegistry, MessagingHookRegistry } from "../hooks";
 import { MessagingWorkflowPlanner } from "./workflow-planner";
 
-const TEST_CREDENTIALS: Readonly<Record<string, string>> = {
-  TELEGRAM_BOT_TOKEN: "123456:test-telegram-token",
-  DISCORD_BOT_TOKEN: "test-discord-token",
-  WECHAT_BOT_TOKEN: "test-wechat-token",
-  SLACK_BOT_TOKEN: "xoxb-test-slack-token",
-  SLACK_APP_TOKEN: "xapp-test-slack-token",
-};
-const TEST_WECHAT_LOGIN = {
-  token: "test-wechat-token",
-  accountId: "test-wechat-account",
-  baseUrl: "https://ilinkai.wechat.example",
-  userId: "test-wechat-user",
-} as const;
-
 function planner(): MessagingWorkflowPlanner {
-  return new MessagingWorkflowPlanner(
-    createBuiltInChannelManifestRegistry(),
-    createBuiltInMessagingHookRegistry({
-      common: {
-        env: {},
-        getCredential: (key) => TEST_CREDENTIALS[key] ?? null,
-        saveCredential: () => {},
-        prompt: async () => "unused",
-        log: () => {},
-      },
-      telegram: {
-        fetch: async () => ({
-          ok: true,
-          status: 200,
-          async json() {
-            return { ok: true };
-          },
-          async text() {
-            return "";
-          },
-        }),
-      },
-      wechat: {
-        ilinkLogin: {
-          env: {},
-          saveCredential: () => {},
-          runLogin: async () => ({
-            kind: "ok",
-            credentials: TEST_WECHAT_LOGIN,
-          }),
-        },
-        seedOpenClawAccount: {
-          now: () => "2026-01-01T00:00:00.000Z",
-        },
-      },
-    }),
-  );
+  return new MessagingWorkflowPlanner(createBuiltInChannelManifestRegistry());
 }
 
 function findFunctionPaths(value: unknown, prefix = "$"): string[] {
@@ -102,13 +51,37 @@ async function withEnv<T>(
 }
 
 describe("MessagingWorkflowPlanner", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("plans onboard as selected, configured, active channels with enrollment inputs", async () => {
-    const plan = await planner().planOnboard({
-      sandboxName: "demo",
-      agent: "openclaw",
-      isInteractive: true,
-      selectedChannels: ["wechat", "telegram"],
-    });
+    const plan = await withEnv(
+      {
+        TELEGRAM_BOT_TOKEN: "123456:test-telegram-token",
+        TELEGRAM_REQUIRE_MENTION: "1",
+        TELEGRAM_ALLOWED_IDS: "123456789",
+        WECHAT_ACCOUNT_ID: "test-wechat-account",
+        WECHAT_BASE_URL: "https://ilinkai.wechat.example",
+        WECHAT_USER_ID: "test-wechat-user",
+        WECHAT_ALLOWED_IDS: "test-wechat-user",
+      },
+      () =>
+        planner().planOnboard({
+          sandboxName: "demo",
+          agent: "openclaw",
+          isInteractive: true,
+          selectedChannels: ["wechat", "telegram"],
+          credentialAvailability: {
+            TELEGRAM_BOT_TOKEN: true,
+            WECHAT_BOT_TOKEN: true,
+          },
+        }),
+    );
 
     expect(plan.workflow).toBe("onboard");
     expect(plan.channels.map((channel) => channel.channelId)).toEqual([
@@ -146,14 +119,22 @@ describe("MessagingWorkflowPlanner", () => {
   });
 
   it("plans add-channel as a configured active target and clears stale disabled state", async () => {
-    const plan = await planner().planAddChannel({
-      sandboxName: "demo",
-      agent: "openclaw",
-      isInteractive: true,
-      channelId: "slack",
-      configuredChannels: ["telegram"],
-      disabledChannels: ["telegram", "slack"],
-    });
+    const plan = await withEnv(
+      {
+        SLACK_BOT_TOKEN: "xoxb-test-slack-token",
+        SLACK_APP_TOKEN: "xapp-test-slack-token",
+        SLACK_ALLOWED_USERS: "U0123456789",
+      },
+      () =>
+        planner().planAddChannel({
+          sandboxName: "demo",
+          agent: "openclaw",
+          isInteractive: true,
+          channelId: "slack",
+          configuredChannels: ["telegram"],
+          disabledChannels: ["telegram", "slack"],
+        }),
+    );
 
     expect(plan.workflow).toBe("add-channel");
     expect(plan.channels.find((channel) => channel.channelId === "telegram")).toMatchObject({
@@ -172,36 +153,22 @@ describe("MessagingWorkflowPlanner", () => {
   });
 
   it("runs add-channel enrollment only for the selected channel", async () => {
-    const hooks = new MessagingHookRegistry([
+    const plan = await withEnv(
       {
-        id: "common.tokenPaste",
-        handler: (context) => {
-          if (context.channelId === "telegram") {
-            throw new Error("existing channels should not re-enroll");
-          }
-          const outputs: Record<string, { kind: "secret"; value: string }> = {};
-          for (const output of context.outputDeclarations ?? []) {
-            if (output.kind === "secret") {
-              outputs[output.id] = {
-                kind: "secret",
-                value: `test-${context.channelId}-${output.id}`,
-              };
-            }
-          }
-          return { outputs };
-        },
+        TELEGRAM_BOT_TOKEN: undefined,
+        SLACK_BOT_TOKEN: "xoxb-test-slack-token",
+        SLACK_APP_TOKEN: "xapp-test-slack-token",
+        SLACK_ALLOWED_USERS: "U0123456789",
       },
-    ]);
-    const plan = await new MessagingWorkflowPlanner(
-      createBuiltInChannelManifestRegistry(),
-      hooks,
-    ).planAddChannel({
-      sandboxName: "demo",
-      agent: "openclaw",
-      isInteractive: true,
-      channelId: "slack",
-      configuredChannels: ["telegram"],
-    });
+      () =>
+        planner().planAddChannel({
+          sandboxName: "demo",
+          agent: "openclaw",
+          isInteractive: true,
+          channelId: "slack",
+          configuredChannels: ["telegram"],
+        }),
+    );
 
     expect(plan.channels.find((channel) => channel.channelId === "telegram")).toMatchObject({
       active: true,
@@ -213,6 +180,39 @@ describe("MessagingWorkflowPlanner", () => {
         ?.inputs.filter((input) => input.kind === "secret")
         .every((input) => input.credentialAvailable === true),
     ).toBe(true);
+  });
+
+  it("does not re-run host-QR enrollment when required manifest inputs are already available", async () => {
+    await withEnv(
+      {
+        WECHAT_ACCOUNT_ID: "cached-wechat-account",
+        WECHAT_ALLOWED_IDS: "cached-wechat-user",
+      },
+      async () => {
+        const plan = await planner().planOnboard({
+        sandboxName: "demo",
+        agent: "openclaw",
+        isInteractive: true,
+        selectedChannels: ["wechat"],
+        credentialAvailability: {
+          WECHAT_BOT_TOKEN: true,
+        },
+      });
+
+      expect(plan.channels[0]).toMatchObject({
+        channelId: "wechat",
+        active: true,
+        selected: true,
+        configured: true,
+      });
+      expect(plan.channels[0]?.inputs).toContainEqual(
+        expect.objectContaining({
+          inputId: "accountId",
+          value: "cached-wechat-account",
+        }),
+      );
+      },
+    );
   });
 
   it("plans stop-channel by keeping configured state and disabling only that channel", async () => {

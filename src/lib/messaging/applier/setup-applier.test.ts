@@ -19,14 +19,6 @@ import {
   type MessagingPolicyApplyContext,
 } from "./types";
 
-const TEST_CREDENTIALS: Readonly<Record<string, string>> = {
-  TELEGRAM_BOT_TOKEN: "123456:test-telegram-token",
-  DISCORD_BOT_TOKEN: "test-discord-token",
-  WECHAT_BOT_TOKEN: "test-wechat-token",
-  SLACK_BOT_TOKEN: "xoxb-test-slack-token",
-  SLACK_APP_TOKEN: "xapp-test-slack-token",
-};
-
 async function withEnv<T>(
   values: Readonly<Record<string, string | undefined>>,
   run: () => Promise<T>,
@@ -55,42 +47,7 @@ async function withEnv<T>(
 }
 
 function planner(): MessagingWorkflowPlanner {
-  return new MessagingWorkflowPlanner(
-    createBuiltInChannelManifestRegistry(),
-    createBuiltInMessagingHookRegistry({
-      common: {
-        env: {},
-        getCredential: (key) => TEST_CREDENTIALS[key] ?? null,
-        saveCredential: () => {},
-        prompt: async () => "unused",
-        log: () => {},
-      },
-      telegram: {
-        fetch: async () => ({
-          ok: true,
-          status: 200,
-          async json() {
-            return { ok: true };
-          },
-          async text() {
-            return "";
-          },
-        }),
-      },
-      wechat: {
-        ilinkLogin: {
-          env: {},
-          saveCredential: () => {},
-          runLogin: async () => ({
-            kind: "timeout",
-          }),
-        },
-        seedOpenClawAccount: {
-          now: () => "2026-01-01T00:00:00.000Z",
-        },
-      },
-    }),
-  );
+  return new MessagingWorkflowPlanner(createBuiltInChannelManifestRegistry());
 }
 
 async function planOnboard(
@@ -155,6 +112,13 @@ describe("MessagingSetupApplier", () => {
         hookId: "wechat-host-qr",
         phase: "enroll",
         handler: "wechat.ilinkLogin",
+      }),
+      expect.objectContaining({
+        sandboxName: "demo",
+        channelId: "wechat",
+        hookId: "wechat-config-prompt",
+        phase: "enroll",
+        handler: "common.configPrompt",
       }),
     ]);
     expect(MessagingSetupApplier.listHookRequests(plan, "post-agent-install")).toEqual([
@@ -350,33 +314,7 @@ describe("MessagingSetupApplier", () => {
       ["wechat"],
     );
     const registry = createBuiltInMessagingHookRegistry({
-      common: {
-        env: {},
-        getCredential: (key) => TEST_CREDENTIALS[key] ?? null,
-        saveCredential: () => {},
-        prompt: async () => "unused",
-        log: () => {},
-      },
-      telegram: {
-        fetch: async () => ({
-          ok: true,
-          status: 200,
-          async json() {
-            return { ok: true };
-          },
-          async text() {
-            return "";
-          },
-        }),
-      },
       wechat: {
-        ilinkLogin: {
-          env: {},
-          saveCredential: () => {},
-          runLogin: async () => ({
-            kind: "timeout",
-          }),
-        },
         seedOpenClawAccount: {
           now: () => "2026-01-01T00:00:00.000Z",
         },

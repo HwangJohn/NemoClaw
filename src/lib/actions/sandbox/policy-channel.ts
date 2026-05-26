@@ -9,6 +9,7 @@ import { loadAgent, type AgentDefinition } from "../../agent/defs";
 import { CLI_DISPLAY_NAME, CLI_NAME } from "../../cli/branding";
 import { hashCredential } from "../../security/credential-hash";
 import { getCredential, prompt as askPrompt } from "../../credentials/store";
+import { createBuiltInChannelManifestRegistry } from "../../messaging/channels";
 import { recoverNamedGatewayRuntime } from "../../gateway-runtime-action";
 const { isNonInteractive } = require("../../onboard") as { isNonInteractive: () => boolean };
 const onboardProviders = require("../../onboard/providers");
@@ -44,6 +45,8 @@ type ChannelMutationOptions = {
   channel?: string;
   dryRun?: boolean;
 };
+
+const messagingManifestRegistry = createBuiltInChannelManifestRegistry();
 
 const useColor = !process.env.NO_COLOR && !!process.stdout.isTTY;
 const trueColor =
@@ -300,8 +303,11 @@ export function listSandboxChannels(sandboxName: string) {
 // channels-add upsert collides with (i.e. updates) the same provider that
 // a later rebuild would have created from scratch.
 function bridgeProviderName(sandboxName: string, channelName: string, envKey: string): string {
-  if (channelName === "slack" && envKey === "SLACK_APP_TOKEN") {
-    return `${sandboxName}-slack-app`;
+  const credential = messagingManifestRegistry
+    .get(channelName)
+    ?.credentials.find((entry) => entry.providerEnvKey === envKey);
+  if (credential) {
+    return credential.providerName.replaceAll("{sandboxName}", sandboxName);
   }
   return `${sandboxName}-${channelName}-bridge`;
 }

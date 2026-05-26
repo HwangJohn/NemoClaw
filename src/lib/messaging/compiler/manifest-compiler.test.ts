@@ -35,7 +35,7 @@ function compiler(): ManifestCompiler {
         env: {},
         getCredential: (key) => TEST_CREDENTIALS[key] ?? null,
         saveCredential: () => {},
-        prompt: async () => "unused",
+        prompt: async () => "",
         log: () => {},
       },
       telegram: {
@@ -53,6 +53,7 @@ function compiler(): ManifestCompiler {
       wechat: {
         ilinkLogin: {
           env: {},
+          log: () => {},
           saveCredential: () => {},
           runLogin: async () => ({
             kind: "ok",

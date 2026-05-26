@@ -3,12 +3,20 @@
 
 import { describe, expect, it } from "vitest";
 
+import type { ChannelHookSpec } from "../../../manifest";
 import { MessagingHookRegistry, runMessagingHook } from "../../../hooks";
-import { telegramManifest } from "../manifest";
 import {
   createTelegramGetMeReachabilityHook,
   TELEGRAM_GET_ME_REACHABILITY_HOOK_ID,
 } from "./get-me-reachability";
+
+const TELEGRAM_REACHABILITY_HOOK = {
+  id: "telegram-reachability",
+  phase: "reachability-check",
+  handler: TELEGRAM_GET_ME_REACHABILITY_HOOK_ID,
+  inputs: ["botToken"],
+  onFailure: "abort",
+} as const satisfies ChannelHookSpec;
 
 describe("Telegram getMe reachability hook implementation", () => {
   it("calls Telegram getMe without exposing the token in outputs", async () => {
@@ -34,12 +42,8 @@ describe("Telegram getMe reachability hook implementation", () => {
         }),
       },
     ]);
-    const hook = telegramManifest.hooks.find((entry) => entry.phase === "reachability-check");
-
-    if (!hook) throw new Error("missing Telegram reachability hook");
-
     await expect(
-      runMessagingHook(hook, registry, {
+      runMessagingHook(TELEGRAM_REACHABILITY_HOOK, registry, {
         channelId: "telegram",
         inputs: {
           botToken: "123456:telegram-token",
@@ -73,12 +77,8 @@ describe("Telegram getMe reachability hook implementation", () => {
         }),
       },
     ]);
-    const hook = telegramManifest.hooks.find((entry) => entry.phase === "reachability-check");
-
-    if (!hook) throw new Error("missing Telegram reachability hook");
-
     await expect(
-      runMessagingHook(hook, registry, {
+      runMessagingHook(TELEGRAM_REACHABILITY_HOOK, registry, {
         channelId: "telegram",
         inputs: {
           botToken: "bad-token",
