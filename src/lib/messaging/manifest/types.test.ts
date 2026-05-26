@@ -259,7 +259,7 @@ const telegramPlan = {
   healthChecks: [
     {
       channelId: "telegram",
-      phase: "validation",
+      phase: "health-check",
       requiredBefore: "lifecycle-success",
       hookIds: [],
     },

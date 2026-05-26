@@ -226,9 +226,6 @@ describe("ManifestCompiler", () => {
     expect(plan.healthChecks.find((check) => check.channelId === "wechat")?.hookIds).toEqual([
       "wechat-health-check",
     ]);
-    expect(plan.healthChecks.find((check) => check.channelId === "telegram")?.hookIds).toEqual([
-      "telegram-reachability",
-    ]);
     expect(
       plan.agentRender.find(
         (render) => render.channelId === "telegram" && render.kind === "json-fragment",
@@ -523,7 +520,7 @@ describe("ManifestCompiler", () => {
         },
         {
           id: "matrix-host-probe",
-          phase: "validation",
+          phase: "reachability-check",
           handler: "matrix.probeHost",
           inputs: ["roomId"],
           onFailure: "abort",
@@ -596,7 +593,7 @@ describe("ManifestCompiler", () => {
     ]);
     expect(plan.channels[0]?.hooks).toContainEqual(
       expect.objectContaining({
-        phase: "validation",
+        phase: "reachability-check",
         handler: "matrix.probeHost",
       }),
     );

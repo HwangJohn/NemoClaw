@@ -147,7 +147,7 @@ export const telegramManifest = {
     },
     {
       id: "telegram-reachability",
-      phase: "validation",
+      phase: "reachability-check",
       handler: "telegram.getMeReachability",
       inputs: ["botToken"],
       onFailure: "abort",
