@@ -241,7 +241,7 @@ describe("setupMessagingChannels", () => {
     expect(result).toEqual(["telegram", "slack"]);
     expect(steps).toEqual(["5/8 Messaging channels"]);
     expect(notes).toEqual([
-      "  [non-interactive] Messaging tokens detected: telegram, slack",
+      "  [non-interactive] Messaging channel inputs detected: telegram, slack",
     ]);
     expect(checkTelegramReachability).toHaveBeenCalledWith("123456:telegram-token");
     expect(prompt).not.toHaveBeenCalled();
@@ -258,7 +258,41 @@ describe("setupMessagingChannels", () => {
 
     expect(result).toEqual([]);
     expect(notes).toEqual([
-      "  [non-interactive] No messaging tokens configured. Skipping.",
+      "  [non-interactive] No complete messaging channel inputs configured. Skipping.",
+    ]);
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it("skips channels missing required non-secret inputs in non-interactive mode", async () => {
+    process.env.WECHAT_BOT_TOKEN = "wechat-token";
+    process.env.WECHAT_ACCOUNT_ID = "   ";
+    const notes: string[] = [];
+
+    const result = await setupMessagingChannels(null, null, {
+      note: (message) => notes.push(message),
+      isNonInteractive: () => true,
+    });
+
+    expect(result).toEqual([]);
+    expect(notes).toEqual([
+      "  [non-interactive] No complete messaging channel inputs configured. Skipping.",
+    ]);
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it("seeds channels with all required secret and non-secret inputs in non-interactive mode", async () => {
+    process.env.WECHAT_BOT_TOKEN = "wechat-token";
+    process.env.WECHAT_ACCOUNT_ID = "wechat-account";
+    const notes: string[] = [];
+
+    const result = await setupMessagingChannels(null, null, {
+      note: (message) => notes.push(message),
+      isNonInteractive: () => true,
+    });
+
+    expect(result).toEqual(["wechat"]);
+    expect(notes).toEqual([
+      "  [non-interactive] Messaging channel inputs detected: wechat",
     ]);
     expect(prompt).not.toHaveBeenCalled();
   });

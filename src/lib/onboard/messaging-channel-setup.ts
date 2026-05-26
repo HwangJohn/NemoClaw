@@ -8,11 +8,11 @@ import {
 } from "../credentials/store";
 import {
   type ChannelManifest,
+  type ChannelInputSpec,
   type ChannelSecretInputSpec,
   createBuiltInChannelManifestRegistry,
   getMessagingManifestAvailabilityContext,
-  hasMessagingManifestCredentials,
-  hasMessagingManifestPrimaryCredential,
+  hasMessagingManifestRequiredInputs,
   MessagingWorkflowPlanner,
   resolveMessagingManifestSeed,
   type SandboxMessagingPlan,
@@ -32,10 +32,14 @@ export interface SetupMessagingChannelsDeps {
   readonly checkTelegramReachability?: (token: string) => Promise<void>;
 }
 
-type SecretAvailabilitySnapshot = ReadonlyMap<string, ReadonlySet<string>>;
-
 const getMessagingToken = (envKey: string): string | null =>
   normalizeCredentialValue(process.env[envKey]) || getCredential(envKey) || null;
+
+const getMessagingInputValue = (input: ChannelInputSpec): string | null => {
+  if (!input.envKey) return null;
+  if (input.kind === "secret") return getMessagingToken(input.envKey);
+  return normalizeCredentialValue(process.env[input.envKey]) || null;
+};
 
 export async function setupMessagingChannels(
   agent: AgentDefinition | null = null,
@@ -51,15 +55,13 @@ export async function setupMessagingChannels(
   const manifestRegistry = createBuiltInChannelManifestRegistry();
   const availabilityContext = getMessagingManifestAvailabilityContext(agent);
   const availableChannels = manifestRegistry.listAvailable(availabilityContext);
-  const hasManifestCredentials = (manifest: ChannelManifest) =>
-    hasMessagingManifestCredentials(manifest, getMessagingToken);
-  const hasManifestPrimaryCredential = (manifest: ChannelManifest) =>
-    hasMessagingManifestPrimaryCredential(manifest, getMessagingToken);
+  const hasManifestRequiredInputs = (manifest: ChannelManifest) =>
+    hasMessagingManifestRequiredInputs(manifest, getMessagingInputValue);
   const seedFromState = (includeAllExisting = false): string[] =>
     resolveMessagingManifestSeed(
       availableChannels,
       existingChannels,
-      hasManifestCredentials,
+      hasManifestRequiredInputs,
       { includeAllExisting },
     );
 
@@ -67,7 +69,7 @@ export async function setupMessagingChannels(
     const enabled = new Set(seedFromState(false));
     const found = Array.from(enabled);
     if (found.length > 0) {
-      note(`  [non-interactive] Messaging tokens detected: ${found.join(", ")}`);
+      note(`  [non-interactive] Messaging channel inputs detected: ${found.join(", ")}`);
       await setupSelectedMessagingChannels(found, enabled, availableChannels, {
         agent,
         interactive: false,
@@ -79,7 +81,7 @@ export async function setupMessagingChannels(
         }
       }
     } else {
-      note("  [non-interactive] No messaging tokens configured. Skipping.");
+      note("  [non-interactive] No complete messaging channel inputs configured. Skipping.");
     }
     return Array.from(enabled);
   }
@@ -97,7 +99,7 @@ export async function setupMessagingChannels(
     output.write("  Available messaging channels:\n");
     availableChannels.forEach((manifest, i) => {
       const marker = enabled.has(manifest.id) ? "●" : "○";
-      const status = hasManifestPrimaryCredential(manifest) ? " (configured)" : "";
+      const status = hasManifestRequiredInputs(manifest) ? " (configured)" : "";
       output.write(
         `    [${i + 1}] ${marker} ${manifest.id} — ${
           manifest.description ?? manifest.displayName
@@ -171,8 +173,7 @@ export async function setupSelectedMessagingChannels(
   for (const channelId of selectedChannels) {
     const manifest = registry.get(channelId);
     if (!manifest) continue;
-    const initialSecretAvailability = snapshotSecretAvailability(registry, [channelId]);
-    if (hasAllSecretInputsAvailable(manifest, initialSecretAvailability)) {
+    if (hasMessagingManifestRequiredInputs(manifest, getMessagingInputValue)) {
       printExistingSecretStatus(manifest);
       printEnrollmentNotes(manifest);
     }
@@ -308,24 +309,6 @@ function logEnrollmentHelp(manifest: ChannelManifest): void {
   console.log(`  ${help}`);
 }
 
-function snapshotSecretAvailability(
-  registry: ReturnType<typeof createBuiltInChannelManifestRegistry>,
-  channelIds: readonly string[],
-): SecretAvailabilitySnapshot {
-  const availability = new Map<string, Set<string>>();
-  for (const channelId of channelIds) {
-    const manifest = registry.get(channelId);
-    if (!manifest) continue;
-    const availableInputs = new Set<string>();
-    for (const input of manifest.inputs) {
-      if (input.kind !== "secret" || !input.envKey) continue;
-      if (getMessagingToken(input.envKey)) availableInputs.add(input.id);
-    }
-    availability.set(manifest.id, availableInputs);
-  }
-  return availability;
-}
-
 function buildCredentialAvailability(
   registry: ReturnType<typeof createBuiltInChannelManifestRegistry>,
   channelIds: readonly string[],
@@ -344,19 +327,6 @@ function buildCredentialAvailability(
     }
   }
   return availability;
-}
-
-function hasAllSecretInputsAvailable(
-  manifest: ChannelManifest,
-  availability: SecretAvailabilitySnapshot,
-): boolean {
-  const secretInputs = manifest.inputs.filter(
-    (entry): entry is ChannelSecretInputSpec => entry.kind === "secret",
-  );
-  return (
-    secretInputs.length > 0 &&
-    secretInputs.every((input) => availability.get(manifest.id)?.has(input.id) === true)
-  );
 }
 
 function printExistingSecretStatus(manifest: ChannelManifest): void {

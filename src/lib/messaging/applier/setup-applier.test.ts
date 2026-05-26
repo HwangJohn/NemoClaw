@@ -103,7 +103,13 @@ describe("MessagingSetupApplier", () => {
   });
 
   it("lists hook requests by phase without executing hook implementations", async () => {
-    const plan = await planOnboard({ WECHAT_ACCOUNT_ID: "wechat-account" }, ["wechat"]);
+    const plan = await planOnboard(
+      {
+        WECHAT_BOT_TOKEN: "wechat-token",
+        WECHAT_ACCOUNT_ID: "wechat-account",
+      },
+      ["wechat"],
+    );
 
     expect(MessagingSetupApplier.listHookRequests(plan, "enroll")).toEqual([
       expect.objectContaining({
@@ -307,6 +313,7 @@ describe("MessagingSetupApplier", () => {
   it("runs post-install hook implementations and writes their build-file outputs", async () => {
     const plan = await planOnboard(
       {
+        WECHAT_BOT_TOKEN: "wechat-token",
         WECHAT_ACCOUNT_ID: "wechat-account",
         WECHAT_BASE_URL: "https://ilinkai.wechat.example",
         WECHAT_USER_ID: "wechat-user",
@@ -397,7 +404,13 @@ describe("MessagingSetupApplier", () => {
   });
 
   it("rejects prototype-polluting build-file merge keys", async () => {
-    const plan = await planOnboard({ WECHAT_ACCOUNT_ID: "wechat-account" }, ["wechat"]);
+    const plan = await planOnboard(
+      {
+        WECHAT_BOT_TOKEN: "wechat-token",
+        WECHAT_ACCOUNT_ID: "wechat-account",
+      },
+      ["wechat"],
+    );
     const files: Record<string, string> = {
       "/sandbox/.openclaw/openclaw.json": "{}",
     };
@@ -508,7 +521,13 @@ describe("MessagingSetupApplier", () => {
   });
 
   it("rejects unsafe build-file hook output paths and modes", async () => {
-    const plan = await planOnboard({ WECHAT_ACCOUNT_ID: "wechat-account" }, ["wechat"]);
+    const plan = await planOnboard(
+      {
+        WECHAT_BOT_TOKEN: "wechat-token",
+        WECHAT_ACCOUNT_ID: "wechat-account",
+      },
+      ["wechat"],
+    );
     const runOpenshell: MessagingOpenShellRunner = (args, options) => {
       if (args.includes("cat") && options?.input === undefined) {
         return { status: 0, stdout: "{}" };

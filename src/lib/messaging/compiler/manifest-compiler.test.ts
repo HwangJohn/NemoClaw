@@ -235,13 +235,26 @@ describe("ManifestCompiler", () => {
   });
 
   it("compiles Hermes render and manifest-owned WeChat policy intent", async () => {
-    const plan = await compiler().compile({
-      sandboxName: "demo",
-      agent: "hermes",
-      workflow: "rebuild",
-      isInteractive: false,
-      selectedChannels: ALL_CHANNELS,
-    });
+    const plan = await withEnv(
+      {
+        WECHAT_ACCOUNT_ID: "test-wechat-account",
+      },
+      () =>
+        compiler().compile({
+          sandboxName: "demo",
+          agent: "hermes",
+          workflow: "rebuild",
+          isInteractive: false,
+          selectedChannels: ALL_CHANNELS,
+          credentialAvailability: {
+            TELEGRAM_BOT_TOKEN: true,
+            DISCORD_BOT_TOKEN: true,
+            WECHAT_BOT_TOKEN: true,
+            SLACK_BOT_TOKEN: true,
+            SLACK_APP_TOKEN: true,
+          },
+        }),
+    );
 
     expect(plan.networkPolicy.entries.find((entry) => entry.channelId === "wechat")).toEqual({
       channelId: "wechat",
@@ -266,7 +279,38 @@ describe("ManifestCompiler", () => {
       plan.channels
         .find((channel) => channel.channelId === "wechat")
         ?.inputs.find((input) => input.inputId === "accountId"),
-    ).not.toHaveProperty("value");
+    ).toMatchObject({
+      kind: "config",
+      value: "test-wechat-account",
+    });
+  });
+
+  it("does not activate a requested channel while any required manifest input is missing", async () => {
+    const plan = await withEnv(
+      {
+        WECHAT_ACCOUNT_ID: undefined,
+      },
+      () =>
+        compiler().compile({
+          sandboxName: "demo",
+          agent: "hermes",
+          workflow: "onboard",
+          isInteractive: false,
+          selectedChannels: ["wechat"],
+          credentialAvailability: {
+            WECHAT_BOT_TOKEN: true,
+          },
+        }),
+    );
+
+    expect(plan.channels[0]).toMatchObject({
+      channelId: "wechat",
+      active: false,
+      disabled: true,
+    });
+    expect(plan.networkPolicy.entries).toEqual([]);
+    expect(plan.agentRender).toEqual([]);
+    expect(plan.healthChecks).toEqual([]);
   });
 
   it("runs enrollment hooks before returning the final channel input plan", async () => {

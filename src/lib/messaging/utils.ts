@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type {
+  ChannelInputSpec,
   ChannelManifest,
   ChannelManifestAvailabilityContext,
-  ChannelSecretInputSpec,
   MessagingAgentId,
   MessagingChannelId,
 } from "./manifest";
@@ -14,7 +14,7 @@ export interface MessagingAgentDescriptor {
   readonly messagingPlatforms?: readonly MessagingChannelId[] | null;
 }
 
-export type MessagingCredentialResolver = (envKey: string) => string | null;
+export type MessagingInputResolver = (input: ChannelInputSpec) => string | null;
 
 export function toMessagingAgentId(
   agent: MessagingAgentDescriptor | null | undefined,
@@ -37,11 +37,11 @@ export function getMessagingManifestAvailabilityContext(
 export function resolveMessagingManifestSeed(
   manifests: readonly ChannelManifest[],
   existingChannels: readonly string[] | null | undefined,
-  hasChannelCredentials: (manifest: ChannelManifest) => boolean,
+  hasChannelRequiredInputs: (manifest: ChannelManifest) => boolean,
   { includeAllExisting = false }: { readonly includeAllExisting?: boolean } = {},
 ): string[] {
   const seeded = new Set(
-    manifests.filter(hasChannelCredentials).map((manifest) => manifest.id),
+    manifests.filter(hasChannelRequiredInputs).map((manifest) => manifest.id),
   );
   if (!Array.isArray(existingChannels)) return Array.from(seeded);
 
@@ -56,25 +56,18 @@ export function resolveMessagingManifestSeed(
   return Array.from(seeded);
 }
 
-export function hasMessagingManifestCredentials(
+export function hasMessagingManifestRequiredInputs(
   manifest: ChannelManifest,
-  resolveCredential: MessagingCredentialResolver,
+  resolveInput: MessagingInputResolver,
 ): boolean {
-  const requiredSecrets = manifest.inputs.filter(
-    (input): input is ChannelSecretInputSpec =>
-      input.kind === "secret" && input.required && Boolean(input.envKey),
-  );
-  if (requiredSecrets.length === 0) return false;
-  return requiredSecrets.every((input) => Boolean(input.envKey && resolveCredential(input.envKey)));
+  const requiredInputs = manifest.inputs.filter((input) => input.required);
+  if (requiredInputs.length === 0) return false;
+  return requiredInputs.every((input) => {
+    if (!input.envKey) return false;
+    return hasResolvedInputValue(resolveInput(input));
+  });
 }
 
-export function hasMessagingManifestPrimaryCredential(
-  manifest: ChannelManifest,
-  resolveCredential: MessagingCredentialResolver,
-): boolean {
-  const primarySecret = manifest.inputs.find(
-    (input): input is ChannelSecretInputSpec =>
-      input.kind === "secret" && input.required && Boolean(input.envKey),
-  );
-  return Boolean(primarySecret?.envKey && resolveCredential(primarySecret.envKey));
+function hasResolvedInputValue(value: string | null): boolean {
+  return typeof value === "string" && value.trim().length > 0;
 }

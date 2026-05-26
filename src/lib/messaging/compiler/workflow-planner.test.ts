@@ -167,6 +167,9 @@ describe("MessagingWorkflowPlanner", () => {
           isInteractive: true,
           channelId: "slack",
           configuredChannels: ["telegram"],
+          credentialAvailability: {
+            TELEGRAM_BOT_TOKEN: true,
+          },
         }),
     );
 
@@ -222,6 +225,10 @@ describe("MessagingWorkflowPlanner", () => {
       isInteractive: false,
       channelId: "telegram",
       configuredChannels: ["telegram", "slack"],
+      credentialAvailability: {
+        SLACK_BOT_TOKEN: true,
+        SLACK_APP_TOKEN: true,
+      },
     });
 
     expect(plan.workflow).toBe("stop-channel");
@@ -279,6 +286,10 @@ describe("MessagingWorkflowPlanner", () => {
       channelId: "telegram",
       configuredChannels: ["telegram", "wechat", "slack"],
       disabledChannels: ["telegram", "wechat"],
+      credentialAvailability: {
+        SLACK_BOT_TOKEN: true,
+        SLACK_APP_TOKEN: true,
+      },
     });
 
     expect(plan.workflow).toBe("remove-channel");
@@ -293,13 +304,23 @@ describe("MessagingWorkflowPlanner", () => {
   });
 
   it("plans rebuild from configured and disabled registry snapshots", async () => {
-    const plan = await planner().planRebuild({
-      sandboxName: "demo",
-      agent: "openclaw",
-      isInteractive: false,
-      configuredChannels: ["telegram", "discord", "wechat"],
-      disabledChannels: ["discord"],
-    });
+    const plan = await withEnv(
+      {
+        WECHAT_ACCOUNT_ID: "test-wechat-account",
+      },
+      () =>
+        planner().planRebuild({
+          sandboxName: "demo",
+          agent: "openclaw",
+          isInteractive: false,
+          configuredChannels: ["telegram", "discord", "wechat"],
+          disabledChannels: ["discord"],
+          credentialAvailability: {
+            TELEGRAM_BOT_TOKEN: true,
+            WECHAT_BOT_TOKEN: true,
+          },
+        }),
+    );
 
     expect(plan.workflow).toBe("rebuild");
     expect(plan.channels.map((channel) => channel.channelId)).toEqual([

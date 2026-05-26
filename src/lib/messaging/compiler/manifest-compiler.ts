@@ -121,7 +121,8 @@ export class ManifestCompiler {
         context.isInteractive,
       runEnrollmentChecks: selected && requestedActive && isEnrollmentWorkflow(context.workflow),
     });
-    const active = requestedActive && !resolvedInputs.skipped;
+    const requiredInputsAvailable = hasRequiredInputsAvailable(manifest, resolvedInputs.inputs);
+    const active = requestedActive && !resolvedInputs.skipped && requiredInputsAvailable;
 
     return {
       channelId: manifest.id,
@@ -130,7 +131,8 @@ export class ManifestCompiler {
       active,
       selected,
       configured: configured && !resolvedInputs.skipped,
-      disabled: disabled || resolvedInputs.skipped,
+      disabled:
+        disabled || resolvedInputs.skipped || (requestedActive && !requiredInputsAvailable),
       inputs: resolvedInputs.inputs,
       hooks: active
         ? manifest.hooks
@@ -273,7 +275,8 @@ function inputReferenceBase(
 function readInputEnvValue(input: ChannelInputSpec): MessagingSerializableValue | undefined {
   if (!input.envKey) return undefined;
   const value = process.env[input.envKey];
-  return value && value.length > 0 ? value : undefined;
+  const normalized = value?.replace(/\r/g, "").trim();
+  return normalized && normalized.length > 0 ? normalized : undefined;
 }
 
 function readInputStatePath(input: ChannelInputSpec): MessagingStatePath | undefined {
@@ -317,10 +320,14 @@ function hasRequiredInputsAvailable(
     if (!input.required) return true;
     const resolved = byId.get(input.id);
     if (!resolved) return false;
-    return resolved.kind === "secret"
-      ? resolved.credentialAvailable === true
-      : resolved.value !== undefined;
+    return isInputReferenceAvailable(resolved);
   });
+}
+
+function isInputReferenceAvailable(input: SandboxMessagingInputReference): boolean {
+  if (input.kind === "secret") return input.credentialAvailable === true;
+  if (input.value === undefined) return false;
+  return typeof input.value === "string" ? input.value.trim().length > 0 : true;
 }
 
 function shouldRunEnrollmentHook(
