@@ -54,7 +54,11 @@ export interface SandboxStateOptions<Gpu, Agent, WebSearchConfig, MessagingChann
       sandboxName: string | null,
     ): string[] | null;
     getSandboxMessagingChannels(sandboxName: string): string[] | null | undefined;
-    setupMessagingChannels(agent: Agent, existingChannels: string[] | null): Promise<string[]>;
+    setupMessagingChannels(
+      agent: Agent,
+      existingChannels: string[] | null,
+      sandboxName: string,
+    ): Promise<string[]>;
     readMessagingChannelConfigFromEnv(): MessagingChannelConfig | null;
     promptValidatedSandboxName(agent: Agent): Promise<string>;
     selectResourceProfileForSandbox(): Promise<ResourceProfile | null>;
@@ -255,6 +259,7 @@ export async function handleSandboxState<Gpu, Agent, WebSearchConfig, MessagingC
     }
 
     await deps.startRecordedStep("sandbox", { provider, model });
+    if (!sandboxName) sandboxName = await deps.promptValidatedSandboxName(agent);
     const recordedMessagingChannels = deps.getRecordedMessagingChannelsForResume(resume, session, sandboxName);
     if (recordedMessagingChannels) {
       selectedMessagingChannels = recordedMessagingChannels;
@@ -265,7 +270,7 @@ export async function handleSandboxState<Gpu, Agent, WebSearchConfig, MessagingC
       const existing = sandboxName
         ? deps.getSandboxMessagingChannels(sandboxName) ?? session?.messagingChannels ?? null
         : session?.messagingChannels ?? null;
-      selectedMessagingChannels = await deps.setupMessagingChannels(agent, existing);
+      selectedMessagingChannels = await deps.setupMessagingChannels(agent, existing, sandboxName);
     }
     const messagingChannelConfig = deps.readMessagingChannelConfigFromEnv();
     session = deps.updateSession((current) => {
@@ -274,7 +279,6 @@ export async function handleSandboxState<Gpu, Agent, WebSearchConfig, MessagingC
       return current;
     });
 
-    if (!sandboxName) sandboxName = await deps.promptValidatedSandboxName(agent);
     const resourceProfile = await deps.selectResourceProfileForSandbox();
     if (fresh) deps.stopStaleDashboardListenersForSandbox(deps.listRegistrySandboxes().sandboxes, sandboxName);
     sandboxName = await deps.createSandbox(

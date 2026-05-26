@@ -29,6 +29,7 @@ export interface SetupMessagingChannelsDeps {
   readonly step?: (current: number, total: number, label: string) => void;
   readonly note?: (message: string) => void;
   readonly isNonInteractive?: () => boolean;
+  readonly sandboxName?: string | null;
 }
 
 const getMessagingToken = (envKey: string): string | null =>
@@ -71,6 +72,7 @@ export async function setupMessagingChannels(
       await setupSelectedMessagingChannels(found, enabled, availableChannels, {
         agent,
         interactive: false,
+        sandboxName: deps.sandboxName,
       });
     } else {
       note("  [non-interactive] No complete messaging channel inputs configured. Skipping.");
@@ -111,7 +113,10 @@ export async function setupMessagingChannels(
     return [];
   }
 
-  await setupSelectedMessagingChannels(selected, enabled, availableChannels, { agent });
+  await setupSelectedMessagingChannels(selected, enabled, availableChannels, {
+    agent,
+    sandboxName: deps.sandboxName,
+  });
   console.log("");
 
   return Array.from(enabled);
@@ -137,7 +142,7 @@ export async function setupSelectedMessagingChannels(
   if (selectedChannels.length === 0) return null;
 
   const agent = toMessagingAgentId(options.agent);
-  const sandboxName = options.sandboxName || "pending-sandbox";
+  const sandboxName = resolveMessagingSetupSandboxName(options);
   const planner = new MessagingWorkflowPlanner(registry);
 
   if (options.interactive === false) {
@@ -332,4 +337,19 @@ function printInSandboxQrStatus(manifest: ChannelManifest): void {
 
 function tokenNoun(inputId: string): string {
   return inputId === "appToken" ? "app token" : "token";
+}
+
+function resolveMessagingSetupSandboxName(
+  options: SetupSelectedMessagingChannelsOptions,
+): string {
+  const explicitName = normalizeSandboxName(options.sandboxName);
+  if (explicitName) return explicitName;
+  const envName = normalizeSandboxName(process.env.NEMOCLAW_SANDBOX_NAME);
+  if (envName) return envName;
+  return options.agent?.name === "hermes" ? "hermes" : "my-assistant";
+}
+
+function normalizeSandboxName(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
 }

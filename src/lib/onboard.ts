@@ -5876,11 +5876,13 @@ function getRecordedMessagingChannelsForResume(
 async function setupMessagingChannels(
   agent: AgentDefinition | null = null,
   existingChannels: string[] | null = null,
+  sandboxName: string | null = null,
 ): Promise<string[]> {
   return setupMessagingChannelsImpl(agent, existingChannels, {
     step,
     note,
     isNonInteractive,
+    sandboxName,
   });
 }
 

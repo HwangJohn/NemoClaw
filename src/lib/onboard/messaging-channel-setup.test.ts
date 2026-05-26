@@ -259,6 +259,25 @@ describe("setupSelectedMessagingChannels", () => {
     });
     expect(logs.join("\n")).toContain("WhatsApp Web pairs via QR code");
   });
+
+  it("threads the resolved sandbox name into manifest provider bindings", async () => {
+    process.env.TELEGRAM_BOT_TOKEN = "123456:telegram-token";
+
+    const plan = await setupSelectedMessagingChannels(
+      ["telegram"],
+      new Set(["telegram"]),
+      manifests("telegram"),
+      { interactive: false, sandboxName: "actual-sandbox" },
+    );
+
+    expect(plan?.credentialBindings).toContainEqual(
+      expect.objectContaining({
+        channelId: "telegram",
+        providerName: "actual-sandbox-telegram-bridge",
+      }),
+    );
+    expect(JSON.stringify(plan)).not.toContain("pending-sandbox");
+  });
 });
 
 describe("setupMessagingChannels", () => {
