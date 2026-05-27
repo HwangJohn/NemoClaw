@@ -274,6 +274,25 @@ def preserve_signing_artifacts(
                 shutil.copy2(artifact, destination)
 
 
+def validate_preserved_signing_artifacts(
+    existing_root: Path, temp_root: Path, skills: tuple[str, ...]
+) -> None:
+    missing: list[str] = []
+    for skill in skills:
+        existing_skill = existing_root / skill
+        if not existing_skill.exists():
+            continue
+        for artifact_name in sorted(PRESERVED_SIGNING_FILES):
+            if (existing_skill / artifact_name).is_file() and not (
+                temp_root / skill / artifact_name
+            ).is_file():
+                missing.append(f"{skill}/{artifact_name}")
+    if missing:
+        preview = ", ".join(missing[:10])
+        suffix = f" (+{len(missing) - 10} more)" if len(missing) > 10 else ""
+        raise FileNotFoundError(f"Missing preserved signing artifacts: {preview}{suffix}")
+
+
 def render_export(config: CatalogConfig, target_root: Path, preserve_from: Path | None = None) -> None:
     source_root = REPO_ROOT / config.source
     if not source_root.is_dir():
@@ -293,6 +312,7 @@ def render_export(config: CatalogConfig, target_root: Path, preserve_from: Path 
 
     if preserve_from is not None:
         preserve_signing_artifacts(preserve_from, target_root, config.skills)
+        validate_preserved_signing_artifacts(preserve_from, target_root, config.skills)
 
     write_manifest(target_root, config, source_root)
 

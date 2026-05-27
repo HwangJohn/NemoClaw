@@ -24,16 +24,22 @@ function listSkillDirs(root: string): string[] {
 
 describe("catalog skills export", () => {
   it("allows the export to be absent before the first refresh PR", () => {
-    const output = execFileSync("python3", [exporter, "--check", "--allow-missing"], {
-      cwd: repoRoot,
-      encoding: "utf8",
-    });
+    const output = execFileSync(
+      "python3",
+      [exporter, "--check", "--allow-missing"],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+      },
+    );
 
     expect(output).toContain("Catalog export is not present yet");
   });
 
   it("preserves existing signing artifacts when regenerating", () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-catalog-export-"));
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "nemoclaw-catalog-export-"),
+    );
     const cleanup = () => fs.rmSync(tempDir, { recursive: true, force: true });
 
     try {
@@ -42,29 +48,41 @@ describe("catalog skills export", () => {
       const tempSkills = path.join(tempDir, "skills", "nemoclaw");
       fs.mkdirSync(tempAgents, { recursive: true });
       fs.mkdirSync(tempScripts, { recursive: true });
-      fs.cpSync(sourceRoot, path.join(tempAgents, "skills"), { recursive: true });
+      fs.cpSync(sourceRoot, path.join(tempAgents, "skills"), {
+        recursive: true,
+      });
       fs.copyFileSync(
         path.join(repoRoot, ".agents", "catalog-skills.yaml"),
         path.join(tempAgents, "catalog-skills.yaml"),
       );
-      fs.copyFileSync(exporter, path.join(tempScripts, "export-catalog-skills.py"));
+      fs.copyFileSync(
+        exporter,
+        path.join(tempScripts, "export-catalog-skills.py"),
+      );
 
       const signedSkill = path.join(tempSkills, "nemoclaw-user-get-started");
       fs.mkdirSync(signedSkill, { recursive: true });
       fs.writeFileSync(path.join(signedSkill, "skill.oms.sig"), "signature\n");
-      fs.writeFileSync(path.join(signedSkill, "skill-card.md"), "# Signed card\n");
-
-      execFileSync("python3", [path.join(tempScripts, "export-catalog-skills.py")], {
-        cwd: tempDir,
-        encoding: "utf8",
-      });
-
-      expect(fs.readFileSync(path.join(signedSkill, "skill.oms.sig"), "utf8")).toBe(
-        "signature\n",
-      );
-      expect(fs.readFileSync(path.join(signedSkill, "skill-card.md"), "utf8")).toBe(
+      fs.writeFileSync(
+        path.join(signedSkill, "skill-card.md"),
         "# Signed card\n",
       );
+
+      execFileSync(
+        "python3",
+        [path.join(tempScripts, "export-catalog-skills.py")],
+        {
+          cwd: tempDir,
+          encoding: "utf8",
+        },
+      );
+
+      expect(
+        fs.readFileSync(path.join(signedSkill, "skill.oms.sig"), "utf8"),
+      ).toBe("signature\n");
+      expect(
+        fs.readFileSync(path.join(signedSkill, "skill-card.md"), "utf8"),
+      ).toBe("# Signed card\n");
       expect(listSkillDirs(tempSkills)).toEqual([
         "nemoclaw-skills-guide",
         "nemoclaw-user-agent-skills",
@@ -78,6 +96,84 @@ describe("catalog skills export", () => {
         "nemoclaw-user-overview",
         "nemoclaw-user-reference",
       ]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("rejects unsafe allowlist path fragments", () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "nemoclaw-catalog-config-"),
+    );
+    const cleanup = () => fs.rmSync(tempDir, { recursive: true, force: true });
+
+    try {
+      const config = path.join(tempDir, "catalog-skills.yaml");
+      fs.writeFileSync(
+        config,
+        [
+          "version: 1",
+          "source: ../outside",
+          "export: skills/nemoclaw",
+          "include:",
+          "  - skill: ../escape",
+          "",
+        ].join("\n"),
+      );
+
+      expect(() =>
+        execFileSync("python3", [exporter, "--allowlist", config, "--check"], {
+          cwd: repoRoot,
+          encoding: "utf8",
+          stdio: "pipe",
+        }),
+      ).toThrow(/source must be a safe relative path/);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("fails when preserved signing artifacts are not copied into the final export", () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "nemoclaw-catalog-export-"),
+    );
+    const cleanup = () => fs.rmSync(tempDir, { recursive: true, force: true });
+
+    try {
+      const tempAgents = path.join(tempDir, ".agents");
+      const tempScripts = path.join(tempDir, "scripts");
+      const tempSkills = path.join(tempDir, "skills", "nemoclaw");
+      fs.mkdirSync(tempAgents, { recursive: true });
+      fs.mkdirSync(tempScripts, { recursive: true });
+      fs.cpSync(sourceRoot, path.join(tempAgents, "skills"), {
+        recursive: true,
+      });
+      fs.copyFileSync(
+        path.join(repoRoot, ".agents", "catalog-skills.yaml"),
+        path.join(tempAgents, "catalog-skills.yaml"),
+      );
+      const tempExporter = path.join(tempScripts, "export-catalog-skills.py");
+      fs.copyFileSync(exporter, tempExporter);
+      let exporterSource = fs.readFileSync(tempExporter, "utf8");
+      exporterSource = exporterSource.replace(
+        "def preserve_signing_artifacts(\n    existing_root: Path, temp_root: Path, skills: tuple[str, ...]\n) -> None:",
+        "def preserve_signing_artifacts(\n    existing_root: Path, temp_root: Path, skills: tuple[str, ...]\n) -> None:\n    return",
+      );
+      fs.writeFileSync(tempExporter, exporterSource);
+
+      const signedSkill = path.join(tempSkills, "nemoclaw-user-get-started");
+      fs.mkdirSync(signedSkill, { recursive: true });
+      fs.writeFileSync(path.join(signedSkill, "skill.oms.sig"), "signature\n");
+
+      expect(() =>
+        execFileSync("python3", [tempExporter], {
+          cwd: tempDir,
+          encoding: "utf8",
+          stdio: "pipe",
+        }),
+      ).toThrow(
+        /Missing preserved signing artifacts: nemoclaw-user-get-started\/skill\.oms\.sig/,
+      );
     } finally {
       cleanup();
     }
