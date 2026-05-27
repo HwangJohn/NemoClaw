@@ -76,4 +76,4 @@ These checks and workflow steps automate export freshness while keeping signing 
 - Review the exporter implementation in [`scripts/export-catalog-skills.py`](../scripts/export-catalog-skills.py).
 - Update the catalog allowlist in [`.agents/catalog-skills.yaml`](../.agents/catalog-skills.yaml) when public skill scope changes.
 - Review generated export diffs under `skills/nemoclaw/` in the refresh PR before requesting or accepting signing artifacts.
-- Check the workflow definitions in [`.github/workflows/pr.yaml`](../.github/workflows/pr.yaml) and [`.github/workflows/catalog-skills-refresh.yaml`](../.github/workflows/catalog-skills-refresh.yaml).
+- Check the workflow definitions in [`.github/workflows/pr.yaml`](workflows/pr.yaml) and [`.github/workflows/catalog-skills-refresh.yaml`](workflows/catalog-skills-refresh.yaml).

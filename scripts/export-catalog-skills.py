@@ -134,6 +134,10 @@ def load_config(path: Path) -> CatalogConfig:
 
     source = Path(str(raw.get("source", ".agents/skills")))
     export = Path(str(raw.get("export", "skills/nemoclaw")))
+    for label, candidate in (("source", source), ("export", export)):
+        if candidate.is_absolute() or ".." in candidate.parts:
+            raise ValueError(f"{repo_path(path)} {label} must be a safe relative path")
+
     include = raw.get("include")
     exclude = raw.get("exclude", [])
     metadata = raw.get("metadata", {})
@@ -152,6 +156,11 @@ def load_config(path: Path) -> CatalogConfig:
         skill = item["skill"].strip()
         if not skill:
             raise ValueError(f"{repo_path(path)} include[{idx}].skill must not be empty")
+        skill_path = Path(skill)
+        if skill_path.is_absolute() or ".." in skill_path.parts or len(skill_path.parts) != 1:
+            raise ValueError(
+                f"{repo_path(path)} include[{idx}].skill must be a single directory name"
+            )
         skills.append(skill)
 
     if skills != sorted(skills):
