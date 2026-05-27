@@ -37,7 +37,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
-          persist-credentials: false
+          persist-credentials: true
 
       - name: Configure git author
         run: |
@@ -70,33 +70,33 @@ jobs:
       - name: Create or update refresh pull request
         id: cpr
         if: ${{ steps.diff.outputs.changed == 'true' && (github.event_name == 'schedule' || !inputs.dry_run) }}
-        uses: peter-evans/create-pull-request@8ce3b843f60ac63fbde403f79364ff7d80b5fbb1 # v7.0.8
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          branch: automation/catalog-skills-refresh
-          delete-branch: true
-          commit-message: "chore(skills): refresh catalog export"
-          title: "chore(skills): refresh catalog export"
-          body: |
-            ## Summary
-            - Regenerates `skills/nemoclaw/` from `.agents/catalog-skills.yaml` and `.agents/skills/`.
-            - Keeps the NVIDIA Verified Skills catalog export deterministic and reviewable.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: automation/catalog-skills-refresh
+        run: |
+          set -euo pipefail
+          git checkout -B "$BRANCH"
+          git add .agents/catalog-skills.yaml skills/nemoclaw
+          git commit -m "chore(skills): refresh catalog export"
+          git push --force-with-lease origin "$BRANCH"
 
-            ## Validation
-            - `python3 scripts/export-catalog-skills.py --check`
-
-            After maintainer review, request signing by commenting `/nvskills-ci` on this PR if the workflow did not do so automatically.
-          labels: |
-            documentation
-            CI/CD
-          add-paths: |
-            .agents/catalog-skills.yaml
-            skills/nemoclaw
+          PR_NUMBER="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
+          if [[ -z "$PR_NUMBER" ]]; then
+            PR_URL="$(gh pr create \
+              --head "$BRANCH" \
+              --base main \
+              --title "chore(skills): refresh catalog export" \
+              --body-file .github/pr-bodies/catalog-skills-refresh.md \
+              --label documentation \
+              --label CI/CD)"
+            PR_NUMBER="${PR_URL##*/}"
+          fi
+          echo "pull-request-number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
 
       - name: Request NVSkills signing
         if: ${{ steps.cpr.outputs.pull-request-number != '' && github.event_name == 'workflow_dispatch' && inputs.request_nvskills_ci && !inputs.dry_run }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ steps.cpr.outputs.pull-request-number }}
         run: |
           gh pr comment "$PR_NUMBER" --body "/nvskills-ci"
