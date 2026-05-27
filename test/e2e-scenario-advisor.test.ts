@@ -42,9 +42,9 @@ describe("E2E scenario advisor", () => {
 
     expect(result.required).toContainEqual(
       expect.objectContaining({
-        id: "ubuntu-repo-docker__cloud-nvidia-openclaw-telegram:messaging-telegram",
+        id: "ubuntu-repo-cloud-openclaw-telegram:messaging-telegram",
         workflow: "e2e-scenarios.yaml",
-        scenario: "ubuntu-repo-docker__cloud-nvidia-openclaw-telegram",
+        scenario: "ubuntu-repo-cloud-openclaw-telegram",
         suiteFilter: "messaging-telegram",
       }),
     );
@@ -61,8 +61,8 @@ describe("E2E scenario advisor", () => {
     );
     expect(result.required).toContainEqual(
       expect.objectContaining({
-        id: "ubuntu-repo-docker__cloud-nvidia-openclaw-telegram:messaging-telegram",
-        scenario: "ubuntu-repo-docker__cloud-nvidia-openclaw-telegram",
+        id: "ubuntu-repo-cloud-openclaw-telegram:messaging-telegram",
+        scenario: "ubuntu-repo-cloud-openclaw-telegram",
         suiteFilter: "messaging-telegram",
       }),
     );
