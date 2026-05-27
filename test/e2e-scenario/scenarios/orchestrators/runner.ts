@@ -32,11 +32,17 @@ export class ScenarioRunner {
     for (const phase of plan.phases) {
       if (phase.name === "environment") {
         results.push(await this.environment.run(ctx, phase, results));
-      } else if (phase.name === "onboarding") {
-        results.push(await this.onboarding.run(ctx, phase, results));
-      } else {
-        results.push(await this.runtime.run(ctx, phase, results));
+        continue;
       }
+      if (phase.name === "onboarding") {
+        results.push(await this.onboarding.run(ctx, phase, results));
+        continue;
+      }
+      if (phase.name === "runtime") {
+        results.push(await this.runtime.run(ctx, phase, results));
+        continue;
+      }
+      throw new Error(`Unsupported phase: ${String(phase.name)}`);
     }
     return results;
   }

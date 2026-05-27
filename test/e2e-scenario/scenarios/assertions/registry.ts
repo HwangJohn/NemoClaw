@@ -321,14 +321,42 @@ function uniqueGroups(groups: AssertionGroup[]): AssertionGroup[] {
 }
 
 export function assertionGroupsForScenario(scenario: ScenarioDefinition): AssertionGroup[] {
-  const groups = [
+  const onboardingGroups = (scenario.onboardingAssertionIds ?? []).map((id) => {
+    const group = assertionGroupForOnboardingAssertion(id);
+    if (!group) {
+      throw new Error(
+        `Unknown onboarding assertion id '${id}' on scenario '${scenario.id}'. Add it to onboardingAssertionGroups or fix the scenario reference.`,
+      );
+    }
+    return group;
+  });
+  const suiteGroups = (scenario.suiteIds ?? []).map((id) => {
+    const group = assertionGroupForSuite(id);
+    if (!group) {
+      throw new Error(
+        `Unknown suite id '${id}' on scenario '${scenario.id}'. Add it to validationSuiteGroups or fix the scenario reference.`,
+      );
+    }
+    return group;
+  });
+  const supplementalGroups = supplementalSuiteIdsForScenario(scenario).map((id) => {
+    const group = assertionGroupForSuite(id);
+    if (!group) {
+      throw new Error(
+        `Unknown supplemental suite id '${id}' on scenario '${scenario.id}'. Add it to validationSuiteGroups or fix supplementalSuiteIdsForScenario.`,
+      );
+    }
+    return group;
+  });
+
+  const groups: (AssertionGroup | undefined)[] = [
     environmentBaseline(),
-    ...(scenario.onboardingAssertionIds ?? []).map((id) => assertionGroupForOnboardingAssertion(id)),
-    ...(scenario.suiteIds ?? []).map((id) => assertionGroupForSuite(id)),
-    ...supplementalSuiteIdsForScenario(scenario).map((id) => assertionGroupForSuite(id)),
+    ...onboardingGroups,
+    ...suiteGroups,
+    ...supplementalGroups,
     scenario.expectedFailure ? runtimeControlGroups[0] : undefined,
-  ].filter((entry): entry is AssertionGroup => Boolean(entry));
-  return uniqueGroups(groups);
+  ];
+  return uniqueGroups(groups.filter((entry): entry is AssertionGroup => Boolean(entry)));
 }
 
 export function validateAssertionGroups(groups: AssertionGroup[], repoRoot: string): void {
@@ -351,6 +379,11 @@ export function validateAssertionGroups(groups: AssertionGroup[], repoRoot: stri
       }
       if (!step.phase) {
         throw new Error(`Assertion step ${step.id} is missing phase owner`);
+      }
+      if (step.phase !== group.phase) {
+        throw new Error(
+          `Assertion step ${step.id} phase '${step.phase}' does not match group ${group.id} phase '${group.phase}'`,
+        );
       }
       if (!step.implementation?.ref) {
         throw new Error(`Assertion step ${step.id} is missing implementation reference`);
