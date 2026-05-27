@@ -53,6 +53,8 @@ sequenceDiagram
 
 ## Human handoff points
 
+These are the manual review and approval points in the catalog signing flow.
+
 - Curate `.agents/catalog-skills.yaml` when public skill scope changes.
 - Review the generated `skills/nemoclaw/` diff in the same PR as the allowlist/source update.
 - Manually comment `/nvskills-ci` if the workflow bot cannot request signing.
@@ -60,9 +62,18 @@ sequenceDiagram
 
 ## Workflow steps added in this PR
 
+These checks and workflow steps automate export freshness while keeping signing under maintainer control.
+
 - `CI / Pull Request` runs `python3 scripts/export-catalog-skills.py --check --allow-missing` so this infrastructure PR can merge before the first generated export, while later export PRs still reject stale or hand-edited files.
 - `Skills / Catalog Refresh` supports:
   - `dry_run=true` to regenerate and report changes without pushing.
   - `dry_run=false` to create or update `automation/catalog-skills-refresh`.
   - `request_nvskills_ci=true` to attempt the `/nvskills-ci` comment after opening/updating the PR.
   - scheduled no-op/refresh behavior using the same exporter.
+
+## Next Steps
+
+- Review the exporter implementation in [`scripts/export-catalog-skills.py`](../scripts/export-catalog-skills.py).
+- Update the catalog allowlist in [`.agents/catalog-skills.yaml`](../.agents/catalog-skills.yaml) when public skill scope changes.
+- Review generated export diffs under `skills/nemoclaw/` in the refresh PR before requesting or accepting signing artifacts.
+- Check the workflow definitions in [`.github/workflows/pr.yaml`](../.github/workflows/pr.yaml) and [`.github/workflows/catalog-skills-refresh.yaml`](../.github/workflows/catalog-skills-refresh.yaml).
