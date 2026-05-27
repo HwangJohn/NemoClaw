@@ -79,6 +79,11 @@ jobs:
       - name: Check for changes
         id: diff
         run: |
+          # Mark any new files under the export paths as intent-to-add so
+          # `git diff` reports them. Without this, an empty `skills/nemoclaw`
+          # tree on main causes a freshly-exported catalog to look unchanged
+          # and the workflow short-circuits without opening a PR.
+          git add --intent-to-add -- .agents/catalog-skills.yaml skills/nemoclaw
           if git diff --quiet -- .agents/catalog-skills.yaml skills/nemoclaw; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "No catalog skill export changes detected."
