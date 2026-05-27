@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { discordManifest, telegramManifest } from "../../channels";
+import { discordManifest, slackManifest, telegramManifest } from "../../channels";
 import { runMessagingHook } from "../hook-runner";
 import { MessagingHookRegistry } from "../registry";
 import {
@@ -90,6 +90,52 @@ describe("common config-prompt hook implementation", () => {
     expect(questions).toEqual([
       "  Discord Server ID (for guild workspace access): ",
     ]);
+  });
+
+  it("prompts Slack user and channel allowlists from the manifest", async () => {
+    const env: NodeJS.ProcessEnv = {};
+    const questions: string[] = [];
+    const registry = new MessagingHookRegistry([
+      {
+        id: COMMON_CONFIG_PROMPT_HOOK_HANDLER_ID,
+        handler: createConfigPromptHook({
+          env,
+          log: () => {},
+          prompt: async (question) => {
+            questions.push(question);
+            return question.includes("Channel IDs")
+              ? "C012AB3CD,C987ZY6XW"
+              : "U01ABC2DEF3";
+          },
+        }),
+      },
+    ]);
+    const hook = slackManifest.hooks.find((entry) => entry.id === "slack-config-prompt");
+
+    if (!hook) throw new Error("missing Slack config-prompt hook");
+
+    await expect(
+      runMessagingHook(hook, registry, {
+        channelId: "slack",
+      }),
+    ).resolves.toMatchObject({
+      outputs: {
+        allowedUsers: {
+          kind: "config",
+          value: "U01ABC2DEF3",
+        },
+        allowedChannels: {
+          kind: "config",
+          value: "C012AB3CD,C987ZY6XW",
+        },
+      },
+    });
+    expect(questions).toEqual([
+      "  Slack Member IDs (comma-separated allowlist): ",
+      "  Slack Channel IDs (comma-separated allowlist): ",
+    ]);
+    expect(env.SLACK_ALLOWED_USERS).toBe("U01ABC2DEF3");
+    expect(env.SLACK_ALLOWED_CHANNELS).toBe("C012AB3CD,C987ZY6XW");
   });
 
   it("logs existing config values without reprompting", async () => {

@@ -51,6 +51,18 @@ export const slackManifest = {
         emptyValueMessage: "bot will require manual pairing",
       },
     },
+    {
+      id: "allowedChannels",
+      kind: "config",
+      required: false,
+      envKey: "SLACK_ALLOWED_CHANNELS",
+      statePath: "slackConfig.allowedChannels",
+      prompt: {
+        label: "Slack Channel IDs (comma-separated allowlist)",
+        help: "Optional: enter comma-separated Slack channel IDs where the bot may answer @mentions. Channel IDs look like C012AB3CD.",
+        emptyValueMessage: "channel @mentions stay unrestricted by channel ID",
+      },
+    },
   ],
   credentials: [
     {
@@ -106,11 +118,16 @@ export const slackManifest = {
   state: {
     persist: {
       allowedIds: ["allowedUsers"],
+      slackConfig: ["allowedChannels"],
     },
     rebuildHydration: [
       {
         statePath: "allowedIds.slack",
         env: "SLACK_ALLOWED_USERS",
+      },
+      {
+        statePath: "slackConfig.allowedChannels",
+        env: "SLACK_ALLOWED_CHANNELS",
       },
     ],
   },
@@ -140,6 +157,10 @@ export const slackManifest = {
       outputs: [
         {
           id: "allowedUsers",
+          kind: "config",
+        },
+        {
+          id: "allowedChannels",
           kind: "config",
         },
       ],

@@ -124,6 +124,7 @@ describe("MessagingWorkflowPlanner", () => {
         SLACK_BOT_TOKEN: "xoxb-test-slack-token",
         SLACK_APP_TOKEN: "xapp-test-slack-token",
         SLACK_ALLOWED_USERS: "U0123456789",
+        SLACK_ALLOWED_CHANNELS: "C012AB3CD",
       },
       () =>
         planner().planAddChannel({
@@ -159,6 +160,7 @@ describe("MessagingWorkflowPlanner", () => {
         SLACK_BOT_TOKEN: "xoxb-test-slack-token",
         SLACK_APP_TOKEN: "xapp-test-slack-token",
         SLACK_ALLOWED_USERS: "U0123456789",
+        SLACK_ALLOWED_CHANNELS: "C012AB3CD",
       },
       () =>
         planner().planAddChannel({

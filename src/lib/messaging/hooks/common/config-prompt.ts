@@ -223,6 +223,7 @@ function logSkippedConfigInput(
 }
 
 function configInputNoun(field: ConfigPromptField): string {
+  if (/channel/i.test(field.id)) return "channel IDs";
   if (/server/i.test(field.id)) return "server ID";
   if (/allowed|user/i.test(field.id)) return "allowed IDs";
   return field.label;

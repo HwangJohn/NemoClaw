@@ -286,6 +286,7 @@ describe("built-in channel manifests", () => {
     const botToken = findInput(slackManifest, "botToken");
     const appToken = findInput(slackManifest, "appToken");
     const allowedUsers = findInput(slackManifest, "allowedUsers");
+    const allowedChannels = findInput(slackManifest, "allowedChannels");
     const hermesLines = buildMessagingEnvLines(
       new Set(["slack"]),
       { slack: ["U0123456789"] },
@@ -301,6 +302,13 @@ describe("built-in channel manifests", () => {
     expect(botToken.envKey).toBe("SLACK_BOT_TOKEN");
     expect(appToken.envKey).toBe("SLACK_APP_TOKEN");
     expect(allowedUsers.envKey).toBe("SLACK_ALLOWED_USERS");
+    expect(allowedChannels.envKey).toBe("SLACK_ALLOWED_CHANNELS");
+    expect(allowedChannels.statePath).toBe("slackConfig.allowedChannels");
+    expect(allowedChannels.prompt).toEqual({
+      label: "Slack Channel IDs (comma-separated allowlist)",
+      help: "Optional: enter comma-separated Slack channel IDs where the bot may answer @mentions. Channel IDs look like C012AB3CD.",
+      emptyValueMessage: "channel @mentions stay unrestricted by channel ID",
+    });
     expect(KNOWN_CHANNELS.slack.allowIdsMode).toBe("dm");
     expect(slackManifest.credentials).toEqual([
       {
@@ -328,7 +336,23 @@ describe("built-in channel manifests", () => {
     expect(renderJson(slackManifest)).toContain("channels.slack.accounts.default");
     expect(renderJson(slackManifest)).toContain("allowedIds.slack.channels");
     expectTokenPasteEnrollHook(slackManifest, ["botToken", "appToken"]);
-    expectConfigPromptEnrollHook(slackManifest, ["allowedUsers"]);
+    expectConfigPromptEnrollHook(slackManifest, ["allowedUsers", "allowedChannels"]);
+    expect(slackManifest.state).toEqual({
+      persist: {
+        allowedIds: ["allowedUsers"],
+        slackConfig: ["allowedChannels"],
+      },
+      rebuildHydration: [
+        {
+          statePath: "allowedIds.slack",
+          env: "SLACK_ALLOWED_USERS",
+        },
+        {
+          statePath: "slackConfig.allowedChannels",
+          env: "SLACK_ALLOWED_CHANNELS",
+        },
+      ],
+    });
   });
 
   it("declares WeChat host-QR hooks, state hydration, provider binding, and Hermes env intent", () => {
