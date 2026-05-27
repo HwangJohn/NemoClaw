@@ -46,6 +46,11 @@ describe("E2E scenario advisor", () => {
         workflow: "e2e-scenarios.yaml",
         scenario: "ubuntu-repo-cloud-openclaw-telegram",
         suiteFilter: "messaging-telegram",
+        // Dispatch must match e2e-scenarios.yaml workflow_dispatch contract
+        // (single `scenarios` input). suiteFilter stays as analytical metadata
+        // on the recommendation but must not leak into the dispatch command.
+        dispatchCommand:
+          "gh workflow run e2e-scenarios.yaml --ref <pr-head-ref> --field scenarios=ubuntu-repo-cloud-openclaw-telegram",
       }),
     );
   });

@@ -513,9 +513,12 @@ function buildSingleScenarioRecommendation(
   reason: string,
   required = true,
 ): ScenarioRecommendation {
-  const suitePart = suiteFilter
-    ? ` --field suite_filter=${shellQuote(suiteFilter)}`
-    : "";
+  // The e2e-scenarios.yaml workflow_dispatch only exposes a single
+  // comma-separated `scenarios` input; it does not accept `scenario` or
+  // `suite_filter`. Emit a dispatch command that matches that contract so
+  // copy/paste from advisor comments actually runs. `suiteFilter` is kept on
+  // the recommendation object as analytical metadata explaining why the
+  // scenario was selected, but is no longer rendered into the command.
   return {
     id: suiteFilter ? `${scenario}:${suiteFilter}` : scenario,
     workflow: SCENARIO_WORKFLOW,
@@ -523,7 +526,7 @@ function buildSingleScenarioRecommendation(
     suiteFilter,
     required,
     reason,
-    dispatchCommand: `gh workflow run e2e-scenarios.yaml --ref <pr-head-ref> --field scenario=${shellQuote(scenario)}${suitePart}`,
+    dispatchCommand: `gh workflow run e2e-scenarios.yaml --ref <pr-head-ref> --field scenarios=${shellQuote(scenario)}`,
   };
 }
 
