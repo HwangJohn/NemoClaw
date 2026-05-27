@@ -37,7 +37,7 @@ describe("E2E scenario advisor", () => {
 
   it("requires targeted scenario E2E when a validation suite changes", () => {
     const result = analyze([
-      "test/e2e/validation_suites/messaging/telegram/00-telegram-injection-safety.sh",
+      "test/e2e-scenario/validation_suites/messaging/telegram/00-telegram-injection-safety.sh",
     ]);
 
     expect(result.required).toContainEqual(
@@ -52,8 +52,8 @@ describe("E2E scenario advisor", () => {
 
   it("requires all scenario E2E and targeted follow-up when suite metadata changes", () => {
     const result = analyze([
-      "test/e2e/validation_suites/suites.yaml",
-      "test/e2e/validation_suites/messaging/telegram/00-telegram-injection-safety.sh",
+      "test/e2e-scenario/validation_suites/suites.yaml",
+      "test/e2e-scenario/validation_suites/messaging/telegram/00-telegram-injection-safety.sh",
     ]);
 
     expect(result.required).toContainEqual(
