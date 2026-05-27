@@ -198,6 +198,7 @@ describe("built-in channel manifests", () => {
       { telegram: ["123456789"] },
       {},
       {},
+      {},
     );
 
     expect(getChannelTokenKeys(KNOWN_CHANNELS.telegram)).toEqual(["TELEGRAM_BOT_TOKEN"]);
@@ -241,6 +242,7 @@ describe("built-in channel manifests", () => {
           users: ["1005536447329222676"],
         },
       },
+      {},
       {},
     );
 
@@ -287,6 +289,7 @@ describe("built-in channel manifests", () => {
     const hermesLines = buildMessagingEnvLines(
       new Set(["slack"]),
       { slack: ["U0123456789"] },
+      {},
       {},
       {},
     );
@@ -343,6 +346,7 @@ describe("built-in channel manifests", () => {
         baseUrl: "https://ilinkai.wechat.com",
         userId: "operator_self_id",
       },
+      {},
     );
 
     expect(getChannelTokenKeys(KNOWN_CHANNELS.wechat)).toEqual(["WECHAT_BOT_TOKEN"]);
@@ -421,7 +425,7 @@ describe("built-in channel manifests", () => {
   it("declares WhatsApp as in-sandbox QR with no host-side token bindings", () => {
     const openclawRender = findRender(whatsappManifest, "whatsapp-openclaw-account");
     const hermesRender = findRender(whatsappManifest, "whatsapp-hermes-env");
-    const hermesLines = buildMessagingEnvLines(new Set(["whatsapp"]), {}, {}, {});
+    const hermesLines = buildMessagingEnvLines(new Set(["whatsapp"]), {}, {}, {}, {});
 
     expect(getChannelTokenKeys(KNOWN_CHANNELS.whatsapp)).toEqual([]);
     expect(whatsappManifest.auth.mode).toBe("in-sandbox-qr");

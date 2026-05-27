@@ -2,10 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AgentDefinition } from "../agent/defs";
-import {
-  getCredential,
-  normalizeCredentialValue,
-} from "../credentials/store";
+import { getCredential, normalizeCredentialValue } from "../credentials/store";
 import {
   type ChannelInputSpec,
   type ChannelManifest,
@@ -56,12 +53,9 @@ export async function setupMessagingChannels(
   const hasManifestRequiredInputs = (manifest: ChannelManifest) =>
     hasMessagingManifestRequiredInputs(manifest, getMessagingInputValue);
   const seedFromState = (includeAllExisting = false): string[] =>
-    resolveMessagingManifestSeed(
-      availableChannels,
-      existingChannels,
-      hasManifestRequiredInputs,
-      { includeAllExisting },
-    );
+    resolveMessagingManifestSeed(availableChannels, existingChannels, hasManifestRequiredInputs, {
+      includeAllExisting,
+    });
 
   if (isNonInteractive() || process.env.NEMOCLAW_NON_INTERACTIVE === "1") {
     const enabled = new Set(seedFromState(false));
@@ -306,9 +300,7 @@ function printInSandboxQrStatus(manifest: ChannelManifest): void {
   );
 }
 
-function resolveMessagingSetupSandboxName(
-  options: SetupSelectedMessagingChannelsOptions,
-): string {
+function resolveMessagingSetupSandboxName(options: SetupSelectedMessagingChannelsOptions): string {
   const explicitName = normalizeSandboxName(options.sandboxName);
   if (explicitName) return explicitName;
   const envName = normalizeSandboxName(process.env.NEMOCLAW_SANDBOX_NAME);
