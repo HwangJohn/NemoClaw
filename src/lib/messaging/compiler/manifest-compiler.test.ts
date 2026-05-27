@@ -386,14 +386,27 @@ describe("ManifestCompiler", () => {
     expect(plan.healthChecks).toEqual([]);
   });
 
-  it("skips enrollment hooks but runs manifest reachability checks for non-interactive create plans", async () => {
+  it("runs non-interactive enrollment hooks to validate and feed reachability checks", async () => {
     const hookCalls: string[] = [];
     const hooks = new MessagingHookRegistry([
       {
         id: "common.tokenPaste",
-        handler: () => {
-          throw new Error("token-paste hook should not run");
+        handler: (context) => {
+          hookCalls.push(`token-paste-input:${String(context.inputs?.botToken)}`);
+          const token = process.env.TELEGRAM_BOT_TOKEN ?? "missing";
+          return {
+            outputs: {
+              botToken: {
+                kind: "secret",
+                value: token,
+              },
+            },
+          };
         },
+      },
+      {
+        id: "common.configPrompt",
+        handler: () => ({}),
       },
       {
         id: "telegram.getMeReachability",
@@ -424,7 +437,10 @@ describe("ManifestCompiler", () => {
       kind: "secret",
       credentialAvailable: true,
     });
-    expect(hookCalls).toEqual(["reachability:123456:raw-telegram-token"]);
+    expect(hookCalls).toEqual([
+      "token-paste-input:undefined",
+      "reachability:123456:raw-telegram-token",
+    ]);
     expect(JSON.stringify(plan)).not.toContain("123456:raw-telegram-token");
   });
 

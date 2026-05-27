@@ -168,6 +168,101 @@ describe("common token-paste hook implementation", () => {
     expect(env.SLACK_APP_TOKEN).toBe("xapp-prompted");
   });
 
+  it("reprompts in interactive mode when an existing token has invalid format", async () => {
+    const env: NodeJS.ProcessEnv = {
+      SLACK_BOT_TOKEN: "not-a-slack-token",
+      SLACK_APP_TOKEN: "xapp-existing",
+    };
+    const logs: string[] = [];
+    const prompts: Array<{ readonly question: string; readonly secret: boolean }> = [];
+    const saved: Array<{ readonly key: string; readonly value: string }> = [];
+    const registry = new MessagingHookRegistry([
+      {
+        id: COMMON_TOKEN_PASTE_HOOK_HANDLER_ID,
+        handler: createTokenPasteHook({
+          env,
+          getCredential: () => null,
+          saveCredential: (key, value) => saved.push({ key, value }),
+          log: (message) => logs.push(message),
+          prompt: async (question, options) => {
+            prompts.push({ question, secret: options?.secret === true });
+            return "xoxb-recovered-token";
+          },
+        }),
+      },
+    ]);
+    const hook = slackManifest.hooks[0];
+
+    if (!hook) throw new Error("missing Slack token-paste hook");
+
+    await expect(
+      runMessagingHook(hook, registry, {
+        channelId: "slack",
+        isInteractive: true,
+      }),
+    ).resolves.toMatchObject({
+      outputs: {
+        botToken: {
+          kind: "secret",
+          value: "xoxb-recovered-token",
+        },
+        appToken: {
+          kind: "secret",
+          value: "xapp-existing",
+        },
+      },
+    });
+    expect(prompts).toEqual([
+      {
+        question: "  Slack Bot Token: ",
+        secret: true,
+      },
+    ]);
+    expect(saved).toEqual([
+      { key: "SLACK_BOT_TOKEN", value: "xoxb-recovered-token" },
+      { key: "SLACK_APP_TOKEN", value: "xapp-existing" },
+    ]);
+    expect(env.SLACK_BOT_TOKEN).toBe("xoxb-recovered-token");
+    expect(logs.join("\n")).toContain("Slack bot tokens start with 'xoxb-'");
+    expect(logs.join("\n")).toContain("Invalid existing slack token ignored");
+    expect(logs.join("\n")).not.toContain("Skipped slack (invalid token format)");
+  });
+
+  it("skips in non-interactive mode when an existing token has invalid format", async () => {
+    const logs: string[] = [];
+    const saved: Array<{ readonly key: string; readonly value: string }> = [];
+    const registry = new MessagingHookRegistry([
+      {
+        id: COMMON_TOKEN_PASTE_HOOK_HANDLER_ID,
+        handler: createTokenPasteHook({
+          env: {
+            SLACK_BOT_TOKEN: "not-a-slack-token",
+            SLACK_APP_TOKEN: "xapp-existing",
+          },
+          getCredential: () => null,
+          saveCredential: (key, value) => saved.push({ key, value }),
+          log: (message) => logs.push(message),
+          prompt: async () => {
+            throw new Error("non-interactive enrollment should not prompt");
+          },
+        }),
+      },
+    ]);
+    const hook = slackManifest.hooks[0];
+
+    if (!hook) throw new Error("missing Slack token-paste hook");
+
+    await expect(
+      runMessagingHook(hook, registry, {
+        channelId: "slack",
+        isInteractive: false,
+      }),
+    ).rejects.toThrow("Invalid token format for SLACK_BOT_TOKEN");
+    expect(saved).toEqual([]);
+    expect(logs.join("\n")).toContain("Slack bot tokens start with 'xoxb-'");
+    expect(logs.join("\n")).toContain("Skipped slack (invalid token format)");
+  });
+
   it("rejects invalid pasted token formats before staging credentials", async () => {
     const saved: Array<{ readonly key: string; readonly value: string }> = [];
     const registry = new MessagingHookRegistry([

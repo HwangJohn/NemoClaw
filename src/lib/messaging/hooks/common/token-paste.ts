@@ -48,7 +48,13 @@ export function createTokenPasteHook(options: TokenPasteHookOptions = {}): Messa
           `No token-paste field registered for ${context.channelId}.${output.id}`,
         );
       }
-      const resolved = await resolveTokenValue(context.channelId, output, field, options);
+      const resolved = await resolveTokenValue(
+        context.channelId,
+        output,
+        field,
+        options,
+        context.isInteractive !== false,
+      );
       outputs[output.id] = {
         kind: "secret",
         value: resolved.token,
@@ -77,6 +83,7 @@ async function resolveTokenValue(
   output: ChannelHookOutputSpec,
   field: TokenPasteField,
   options: TokenPasteHookOptions,
+  isInteractive: boolean,
 ): Promise<{ readonly token: string; readonly source: "existing" | "prompted" }> {
   const env = options.env ?? process.env;
   const readCredential = options.getCredential ?? (() => null);
@@ -86,7 +93,24 @@ async function resolveTokenValue(
 
   let token = normalizeCredentialValue(env[field.envKey]) || readCredential(field.envKey);
   let source: "existing" | "prompted" = "existing";
+  if (token && field.format && !field.format.test(token)) {
+    log(`  ✗ Invalid format. ${field.formatHint || "Check the token and try again."}`);
+    if (!isInteractive) {
+      log(formatSkippedInvalidTokenMessage(channelId, output));
+      throw new Error(
+        `Invalid token format for ${field.envKey}. ${
+          field.formatHint || "Check the token and try again."
+        }`,
+      );
+    }
+    log(`  ✗ Invalid existing ${channelId} ${tokenNoun(output)} ignored.`);
+    token = "";
+  }
   if (!token) {
+    if (!isInteractive) {
+      log(formatSkippedNoTokenMessage(channelId, output));
+      throw new Error(`No token entered for ${field.envKey}.`);
+    }
     if (field.help) {
       log("");
       log(`  ${field.help}`);

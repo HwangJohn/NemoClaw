@@ -39,6 +39,13 @@ export function createWechatIlinkLoginHook(
   options: WechatIlinkLoginHookOptions = {},
 ): MessagingHookHandler {
   return async (context) => {
+    if (context.isInteractive === false) {
+      (options.log ?? console.log)(
+        `  Skipped ${context.channelId} (host QR login requires interactive mode)`,
+      );
+      throw new Error("WeChat host QR login requires interactive mode.");
+    }
+
     const runLogin = options.runLogin;
     if (!runLogin) {
       throw new Error(

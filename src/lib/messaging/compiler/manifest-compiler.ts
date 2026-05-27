@@ -116,14 +116,12 @@ export class ManifestCompiler {
     const requestedActive = !disabled && (selected || configured);
     const resolvedInputs = await resolveChannelInputs(manifest, context, this.hooks, {
       runEnrollment:
-        selected &&
-        requestedActive &&
-        isEnrollmentWorkflow(context.workflow) &&
-        context.isInteractive,
+        selected && requestedActive && isEnrollmentWorkflow(context.workflow),
       runEnrollmentChecks:
         selected &&
         requestedActive &&
         isEnrollmentWorkflow(context.workflow),
+      isInteractive: context.isInteractive,
     });
     const requiredInputsAvailable = hasRequiredInputsAvailable(manifest, resolvedInputs.inputs);
     const active = requestedActive && !resolvedInputs.skipped && requiredInputsAvailable;
@@ -183,7 +181,11 @@ async function resolveChannelInputs(
   manifest: ChannelManifest,
   context: ManifestCompilerContext,
   hooks: MessagingHookRegistry,
-  options: { readonly runEnrollment: boolean; readonly runEnrollmentChecks: boolean },
+  options: {
+    readonly runEnrollment: boolean;
+    readonly runEnrollmentChecks: boolean;
+    readonly isInteractive: boolean;
+  },
 ): Promise<{
   readonly inputs: SandboxMessagingInputReference[];
   readonly skipped: boolean;
@@ -200,7 +202,13 @@ async function resolveChannelInputs(
   let skipped = false;
   for (const hook of enrollmentHooks) {
     if (!shouldRunEnrollmentHook(hook, inputs)) continue;
-    const result = await runCompilerHook(manifest, hook, hooks, hookInputs);
+    const result = await runCompilerHook(
+      manifest,
+      hook,
+      hooks,
+      hookInputs,
+      options.isInteractive,
+    );
     if (!result) {
       skipped = true;
       break;
@@ -218,7 +226,7 @@ async function resolveChannelInputs(
       .filter((entry) => isHookForAgent(entry, context.agent))
       .filter((entry) => entry.phase === "reachability-check")
       .filter((entry) => hasDeclaredHookInputs(hookInputs, entry))) {
-      await runCompilerHook(manifest, hook, hooks, hookInputs);
+      await runCompilerHook(manifest, hook, hooks, hookInputs, options.isInteractive);
     }
   }
 
@@ -230,10 +238,12 @@ async function runCompilerHook(
   hook: ChannelHookSpec,
   hooks: MessagingHookRegistry,
   inputs: MessagingHookInputMap,
+  isInteractive: boolean,
 ): Promise<MessagingHookRunResult | null> {
   try {
     return await runMessagingHook(hook, hooks, {
       channelId: manifest.id,
+      isInteractive,
       inputs: selectDeclaredHookInputs(hook, inputs),
     });
   } catch (error) {

@@ -66,6 +66,10 @@ export function createConfigPromptHook(
         continue;
       }
 
+      if (context.isInteractive === false) {
+        continue;
+      }
+
       if (field.help) log(options, `  ${field.help}`);
       const value = await promptConfigInputValue(field, options);
       if (value) {

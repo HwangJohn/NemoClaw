@@ -168,4 +168,42 @@ describe("common config-prompt hook implementation", () => {
     expect(logs.join("\n")).toContain("reply mode already set: @mentions only");
     expect(logs.join("\n")).toContain("allowed IDs already set: 123456789");
   });
+
+  it("records existing config but does not prompt for missing config in non-interactive mode", async () => {
+    const env: NodeJS.ProcessEnv = {
+      SLACK_ALLOWED_USERS: "U01ABC2DEF3",
+    };
+    const logs: string[] = [];
+    const registry = new MessagingHookRegistry([
+      {
+        id: COMMON_CONFIG_PROMPT_HOOK_HANDLER_ID,
+        handler: createConfigPromptHook({
+          env,
+          log: (message) => logs.push(message),
+          prompt: async () => {
+            throw new Error("non-interactive config hook should not prompt");
+          },
+        }),
+      },
+    ]);
+    const hook = slackManifest.hooks.find((entry) => entry.id === "slack-config-prompt");
+
+    if (!hook) throw new Error("missing Slack config-prompt hook");
+
+    await expect(
+      runMessagingHook(hook, registry, {
+        channelId: "slack",
+        isInteractive: false,
+      }),
+    ).resolves.toMatchObject({
+      outputs: {
+        allowedUsers: {
+          kind: "config",
+          value: "U01ABC2DEF3",
+        },
+      },
+    });
+    expect(env.SLACK_ALLOWED_CHANNELS).toBeUndefined();
+    expect(logs.join("\n")).toContain("allowed IDs already set: U01ABC2DEF3");
+  });
 });

@@ -150,6 +150,47 @@ describe("setupSelectedMessagingChannels", () => {
     expect(logs.join("\n")).not.toContain("enrollment failed");
   });
 
+  it("reprompts for an invalid existing Slack token during interactive setup", async () => {
+    process.env.SLACK_BOT_TOKEN = "not-a-slack-token";
+    process.env.SLACK_APP_TOKEN = "xapp-existing-token";
+    const logs: string[] = [];
+    const questions: string[] = [];
+    vi.mocked(prompt).mockImplementation(async (question: string) => {
+      questions.push(question);
+      if (question.includes("Slack Bot Token")) return "xoxb-recovered-token";
+      return "";
+    });
+    vi.spyOn(console, "log").mockImplementation((message = "") => {
+      logs.push(String(message));
+    });
+    const enabled = new Set(["slack"]);
+
+    const plan = await setupSelectedMessagingChannels(
+      ["slack"],
+      enabled,
+      manifests("slack"),
+    );
+
+    expect(enabled.has("slack")).toBe(true);
+    expect(plan?.channels[0]).toMatchObject({ channelId: "slack", active: true });
+    expect(questions).toEqual([
+      "  Slack Bot Token: ",
+      "  Slack Member IDs (comma-separated allowlist): ",
+      "  Slack Channel IDs (comma-separated allowlist): ",
+    ]);
+    expect(saveCredential).toHaveBeenCalledWith(
+      "SLACK_BOT_TOKEN",
+      "xoxb-recovered-token",
+    );
+    expect(saveCredential).toHaveBeenCalledWith(
+      "SLACK_APP_TOKEN",
+      "xapp-existing-token",
+    );
+    expect(process.env.SLACK_BOT_TOKEN).toBe("xoxb-recovered-token");
+    expect(logs.join("\n")).toContain("Invalid existing slack token ignored");
+    expect(logs.join("\n")).not.toContain("Skipped slack (invalid token format)");
+  });
+
   it("prompts each channel's config before enrolling the next selected channel", async () => {
     const questions: string[] = [];
     vi.mocked(prompt).mockImplementation(async (question: string) => {
@@ -363,6 +404,29 @@ describe("setupMessagingChannels", () => {
     expect(notes).toEqual([
       "  [non-interactive] Messaging channel inputs detected: wechat",
     ]);
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it("validates detected non-interactive Slack inputs before returning enabled channels", async () => {
+    process.env.SLACK_BOT_TOKEN = "not-a-slack-token";
+    process.env.SLACK_APP_TOKEN = "xapp-existing-token";
+    const logs: string[] = [];
+    const notes: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((message = "") => {
+      logs.push(String(message));
+    });
+
+    const result = await setupMessagingChannels(null, null, {
+      note: (message) => notes.push(message),
+      isNonInteractive: () => true,
+    });
+
+    expect(result).toEqual([]);
+    expect(notes).toEqual([
+      "  [non-interactive] Messaging channel inputs detected: slack",
+    ]);
+    expect(logs.join("\n")).toContain("Slack bot tokens start with 'xoxb-'");
+    expect(logs.join("\n")).toContain("Skipped slack (invalid token format)");
     expect(prompt).not.toHaveBeenCalled();
   });
 });
