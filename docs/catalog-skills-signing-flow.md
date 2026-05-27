@@ -24,8 +24,8 @@ sequenceDiagram
     Maintainer->>Exporter: Run python3 scripts/export-catalog-skills.py
     Exporter->>Export: Copy allowlisted skills as real files<br/>write catalog-metadata.json<br/>preserve skill.oms.sig + skill-card.md if present
     Maintainer->>PRCI: Open implementation or content PR
-    PRCI->>Exporter: python3 scripts/export-catalog-skills.py --check
-    Exporter-->>PRCI: Fail if skills/nemoclaw is stale or hand-edited
+    PRCI->>Exporter: python3 scripts/export-catalog-skills.py --check --allow-missing
+    Exporter-->>PRCI: Pass before first export exists;<br/>after refresh PR, fail if skills/nemoclaw is stale or hand-edited
     Maintainer->>Main: Merge reviewed PR after checks pass
 
     Note over Refresh,PR: Post-merge refresh automation added by this PR
@@ -60,7 +60,7 @@ sequenceDiagram
 
 ## Workflow steps added in this PR
 
-- `CI / Pull Request` runs `python3 scripts/export-catalog-skills.py --check` to reject stale generated exports.
+- `CI / Pull Request` runs `python3 scripts/export-catalog-skills.py --check --allow-missing` so this infrastructure PR can merge before the first generated export, while later export PRs still reject stale or hand-edited files.
 - `Skills / Catalog Refresh` supports:
   - `dry_run=true` to regenerate and report changes without pushing.
   - `dry_run=false` to create or update `automation/catalog-skills-refresh`.

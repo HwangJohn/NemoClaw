@@ -159,7 +159,7 @@ repos:
 
       - id: catalog-skills-export
         name: Verify catalog skills export
-        entry: python3 scripts/export-catalog-skills.py --check
+        entry: python3 scripts/export-catalog-skills.py --check --allow-missing
         language: system
         files: ^(\.agents/catalog-skills\.yaml|\.agents/skills/|skills/nemoclaw/|scripts/export-catalog-skills\.py)$
         pass_filenames: false

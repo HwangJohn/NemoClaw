@@ -312,7 +312,7 @@ def replace_directory(source: Path, destination: Path) -> None:
     shutil.move(str(source), str(destination))
 
 
-def export_catalog(allowlist: Path, check: bool) -> int:
+def export_catalog(allowlist: Path, check: bool, allow_missing: bool) -> int:
     config = load_config(allowlist)
     export_root = REPO_ROOT / config.export
 
@@ -322,6 +322,12 @@ def export_catalog(allowlist: Path, check: bool) -> int:
 
         if check:
             if not export_root.exists():
+                if allow_missing:
+                    print(
+                        f"Catalog export is not present yet: {repo_path(config.export)} "
+                        "(allowed by --allow-missing)",
+                    )
+                    return 0
                 print(f"Catalog export is missing: {repo_path(config.export)}", file=sys.stderr)
                 return 1
             diffs = dircmp_diff(export_root, expected)
@@ -354,13 +360,18 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Check whether the generated export is current without writing files",
     )
+    parser.add_argument(
+        "--allow-missing",
+        action="store_true",
+        help="In --check mode, pass when the export directory has not been created yet",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     allowlist = args.allowlist if args.allowlist.is_absolute() else REPO_ROOT / args.allowlist
-    return export_catalog(allowlist, bool(args.check))
+    return export_catalog(allowlist, bool(args.check), bool(args.allow_missing))
 
 
 if __name__ == "__main__":

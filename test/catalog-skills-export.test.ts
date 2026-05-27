@@ -12,7 +12,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
 const exporter = path.join(repoRoot, "scripts", "export-catalog-skills.py");
-const catalogRoot = path.join(repoRoot, "skills", "nemoclaw");
 const sourceRoot = path.join(repoRoot, ".agents", "skills");
 
 function listSkillDirs(root: string): string[] {
@@ -24,29 +23,13 @@ function listSkillDirs(root: string): string[] {
 }
 
 describe("catalog skills export", () => {
-  it("is current", () => {
-    const output = execFileSync("python3", [exporter, "--check"], {
+  it("allows the export to be absent before the first refresh PR", () => {
+    const output = execFileSync("python3", [exporter, "--check", "--allow-missing"], {
       cwd: repoRoot,
       encoding: "utf8",
     });
 
-    expect(output).toContain("Catalog skills export is current");
-  });
-
-  it("contains only the public allowlisted skills", () => {
-    expect(listSkillDirs(catalogRoot)).toEqual([
-      "nemoclaw-skills-guide",
-      "nemoclaw-user-agent-skills",
-      "nemoclaw-user-configure-inference",
-      "nemoclaw-user-configure-security",
-      "nemoclaw-user-deploy-remote",
-      "nemoclaw-user-get-started",
-      "nemoclaw-user-manage-policy",
-      "nemoclaw-user-manage-sandboxes",
-      "nemoclaw-user-monitor-sandbox",
-      "nemoclaw-user-overview",
-      "nemoclaw-user-reference",
-    ]);
+    expect(output).toContain("Catalog export is not present yet");
   });
 
   it("preserves existing signing artifacts when regenerating", () => {
@@ -82,6 +65,19 @@ describe("catalog skills export", () => {
       expect(fs.readFileSync(path.join(signedSkill, "skill-card.md"), "utf8")).toBe(
         "# Signed card\n",
       );
+      expect(listSkillDirs(tempSkills)).toEqual([
+        "nemoclaw-skills-guide",
+        "nemoclaw-user-agent-skills",
+        "nemoclaw-user-configure-inference",
+        "nemoclaw-user-configure-security",
+        "nemoclaw-user-deploy-remote",
+        "nemoclaw-user-get-started",
+        "nemoclaw-user-manage-policy",
+        "nemoclaw-user-manage-sandboxes",
+        "nemoclaw-user-monitor-sandbox",
+        "nemoclaw-user-overview",
+        "nemoclaw-user-reference",
+      ]);
     } finally {
       cleanup();
     }
