@@ -24,16 +24,45 @@ function listSkillDirs(root: string): string[] {
 
 describe("catalog skills export", () => {
   it("allows the export to be absent before the first refresh PR", () => {
-    const output = execFileSync(
-      "python3",
-      [exporter, "--check", "--allow-missing"],
-      {
-        cwd: repoRoot,
-        encoding: "utf8",
-      },
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "nemoclaw-catalog-missing-"),
     );
+    const cleanup = () => fs.rmSync(tempDir, { recursive: true, force: true });
 
-    expect(output).toContain("Catalog export is not present yet");
+    try {
+      const tempAgents = path.join(tempDir, ".agents");
+      const tempScripts = path.join(tempDir, "scripts");
+      fs.mkdirSync(tempAgents, { recursive: true });
+      fs.mkdirSync(tempScripts, { recursive: true });
+      fs.cpSync(sourceRoot, path.join(tempAgents, "skills"), {
+        recursive: true,
+      });
+      fs.copyFileSync(
+        path.join(repoRoot, ".agents", "catalog-skills.yaml"),
+        path.join(tempAgents, "catalog-skills.yaml"),
+      );
+      fs.copyFileSync(
+        exporter,
+        path.join(tempScripts, "export-catalog-skills.py"),
+      );
+
+      const output = execFileSync(
+        "python3",
+        [
+          path.join(tempScripts, "export-catalog-skills.py"),
+          "--check",
+          "--allow-missing",
+        ],
+        {
+          cwd: tempDir,
+          encoding: "utf8",
+        },
+      );
+
+      expect(output).toContain("Catalog export is not present yet");
+    } finally {
+      cleanup();
+    }
   });
 
   it("preserves existing signing artifacts when regenerating", () => {
