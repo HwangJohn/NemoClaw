@@ -61,7 +61,11 @@ jobs:
           if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
             echo "Existing $BRANCH found; overlaying skills/nemoclaw to preserve NVSkills artifacts"
             git fetch --depth 1 origin "$BRANCH":"refs/remotes/origin/$BRANCH"
-            if git ls-tree -d "origin/$BRANCH" -- skills/nemoclaw >/dev/null 2>&1; then
+            # Use `git cat-file -e` instead of `git ls-tree -d`: the latter can
+            # exit 0 with empty output when the tree exists but the path does
+            # not, which would otherwise wipe skills/nemoclaw and then fail at
+            # checkout. cat-file -e fails when the object is absent.
+            if git cat-file -e "origin/$BRANCH:skills/nemoclaw" 2>/dev/null; then
               rm -rf skills/nemoclaw
               git checkout "origin/$BRANCH" -- skills/nemoclaw
             fi
