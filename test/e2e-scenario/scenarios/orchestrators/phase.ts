@@ -289,17 +289,37 @@ export class PhaseOrchestrator {
       return this.runShellStep(ctx, step);
     }
     if (kind === "probe") {
-      // Probe registry lands in a follow-up PR. Until then, surface
-      // unimplemented probes as visibly skipped — never as fake green.
-      return {
-        status: "skipped",
-        message: `probe not registered: ${step.implementation?.ref ?? "<no ref>"}`,
-      };
+      // Probe registry lands in a follow-up PR. Until then, probes
+      // surface as visibly skipped — never as fake green. For
+      // security-sensitive or otherwise required probes, the run
+      // must NOT pass on this gap; the typed registry marks those
+      // with `required: true` and we reclassify the skip as a
+      // failure so the phase result fails closed.
+      const ref = step.implementation?.ref ?? "<no ref>";
+      if (step.required) {
+        return {
+          status: "failed",
+          classifier: "runner-infra",
+          message: `required probe not registered: ${ref} (step ${step.id})`,
+        };
+      }
+      return { status: "skipped", message: `probe not registered: ${ref}` };
     }
     if (kind === "pending") {
       // pending steps surface as skipped with the placeholder ref so
-      // gaps are visible in plan output and phase results.
-      return { status: "skipped", message: `pending: ${step.implementation?.ref ?? ""}` };
+      // gaps are visible in plan output and phase results. Required
+      // pending steps (e.g. expected-failure side-effect validators
+      // for negative scenarios) fail closed instead — the run cannot
+      // honestly pass while the contract is unimplemented.
+      const ref = step.implementation?.ref ?? "";
+      if (step.required) {
+        return {
+          status: "failed",
+          classifier: "runner-infra",
+          message: `required pending step not implemented: ${ref} (step ${step.id})`,
+        };
+      }
+      return { status: "skipped", message: `pending: ${ref}` };
     }
     throw new Error(`Unknown assertion step kind for ${step.id}: ${String(kind)}`);
   }

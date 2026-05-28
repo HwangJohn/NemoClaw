@@ -555,6 +555,101 @@ describe("ScenarioRunner seeds context.env and short-circuits across phases", ()
   });
 });
 
+describe("required probe and pending steps fail closed", () => {
+  it("test_required_probe_step_that_is_unregistered_fails_the_phase", async () => {
+    const ctx = freshCtx();
+    try {
+      const step: AssertionStep = {
+        id: "runtime.security.required-probe",
+        phase: "runtime",
+        implementation: { kind: "probe", ref: "unregisteredSecurityProbe" },
+        evidencePath: ".e2e/assertions/runtime.security.required-probe.json",
+        required: true,
+      };
+      const orchestrator = new PhaseOrchestrator("runtime");
+
+      const result = await orchestrator.run(ctx, makePhase([step]));
+
+      expect(result.status).toBe("failed");
+      expect(result.assertions[0].status).toBe("failed");
+      expect(result.assertions[0].message).toMatch(/required probe not registered/);
+      expect(result.assertions[0].message).toContain("unregisteredSecurityProbe");
+    } finally {
+      fs.rmSync(ctx.contextDir, { recursive: true, force: true });
+    }
+  });
+
+  it("test_non_required_probe_step_continues_to_skip_visibly", async () => {
+    const ctx = freshCtx();
+    try {
+      const step: AssertionStep = {
+        id: "runtime.diagnostics.non-required-probe",
+        phase: "runtime",
+        implementation: { kind: "probe", ref: "diagnosticsProbe" },
+        evidencePath: ".e2e/assertions/runtime.diagnostics.non-required-probe.json",
+        // required intentionally omitted (defaults to false)
+      };
+      const orchestrator = new PhaseOrchestrator("runtime");
+
+      const result = await orchestrator.run(ctx, makePhase([step]));
+
+      expect(result.assertions[0].status).toBe("skipped");
+      expect(result.assertions[0].message).toMatch(/probe not registered/);
+      // Non-required skipped step does not fail the phase.
+      expect(result.status).not.toBe("failed");
+    } finally {
+      fs.rmSync(ctx.contextDir, { recursive: true, force: true });
+    }
+  });
+
+  it("test_required_pending_step_fails_closed", async () => {
+    const ctx = freshCtx();
+    try {
+      const step: AssertionStep = {
+        id: "runtime.expected-failure.no-side-effects",
+        phase: "runtime",
+        implementation: { kind: "pending", ref: "expectedFailureNoSideEffectsProbe" },
+        evidencePath: ".e2e/assertions/runtime.expected-failure.no-side-effects.json",
+        required: true,
+      };
+      const orchestrator = new PhaseOrchestrator("runtime");
+
+      const result = await orchestrator.run(ctx, makePhase([step]));
+
+      expect(result.status).toBe("failed");
+      expect(result.assertions[0].status).toBe("failed");
+      expect(result.assertions[0].message).toMatch(/required pending step not implemented/);
+    } finally {
+      fs.rmSync(ctx.contextDir, { recursive: true, force: true });
+    }
+  });
+
+  it("test_security_suite_groups_in_registry_mark_their_steps_as_required", async () => {
+    const { assertionGroupForSuite } = await import("../scenarios/assertions/registry.ts");
+    for (const suiteId of ["security-shields", "security-policy", "security-injection"]) {
+      const group = assertionGroupForSuite(suiteId);
+      expect(group, `missing assertion group for suite ${suiteId}`).toBeDefined();
+      for (const step of group?.steps ?? []) {
+        expect(
+          step.required,
+          `${suiteId} step ${step.id} must be required so it fails closed`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("test_expected_failure_no_side_effects_step_in_registry_is_required", async () => {
+    const { assertionRegistry } = await import("../scenarios/assertions/registry.ts");
+    const group = assertionRegistry.groups.find(
+      (g) => g.id === "runtime.expected-failure.no-side-effects",
+    );
+    expect(group).toBeDefined();
+    for (const step of group?.steps ?? []) {
+      expect(step.required).toBe(true);
+    }
+  });
+});
+
 describe("framework-owned secret hygiene at the spawn boundary", () => {
   it("test_should_not_persist_secret_shaped_child_output_into_evidence", async () => {
     const ctx = freshCtx();

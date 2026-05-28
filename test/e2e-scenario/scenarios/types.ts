@@ -72,6 +72,15 @@ export interface AssertionStep {
   // must match the secret-key shape; the framework rejects non-secret
   // names to keep the allowlist-vs-declared-secret boundary honest.
   secretEnv?: readonly string[];
+  // When true, a probe/pending step that resolves as "skipped" is
+  // reclassified as "failed" by the phase orchestrator. Required
+  // steps fail closed when their underlying implementation isn't
+  // available yet (probe registry not landed, expected-failure
+  // side-effect validator not implemented, ...) instead of silently
+  // producing fake green. Defaults to false; set true for security-
+  // sensitive suites and expected-failure validators that the run
+  // is not safe without.
+  required?: boolean;
 }
 
 export interface AssertionGroup {
