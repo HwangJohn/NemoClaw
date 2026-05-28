@@ -105,12 +105,38 @@ export function validateE2eScenariosWorkflowBoundary(
   requireRunDoesNotContain(errors, normalRun, "--plan-only");
   requireRunDoesNotContain(errors, normalRun, "--validate-only");
 
+  const wslInstall = requireStep(errors, steps, "Ensure Ubuntu WSL exists");
+  requireRunContains(errors, wslInstall, "wsl --install");
+  requireRunContains(errors, wslInstall, "wsl --set-default");
+
+  const wslDeps = requireStep(errors, steps, "Install Ubuntu dependencies");
+  requireRunContains(errors, wslDeps, "apt-get install");
+  requireRunContains(errors, wslDeps, "rsync");
+
+  const wslNode = requireStep(errors, steps, "Install Node.js 22 in WSL");
+  requireRunContains(errors, wslNode, "setup_22.x");
+  requireRunContains(errors, wslNode, "npm --version");
+
+  const wslWorkspace = requireStep(errors, steps, "Copy checkout into WSL ext4 workspace");
+  requireRunContains(errors, wslWorkspace, "rsync -a");
+  requireRunContains(errors, wslWorkspace, "WSL ext4 workspace ready");
+
   const wslRun = requireStep(errors, steps, "Run typed scenarios in WSL");
   requireRunContains(errors, wslRun, "npx tsx test/e2e-scenario/scenarios/run.ts");
   requireRunContains(errors, wslRun, "--scenarios");
+  // From this PR: the typed runner is the only execution path; the
+  // bash runner / dry-run / validate-only / plan-only modes are
+  // removed from CI.
   requireRunDoesNotContain(errors, wslRun, "--dry-run");
   requireRunDoesNotContain(errors, wslRun, "--plan-only");
   requireRunDoesNotContain(errors, wslRun, "--validate-only");
+  // From main (#4346): the WSL step must use the robust PowerShell
+  // wrapper that materializes a bash script, copies it into WSL via
+  // wslpath, and invokes it with `bash -l` so Docker WSL integration
+  // and Ubuntu first-run races are handled.
+  requireRunContains(errors, wslRun, "$env:WSL_WORKDIR");
+  requireRunContains(errors, wslRun, "WriteAllText");
+  requireRunContains(errors, wslRun, "bash -l $wslTmp");
 
   const upload = requireStep(errors, steps, "Upload scenario artifacts");
   const uploadWith = asRecord(upload?.with);
