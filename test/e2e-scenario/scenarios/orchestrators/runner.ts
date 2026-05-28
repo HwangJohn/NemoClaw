@@ -1,9 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
+import path from "node:path";
+
 import type { PhaseActionResult, PhaseResult, RunContext, RunPlan, RunPlanPhase } from "../types.ts";
 import { seedContextEnv } from "./context.ts";
 import { EnvironmentOrchestrator } from "./environment.ts";
+import { evaluateNegativeContract, negativeContractPhaseResult } from "./negative-matcher.ts";
 import { OnboardingOrchestrator } from "./onboarding.ts";
 import { RuntimeOrchestrator } from "./runtime.ts";
 
@@ -62,6 +66,20 @@ export class ScenarioRunner {
       const orchestrator = this.orchestratorFor(phase.name);
       results.push(await orchestrator.run(ctx, phase, results));
     }
+
+    // Negative-scenario contract verification. Single decision point:
+    // if the plan declared expectedFailure, evaluate the matcher and
+    // append a synthetic phase result. Positive scenarios are
+    // unaffected. Side-effect verification stays the responsibility of
+    // the runtime control group's required pending step (kept red
+    // until the probe lands); the matcher only judges phase + errorClass.
+    if (plan.expectedFailure) {
+      const contractResult = evaluateNegativeContract(plan, results);
+      const synthetic = negativeContractPhaseResult(contractResult);
+      results.push(synthetic);
+      writeNegativeContractArtifact(ctx, contractResult, synthetic);
+    }
+
     return results;
   }
 
@@ -74,8 +92,29 @@ export class ScenarioRunner {
 }
 
 interface BlockingFailure {
-  phase: PhaseResult["phase"];
+  phase: "environment" | "onboarding" | "runtime";
   action: PhaseActionResult;
+}
+
+function writeNegativeContractArtifact(
+  ctx: RunContext,
+  contractResult: ReturnType<typeof evaluateNegativeContract>,
+  synthetic: PhaseResult,
+): void {
+  try {
+    const outputDir = path.join(ctx.contextDir, ".e2e");
+    fs.mkdirSync(outputDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(outputDir, "negative-contract.json"),
+      `${JSON.stringify(contractResult, null, 2)}\n`,
+    );
+    fs.writeFileSync(
+      path.join(outputDir, `${synthetic.phase}.result.json`),
+      `${JSON.stringify(synthetic, null, 2)}\n`,
+    );
+  } catch {
+    /* artifact emission is best-effort; matcher result already in memory */
+  }
 }
 
 function blockingPriorResult(results: PhaseResult[]): BlockingFailure | undefined {
@@ -84,6 +123,9 @@ function blockingPriorResult(results: PhaseResult[]): BlockingFailure | undefine
   // phases - they are expected to be reported alongside other phase
   // results so reviewers can see all failure layers at once.
   for (const result of results) {
+    if (result.phase !== "environment" && result.phase !== "onboarding" && result.phase !== "runtime") {
+      continue;
+    }
     const failedAction = result.actions.find((action) => action.status === "failed");
     if (failedAction) {
       return { phase: result.phase, action: failedAction };

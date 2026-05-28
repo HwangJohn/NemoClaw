@@ -97,7 +97,7 @@ async function main() {
   for (const plan of plans) {
     const results = await runner.run({ contextDir }, plan);
     allResults.push(...results);
-    if (results.some((result) => result.status === "failed")) {
+    if (planFailed(plan, results)) {
       anyFailed = true;
     }
   }
@@ -123,6 +123,36 @@ async function main() {
   if (anyFailed) {
     process.exitCode = 1;
   }
+}
+
+// A scenario fails iff:
+//   positive (no expectedFailure): any phase result failed.
+//   negative (expectedFailure declared): the synthetic
+//     negative-contract phase did not match, OR the runtime
+//     control group's required side-effect step did not pass.
+//
+// The matcher decides exit code for negatives so that a scenario
+// that failed for the right reason in the right phase is no longer
+// reported as red just because setup did not complete. Until the
+// forbidden-side-effect probe lands, the required pending step in
+// runtimeControlGroups keeps negatives visibly red on the side-effect
+// axis even when phase + errorClass match.
+function planFailed(plan: import("./types.ts").RunPlan, results: PhaseResult[]): boolean {
+  if (!plan.expectedFailure) {
+    return results.some((result) => result.status === "failed");
+  }
+  const contractPhase = results.find((result) => result.phase === "negative-contract");
+  if (!contractPhase || contractPhase.status !== "passed") {
+    return true;
+  }
+  const runtime = results.find((result) => result.phase === "runtime");
+  const sideEffectStep = runtime?.assertions.find(
+    (assertion) => assertion.id === "runtime.expected-failure.no-side-effects",
+  );
+  if (!sideEffectStep || sideEffectStep.status !== "passed") {
+    return true;
+  }
+  return false;
 }
 
 try {

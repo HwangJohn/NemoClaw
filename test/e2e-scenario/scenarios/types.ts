@@ -3,6 +3,25 @@
 
 export type PhaseName = "environment" | "onboarding" | "runtime";
 
+// Synthetic phase appended by the scenario runner when a scenario
+// declares plan.expectedFailure. Distinct from PhaseName so a scenario
+// builder cannot accidentally declare an assertion or action against
+// it. Only the runner emits PhaseResult entries with this name.
+export type NegativeContractPhase = "negative-contract";
+
+export type PhaseResultName = PhaseName | NegativeContractPhase;
+
+// User-facing phase the negative-scenario contract advertises. Wider
+// than PhaseName because manifests may declare "preflight" failures,
+// which the matcher resolves to the onboarding phase orchestrator.
+export type ExpectedFailurePhase = PhaseName | "preflight";
+
+export interface ExpectedFailureContract {
+  phase: ExpectedFailurePhase;
+  errorClass: string;
+  forbiddenSideEffects?: readonly string[];
+}
+
 export type TransientClassifier =
   | "empty-event-capture"
   | "provider-transient"
@@ -112,7 +131,7 @@ export interface ScenarioDefinition {
   runnerRequirements?: string[];
   requiredSecrets?: string[];
   skippedCapabilities?: Array<Record<string, unknown>>;
-  expectedFailure?: Record<string, unknown>;
+  expectedFailure?: ExpectedFailureContract;
 }
 
 // A phase action is real, deterministic setup work the phase orchestrator
@@ -179,7 +198,7 @@ export interface RunPlan {
   runnerRequirements: string[];
   requiredSecrets: string[];
   skippedCapabilities: Array<Record<string, unknown>>;
-  expectedFailure?: Record<string, unknown>;
+  expectedFailure?: ExpectedFailureContract;
   sutBoundaries: SutBoundary[];
 }
 
@@ -206,7 +225,7 @@ export interface PhaseActionResult {
 }
 
 export interface PhaseResult {
-  phase: PhaseName;
+  phase: PhaseResultName;
   status: "passed" | "failed" | "skipped";
   // Action results are recorded distinctly from assertion results so
   // failure-layer attribution stays unambiguous: a failure in actions

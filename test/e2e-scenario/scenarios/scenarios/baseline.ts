@@ -11,7 +11,7 @@ import {
   ubuntuRepoNoDocker,
   wslRepoDocker,
 } from "../matrix.ts";
-import type { ScenarioDefinition, ScenarioEnvironment } from "../types.ts";
+import type { ExpectedFailureContract, ScenarioDefinition, ScenarioEnvironment } from "../types.ts";
 
 interface CanonicalScenarioInput {
   id: string;
@@ -24,7 +24,7 @@ interface CanonicalScenarioInput {
   runnerRequirements?: string[];
   requiredSecrets?: string[];
   skippedCapabilities?: Array<Record<string, unknown>>;
-  expectedFailure?: Record<string, unknown>;
+  expectedFailure?: ExpectedFailureContract;
 }
 
 function canonicalScenario(input: CanonicalScenarioInput): ScenarioDefinition {
