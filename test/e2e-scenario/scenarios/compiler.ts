@@ -8,6 +8,8 @@ import { loadManifest } from "./manifests.ts";
 import { requireScenarios } from "./registry.ts";
 import type {
   AssertionGroup,
+  ExpectedFailureContract,
+  ExpectedFailurePhase,
   NemoClawInstanceManifest,
   PhaseAction,
   PhaseName,
@@ -99,6 +101,11 @@ const ONBOARD_PROFILE_SECRET_ENV: Readonly<Record<string, readonly string[]>> = 
   "cloud-openclaw-custom-policies": ["NVIDIA_API_KEY"],
   "cloud-openclaw-invalid-nvidia-key": ["NVIDIA_API_KEY"],
   "cloud-openclaw-gateway-port-conflict": ["NVIDIA_API_KEY"],
+  // Negative scenario: nemoclaw onboard runs against a docker shim that
+  // exits non-zero. Onboard never reaches the cloud auth step, but the
+  // CLI still loads NVIDIA_API_KEY when present — keep it in the secret
+  // env so behavior matches a real user invocation.
+  "cloud-openclaw-no-docker": ["NVIDIA_API_KEY"],
   "cloud-hermes": ["NVIDIA_API_KEY"],
   "cloud-hermes-discord": ["NVIDIA_API_KEY"],
   "cloud-hermes-slack": ["NVIDIA_API_KEY"],
@@ -138,10 +145,21 @@ function phaseActions(phase: PhaseName, scenario: ScenarioDefinition): PhaseActi
     if (!scenario.environment) {
       return [];
     }
-    const onboardingId = scenario.environment.onboarding;
-    if (!onboardingId) {
+    const baseOnboardingId = scenario.environment.onboarding;
+    if (!baseOnboardingId) {
       throw new Error(`Scenario ${scenario.id} is missing environment.onboarding`);
     }
+    // Negative-runtime scenarios route to a dedicated onboarding profile
+    // that sets up the failure condition (e.g. docker-missing) BEFORE
+    // invoking `nemoclaw onboard` and captures the resulting output to
+    // the log file the assertion phase reads. The profile id convention
+    // is `<base>-no-docker`. New negative profiles register a worker in
+    // nemoclaw_scenarios/onboard/dispatch.sh and a secret-env mapping
+    // above.
+    const onboardingId =
+      scenario.environment.runtime === "docker-missing"
+        ? `${baseOnboardingId}-no-docker`
+        : baseOnboardingId;
     // secretEnv defaults to [] (no parent-env secrets pass through)
     // unless the profile is explicitly listed above. Unknown profiles
     // get the safest setting and surface the gap loudly the first
@@ -178,6 +196,41 @@ const SUT_BOUNDARIES: SutBoundary[] = [
   { id: "state", client: "StateClient" },
 ];
 
+// Negative scenarios advertise their failure mode against one of these
+// user-facing phases. "preflight" is intentionally distinct from the
+// internal PhaseName union: scenario manifests speak the user's vocab
+// ("preflight failed") and the matcher resolves preflight to the
+// onboarding phase orchestrator. See orchestrators/negative-matcher.ts.
+const EXPECTED_FAILURE_PHASES: readonly ExpectedFailurePhase[] = [
+  "environment",
+  "onboarding",
+  "runtime",
+  "preflight",
+];
+
+function validateExpectedFailure(scenarioId: string, contract: ExpectedFailureContract): void {
+  if (!EXPECTED_FAILURE_PHASES.includes(contract.phase)) {
+    throw new Error(
+      `Scenario ${scenarioId} expectedFailure.phase invalid: ${String(contract.phase)} (allowed: ${EXPECTED_FAILURE_PHASES.join(", ")})`,
+    );
+  }
+  if (typeof contract.errorClass !== "string" || contract.errorClass.trim().length === 0) {
+    throw new Error(`Scenario ${scenarioId} expectedFailure.errorClass must be a non-empty string`);
+  }
+  if (contract.forbiddenSideEffects !== undefined) {
+    if (!Array.isArray(contract.forbiddenSideEffects)) {
+      throw new Error(`Scenario ${scenarioId} expectedFailure.forbiddenSideEffects must be an array`);
+    }
+    for (const entry of contract.forbiddenSideEffects) {
+      if (typeof entry !== "string" || entry.trim().length === 0) {
+        throw new Error(
+          `Scenario ${scenarioId} expectedFailure.forbiddenSideEffects entries must be non-empty strings`,
+        );
+      }
+    }
+  }
+}
+
 export function validateRunPlan(plan: RunPlan): void {
   if (!plan.scenarioId) {
     throw new Error("RunPlan missing scenarioId");
@@ -189,6 +242,9 @@ export function validateRunPlan(plan: RunPlan): void {
   }
   if (plan.sutBoundaries.length === 0) {
     throw new Error(`RunPlan ${plan.scenarioId} missing SUT boundaries`);
+  }
+  if (plan.expectedFailure) {
+    validateExpectedFailure(plan.scenarioId, plan.expectedFailure);
   }
 }
 

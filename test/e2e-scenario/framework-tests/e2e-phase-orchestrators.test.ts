@@ -415,6 +415,33 @@ describe("plan compiler emits phase actions for canonical scenarios", () => {
       }
     }
   });
+
+  it("compiler_routes_docker_missing_runtime_to_no_docker_onboarding_profile", async () => {
+    const { compileRunPlans } = await import("../scenarios/compiler.ts");
+    // Negative scenario declares runtime=docker-missing in scenarios.yaml.
+    // The compiler must substitute the onboarding profile id from the
+    // base 'cloud-openclaw' to 'cloud-openclaw-no-docker' so the
+    // dispatcher routes to the worker that installs the docker shim and
+    // captures negative-preflight.log. Without this routing, the
+    // 'onboarding.preflight.expected-failed' assertion has nothing to grep.
+    const [plan] = compileRunPlans(["ubuntu-no-docker-preflight-negative"]);
+    const onb = plan.phases.find((p) => p.name === "onboarding")!;
+    const action = onb.actions.find((a) => a.id.startsWith("onboarding.profile."));
+    expect(action?.id).toBe("onboarding.profile.cloud-openclaw-no-docker");
+    expect(action?.arg).toBe("cloud-openclaw-no-docker");
+    expect(action?.evidencePath).toBe(
+      ".e2e/actions/onboarding.profile.cloud-openclaw-no-docker.log",
+    );
+    // Secret env must still include NVIDIA_API_KEY so behavior matches
+    // a real user invocation (CLI loads creds even if preflight aborts).
+    expect(action?.secretEnv).toContain("NVIDIA_API_KEY");
+    // Positive scenarios must NOT pick up the -no-docker suffix.
+    const [posPlan] = compileRunPlans(["ubuntu-repo-cloud-openclaw"]);
+    const posAction = posPlan.phases
+      .find((p) => p.name === "onboarding")!
+      .actions.find((a) => a.id.startsWith("onboarding.profile."));
+    expect(posAction?.arg).toBe("cloud-openclaw");
+  });
 });
 
 describe("ScenarioRunner seeds context.env and short-circuits across phases", () => {
