@@ -75,10 +75,21 @@ sandbox_lifecycle_assert_status_fields_present() {
     sandbox_lifecycle_fail "${id}" "nemoclaw status failed"
     return 1
   }
-  local status_output_lower
-  status_output_lower="$(printf '%s' "${SANDBOX_LIFECYCLE_LAST_OUTPUT}" | tr '[:upper:]' '[:lower:]')"
-  for field in status gateway sandbox; do
-    [[ "${status_output_lower}" == *"${field}"* ]] || {
+  # The real `nemoclaw <name> status` output (src/lib/actions/sandbox/status.ts)
+  # always emits a 'Sandbox: <name>' header plus structured fields like
+  # 'Model:', 'OpenShell:', 'Policies:'. The original assertion required
+  # literal 'status' and 'gateway' tokens that never appear in normal
+  # output — it only passed against the test-suite mock. Align with the
+  # production CLI: require the sandbox name and a couple of substantive
+  # field labels that are unconditionally printed.
+  local output="${SANDBOX_LIFECYCLE_LAST_OUTPUT}"
+  if [[ "${output}" != *"${E2E_SANDBOX_NAME}"* ]]; then
+    sandbox_lifecycle_fail "${id}" "status output did not mention sandbox '${E2E_SANDBOX_NAME}'"
+    return 1
+  fi
+  local field
+  for field in Sandbox Model OpenShell; do
+    [[ "${output}" == *"${field}"* ]] || {
       sandbox_lifecycle_fail "${id}" "missing status field: ${field}"
       return 1
     }

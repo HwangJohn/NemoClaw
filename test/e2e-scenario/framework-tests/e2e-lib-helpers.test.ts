@@ -1065,7 +1065,7 @@ describe("sandbox lifecycle validation helper", () => {
       fs.writeFileSync(path.join(bin, "nemoclaw"), `#!/usr/bin/env bash
 case "$*" in
   list) echo sb1;;
-  "sb1 status") echo 'status running gateway healthy sandbox running';;
+  "sb1 status") printf '  Sandbox: sb1\\n    Model:    nvidia/x\\n    OpenShell: 0.0.44\\n    Policies: npm\\n';;
   "sb1 logs") echo logline;;
   *) echo "unexpected nemoclaw args: $*" >&2; exit 64;;
 esac
