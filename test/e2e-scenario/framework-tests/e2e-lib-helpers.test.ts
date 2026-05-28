@@ -522,6 +522,82 @@ describe("rebuild/upgrade validation helpers", () => {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });
+
+  it("policy_preset_check_should_match_endpoint_url_when_preset_name_absent", () => {
+    // The legacy assertion called `nemoclaw policy status` (a command
+    // that does not exist) and silently failed. The new assertion calls
+    // `openshell policy get --full <sandbox>` and matches preset names
+    // OR their well-known endpoint hostnames. Verify both paths: a
+    // policy output containing only endpoint URLs (no bare preset name)
+    // still passes, mirroring the behavior of the live gateway policy
+    // dump in test/e2e/test-rebuild-openclaw.sh.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-ru-policy-"));
+    try {
+      fs.writeFileSync(
+        path.join(tmp, "context.env"),
+        "E2E_SCENARIO=test\nE2E_AGENT=openclaw\nE2E_SANDBOX_NAME=sb\nE2E_GATEWAY_URL=http://127.0.0.1\n",
+      );
+      const r = runBash(
+        `
+        set -euo pipefail
+        fake_openshell() {
+          # Emit a minimal policy dump that contains the preset endpoint
+          # URLs but NOT the bare preset names. This is the realistic
+          # case: 'openshell policy get --full' renders network rules
+          # by hostname, not by preset label.
+          printf 'allow registry.npmjs.org\\nallow pypi.org\\n'
+        }
+        . "${REBUILD_UPGRADE_LIB}"
+        rebuild_upgrade_assert_policy_presets_preserved
+      `,
+        {
+          E2E_CONTEXT_DIR: tmp,
+          REBUILD_UPGRADE_OPENSHELL_CMD: "fake_openshell",
+          E2E_EXPECTED_POLICY_PRESETS: "npm pypi",
+        },
+      );
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stdout).toContain("suite.rebuild.policy_presets_preserved");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("policy_preset_check_should_fail_with_diagnostic_when_preset_missing", () => {
+    // Negative case: when a declared preset is absent from the live
+    // policy dump, the assertion must fail AND emit a diagnostic line
+    // identifying the missing preset and showing the policy head. The
+    // original implementation failed silently because the underlying
+    // `nemoclaw policy status` command did not exist; the new
+    // implementation must produce actionable evidence.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-ru-policy-miss-"));
+    try {
+      fs.writeFileSync(
+        path.join(tmp, "context.env"),
+        "E2E_SCENARIO=test\nE2E_AGENT=openclaw\nE2E_SANDBOX_NAME=sb\nE2E_GATEWAY_URL=http://127.0.0.1\n",
+      );
+      const r = runBash(
+        `
+        fake_openshell() {
+          # Policy dump missing 'pypi' entirely.
+          printf 'allow registry.npmjs.org\\n'
+        }
+        . "${REBUILD_UPGRADE_LIB}"
+        rebuild_upgrade_assert_policy_presets_preserved
+      `,
+        {
+          E2E_CONTEXT_DIR: tmp,
+          REBUILD_UPGRADE_OPENSHELL_CMD: "fake_openshell",
+          E2E_EXPECTED_POLICY_PRESETS: "npm pypi",
+        },
+      );
+      expect(r.status).not.toBe(0);
+      expect(r.stdout + r.stderr).toMatch(/preset 'pypi' not in policy/);
+      expect(r.stdout + r.stderr).toMatch(/matchers: pypi/);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("Phase 1.A logging helpers", () => {

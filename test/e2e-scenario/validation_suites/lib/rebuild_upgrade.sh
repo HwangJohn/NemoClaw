@@ -113,16 +113,48 @@ rebuild_upgrade_assert_inference_works() {
 
 rebuild_upgrade_assert_policy_presets_preserved() {
   rebuild_upgrade_require_context || return 1
-  local presets output preset
+  local id="suite.rebuild.policy_presets_preserved"
+  local sandbox presets output preset
+  sandbox="$(_rebuild_upgrade_ctx E2E_SANDBOX_NAME)"
   presets="${E2E_EXPECTED_POLICY_PRESETS:-npm pypi}"
-  output="$(_rebuild_upgrade_run REBUILD_UPGRADE_NEMOCLAW_CMD nemoclaw policy status 2>/dev/null || true)"
+
+  # Mirror the legacy test/e2e/test-rebuild-openclaw.sh and
+  # test-full-e2e.sh pattern: ask the live gateway for the full policy
+  # via `openshell policy get --full <sandbox>` and grep for the preset
+  # name OR a well-known endpoint hostname for that preset. The earlier
+  # implementation called `nemoclaw policy status`, which does not
+  # exist as a CLI subcommand — the assertion always failed silently
+  # because the wrapper swallowed the missing-command stderr via
+  # `2>/dev/null || true`.
+  output="$(_rebuild_upgrade_run REBUILD_UPGRADE_OPENSHELL_CMD openshell policy get --full "${sandbox}" 2>&1 || true)"
+  if [[ -z "${output}" ]]; then
+    e2e_fail "${id} openshell policy get --full returned no output for sandbox '${sandbox}'"
+    return 1
+  fi
+
+  local preset matchers found m
   for preset in ${presets}; do
-    if [[ "${output}" != *"${preset}"* ]]; then
-      e2e_fail "suite.rebuild.policy_presets_preserved"
+    case "${preset}" in
+      npm)              matchers=("npm" "registry.npmjs.org") ;;
+      pypi)             matchers=("pypi" "pypi.org" "files.pythonhosted.org") ;;
+      huggingface)      matchers=("huggingface" "huggingface.co") ;;
+      brew)             matchers=("brew" "formulae.brew.sh") ;;
+      openclaw-pricing) matchers=("openclaw-pricing" "openrouter.ai") ;;
+      *)                matchers=("${preset}") ;;
+    esac
+    found=0
+    for m in "${matchers[@]}"; do
+      if [[ "${output}" == *"${m}"* ]]; then
+        found=1
+        break
+      fi
+    done
+    if [[ "${found}" -eq 0 ]]; then
+      e2e_fail "${id} preset '${preset}' not in policy (matchers: ${matchers[*]}); head: ${output:0:300}"
       return 1
     fi
   done
-  e2e_pass "suite.rebuild.policy_presets_preserved"
+  e2e_pass "${id} presets=${presets}"
 }
 
 rebuild_upgrade_assert_hermes_config_preserved() {
