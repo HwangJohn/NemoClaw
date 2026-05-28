@@ -15,8 +15,8 @@ fi
 # mention of 'docker' / 'container' / 'daemon' / 'socket', which a normal
 # successful onboarding always logs. Tighten to actual failure phrases.
 if grep -Eiq \
-    "preflight[[:space:]]+(failed|error)|cannot connect to[[:space:]]+(the[[:space:]]+)?docker daemon|permission denied[[:space:]]+while trying to connect to.*docker.*sock|onboarding aborted|FATAL: docker|ERROR: docker daemon" \
-    "${E2E_CONTEXT_DIR}/onboard.log"; then
+  "preflight[[:space:]]+(failed|error)|cannot connect to[[:space:]]+(the[[:space:]]+)?docker daemon|permission denied[[:space:]]+while trying to connect to.*docker.*sock|onboarding aborted|FATAL: docker|ERROR: docker daemon" \
+  "${E2E_CONTEXT_DIR}/onboard.log"; then
   echo "FAIL: onboarding.preflight.passed - onboard log contains preflight failure evidence"
   exit 1
 fi
