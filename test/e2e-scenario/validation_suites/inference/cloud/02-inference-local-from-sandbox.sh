@@ -24,6 +24,7 @@ route="$(e2e_context_get E2E_INFERENCE_ROUTE)"
 # Orchestrator step cap is 45s; widen wrapper cap to 35s.
 # CodeRabbit review item #13: capture then truncate to avoid `| head` racing
 # curl under `pipefail` and flagging a successful request as failed.
+# shellcheck disable=SC2034 # consumed by e2e_sandbox_exec via env
 E2E_SANDBOX_EXEC_TIMEOUT_SECONDS=35 \
 body="$(e2e_sandbox_exec "${name}" -- curl -fsS --max-time 25 "https://${route}/v1/models")"
 printf '%s\n' "${body:0:512}"

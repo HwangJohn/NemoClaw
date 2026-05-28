@@ -23,6 +23,7 @@ payload='{"model":"nvidia/nemotron-3-super-120b-a12b","messages":[{"role":"user"
 # Orchestrator step cap is 60s; widen the wrapper cap to 50s so a hung
 # upstream surfaces with a clear diagnostic before SIGTERM. Inner curl
 # --max-time stays ~10s under the wrapper cap.
+# shellcheck disable=SC2034 # consumed by e2e_sandbox_exec via env
 E2E_SANDBOX_EXEC_TIMEOUT_SECONDS=50 \
 response="$(e2e_sandbox_exec "${name}" -- curl -fsS --max-time 40 -H 'Content-Type: application/json' \
   -d "${payload}" "https://inference.local/v1/chat/completions")"
