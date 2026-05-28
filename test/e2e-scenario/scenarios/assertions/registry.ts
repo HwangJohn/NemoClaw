@@ -3,7 +3,6 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { environmentBaseline } from "./environment.ts";
 import type { AssertionGroup, AssertionStep, PhaseName, ScenarioDefinition } from "../types.ts";
 
 type Reliability = AssertionStep["reliability"];
@@ -254,7 +253,7 @@ export const validationSuiteGroups: AssertionGroup[] = [
 ];
 
 export const assertionRegistry = {
-  groups: [environmentBaseline(), ...onboardingAssertionGroups, ...runtimeControlGroups, ...validationSuiteGroups],
+  groups: [...onboardingAssertionGroups, ...runtimeControlGroups, ...validationSuiteGroups],
 };
 
 export function assertionGroupForSuite(suiteId: string): AssertionGroup | undefined {
@@ -349,8 +348,11 @@ export function assertionGroupsForScenario(scenario: ScenarioDefinition): Assert
     return group;
   });
 
+  // Environment phase work is performed by typed PhaseAction entries
+  // (context.emit + install.<id>) emitted from compiler.phaseActions(),
+  // not by assertion groups. No environment-phase assertion group is
+  // included in scenario plans.
   const groups: (AssertionGroup | undefined)[] = [
-    environmentBaseline(),
     ...onboardingGroups,
     ...suiteGroups,
     ...supplementalGroups,
