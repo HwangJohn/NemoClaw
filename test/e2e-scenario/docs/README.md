@@ -32,6 +32,22 @@ test plan, expected state, and post-onboard suites. Test plans can also declare
 onboarding assertions that run after install/onboard and before expected-state
 validation.
 
+The typed TS runner enforces the contract by inserting a dedicated
+`state-validation` phase between onboarding and runtime. Probe actions
+are emitted from the typed expected-state registry
+(`scenarios/expected-states.ts`, mirrored to
+`nemoclaw_scenarios/expected-states.yaml` during transition):
+
+- `cli-installed`, `gateway-healthy`, `sandbox-running` for ready states.
+- `gateway-absent`, `sandbox-absent` for negative/preflight-failure states.
+
+A failed probe is a phase-action failure; the runner short-circuits
+the runtime phase rather than running suite assertions against a
+missing or wedged environment. An onboarding-phase failure does NOT
+block state-validation — negative scenarios depend on absent-state
+probes running after the deliberate onboarding failure to verify
+forbidden side effects (gateway/sandbox left behind) did not occur.
+
 ## How to run
 
 The TypeScript runner is the only supported entrypoint. There is one

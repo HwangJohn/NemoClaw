@@ -112,13 +112,19 @@ describe("phase orchestrators - top-level delegation", () => {
       const runner = new ScenarioRunner({
         environment: fakeOrchestrator("environment"),
         onboarding: fakeOrchestrator("onboarding"),
+        stateValidation: fakeOrchestrator("state-validation"),
         runtime: fakeOrchestrator("runtime"),
       });
 
       const results = await runner.run(ctx, plan);
 
-      expect(calls).toEqual(["environment", "onboarding", "runtime"]);
-      expect(results.map((result) => result.phase)).toEqual(["environment", "onboarding", "runtime"]);
+      expect(calls).toEqual(["environment", "onboarding", "state-validation", "runtime"]);
+      expect(results.map((result) => result.phase)).toEqual([
+        "environment",
+        "onboarding",
+        "state-validation",
+        "runtime",
+      ]);
     } finally {
       fs.rmSync(ctx.contextDir, { recursive: true, force: true });
     }
@@ -522,18 +528,44 @@ describe("ScenarioRunner seeds context.env and short-circuits across phases", ()
           return { phase: "runtime" as const, status: "passed" as const, actions: [], assertions: [] };
         },
       };
-      const runner = new ScenarioRunner({ environment: failingEnv, onboarding, runtime });
+      let stateValidationCalled = false;
+      const stateValidation = {
+        run: async () => {
+          stateValidationCalled = true;
+          return {
+            phase: "state-validation" as const,
+            status: "passed" as const,
+            actions: [],
+            assertions: [],
+          };
+        },
+      };
+      const runner = new ScenarioRunner({
+        environment: failingEnv,
+        onboarding,
+        stateValidation,
+        runtime,
+      });
 
       const results = await runner.run(ctx, plan);
 
-      // Downstream orchestrators must NOT have been invoked.
+      // Downstream orchestrators must NOT have been invoked. An
+      // environment failure means install never ran; there is nothing
+      // for state-validation to probe.
       expect(onboardingCalled).toBe(false);
+      expect(stateValidationCalled).toBe(false);
       expect(runtimeCalled).toBe(false);
       // Each phase still has a result, and the downstream ones are
       // skipped with a message that names the blocking action.
-      expect(results.map((r) => r.phase)).toEqual(["environment", "onboarding", "runtime"]);
+      expect(results.map((r) => r.phase)).toEqual([
+        "environment",
+        "onboarding",
+        "state-validation",
+        "runtime",
+      ]);
       expect(results[1].status).toBe("skipped");
       expect(results[2].status).toBe("skipped");
+      expect(results[3].status).toBe("skipped");
       expect(results[1].assertions[0].message).toMatch(/blocked by prior failure/);
       expect(results[1].assertions[0].message).toMatch(/environment.install.repo-current/);
     } finally {

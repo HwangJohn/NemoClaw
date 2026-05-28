@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-export type PhaseName = "environment" | "onboarding" | "runtime";
+export type PhaseName = "environment" | "onboarding" | "state-validation" | "runtime";
 
 // Synthetic phase appended by the scenario runner when a scenario
 // declares plan.expectedFailure. Distinct from PhaseName so a scenario
@@ -11,15 +11,69 @@ export type NegativeContractPhase = "negative-contract";
 
 export type PhaseResultName = PhaseName | NegativeContractPhase;
 
+// Concrete probe ids the state-validation orchestrator emits as phase
+// actions. Each id maps to a probe script under
+// nemoclaw_scenarios/probes/. Inference and credentials probes are
+// declared but not yet implemented; the compiler skips emitting actions
+// for them until the probe scripts land.
+export type StateProbeId =
+  | "cli-installed"
+  | "gateway-healthy"
+  | "gateway-absent"
+  | "sandbox-running"
+  | "sandbox-absent";
+
 // User-facing phase the negative-scenario contract advertises. Wider
 // than PhaseName because manifests may declare "preflight" failures,
 // which the matcher resolves to the onboarding phase orchestrator.
-export type ExpectedFailurePhase = PhaseName | "preflight";
+// state-validation is intentionally omitted: it is an internal phase
+// the framework inserts after onboarding; scenarios cannot declare
+// expected failures against it (those are expressed via
+// expectedStateId + the absent/forbidden-side-effect probes).
+export type ExpectedFailurePhase = "environment" | "onboarding" | "runtime" | "preflight";
 
 export interface ExpectedFailureContract {
   phase: ExpectedFailurePhase;
   errorClass: string;
   forbiddenSideEffects?: readonly string[];
+}
+
+// Expected-state contract. Mirrors the structural shape of
+// nemoclaw_scenarios/expected-states.yaml so the typed registry can
+// remain a verifiable mirror of the legacy YAML during transition.
+// Each dimension's `expected` field declares whether that aspect of
+// the post-setup environment should be present, absent, or optional.
+// Optional dimensions emit no probe actions; present/absent dimensions
+// emit a real probe that gates the runtime phase.
+//
+// Spec ownership: the typed registry (scenarios/expected-states.ts) is
+// the source of truth for the TS runner; expected-states.yaml stays
+// alongside until the legacy resolver is fully retired, with a contract
+// test that the typed registry mirrors the YAML.
+export type ExpectedPresence = "present" | "absent" | "optional";
+export type ExpectedHealth = "healthy" | "absent" | "optional";
+export type ExpectedSandboxStatus = "running" | "absent" | "optional";
+export type ExpectedInferenceAvail = "available" | "absent" | "optional";
+
+export interface ExpectedState {
+  id: string;
+  cli?: { installed?: boolean };
+  gateway?: {
+    expected: ExpectedPresence;
+    health?: ExpectedHealth;
+  };
+  sandbox?: {
+    expected: ExpectedPresence;
+    status?: ExpectedSandboxStatus;
+    agent?: string;
+  };
+  inference?: {
+    expected: ExpectedInferenceAvail;
+    provider?: string;
+  };
+  credentials?: {
+    expected: ExpectedPresence;
+  };
 }
 
 export type TransientClassifier =

@@ -10,6 +10,7 @@ import { EnvironmentOrchestrator } from "./environment.ts";
 import { evaluateNegativeContract, negativeContractPhaseResult } from "./negative-matcher.ts";
 import { OnboardingOrchestrator } from "./onboarding.ts";
 import { RuntimeOrchestrator } from "./runtime.ts";
+import { StateValidationOrchestrator } from "./state-validation.ts";
 
 interface PhaseRunner {
   run(ctx: RunContext, phase: RunPlanPhase, priorResults?: PhaseResult[]): Promise<PhaseResult>;
@@ -18,17 +19,20 @@ interface PhaseRunner {
 export interface ScenarioRunnerDeps {
   environment?: PhaseRunner;
   onboarding?: PhaseRunner;
+  stateValidation?: PhaseRunner;
   runtime?: PhaseRunner;
 }
 
 export class ScenarioRunner {
   private readonly environment: PhaseRunner;
   private readonly onboarding: PhaseRunner;
+  private readonly stateValidation: PhaseRunner;
   private readonly runtime: PhaseRunner;
 
   constructor(deps: ScenarioRunnerDeps = {}) {
     this.environment = deps.environment ?? new EnvironmentOrchestrator();
     this.onboarding = deps.onboarding ?? new OnboardingOrchestrator();
+    this.stateValidation = deps.stateValidation ?? new StateValidationOrchestrator();
     this.runtime = deps.runtime ?? new RuntimeOrchestrator();
   }
 
@@ -41,7 +45,7 @@ export class ScenarioRunner {
 
     const results: PhaseResult[] = [];
     for (const phase of plan.phases) {
-      const blocked = blockingPriorResult(results);
+      const blocked = phaseBlockedBy(phase.name, results);
       if (blocked) {
         // Cross-phase short-circuit: the previous phase's setup work
         // failed, so this phase cannot meaningfully run. Synthesize a
@@ -86,13 +90,14 @@ export class ScenarioRunner {
   private orchestratorFor(name: RunPlanPhase["name"]): PhaseRunner {
     if (name === "environment") return this.environment;
     if (name === "onboarding") return this.onboarding;
+    if (name === "state-validation") return this.stateValidation;
     if (name === "runtime") return this.runtime;
     throw new Error(`Unsupported phase: ${String(name)}`);
   }
 }
 
 interface BlockingFailure {
-  phase: "environment" | "onboarding" | "runtime";
+  phase: "environment" | "onboarding" | "state-validation" | "runtime";
   action: PhaseActionResult;
 }
 
@@ -117,13 +122,42 @@ function writeNegativeContractArtifact(
   }
 }
 
-function blockingPriorResult(results: PhaseResult[]): BlockingFailure | undefined {
+// state-validation is the typed diagnostic layer between onboarding
+// and runtime. It probes gateway/sandbox/cli post-conditions and is
+// the phase that proves a negative scenario's forbidden side effects
+// did not occur (gateway-absent, sandbox-absent). For state-validation
+// to do its job after a deliberate onboarding failure (negative
+// scenarios), an onboarding failure must NOT block it. Only an
+// environment-phase failure (install never ran) skips state-validation.
+// Runtime stays blocked by any prior phase-action failure, including
+// state-validation, so suites never run against a missing or wedged
+// environment.
+function phaseBlockedBy(
+  phase: "environment" | "onboarding" | "state-validation" | "runtime",
+  results: PhaseResult[],
+): BlockingFailure | undefined {
+  const firstFailure = firstBlockingActionFailure(results);
+  if (!firstFailure) {
+    return undefined;
+  }
+  if (phase === "state-validation" && firstFailure.phase !== "environment") {
+    return undefined;
+  }
+  return firstFailure;
+}
+
+function firstBlockingActionFailure(results: PhaseResult[]): BlockingFailure | undefined {
   // A phase action failure (real setup work didn't succeed) blocks
   // downstream phases. Assertion failures do NOT block downstream
   // phases - they are expected to be reported alongside other phase
   // results so reviewers can see all failure layers at once.
   for (const result of results) {
-    if (result.phase !== "environment" && result.phase !== "onboarding" && result.phase !== "runtime") {
+    if (
+      result.phase !== "environment" &&
+      result.phase !== "onboarding" &&
+      result.phase !== "state-validation" &&
+      result.phase !== "runtime"
+    ) {
       continue;
     }
     const failedAction = result.actions.find((action) => action.status === "failed");

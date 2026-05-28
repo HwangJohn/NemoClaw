@@ -333,11 +333,17 @@ describe("ScenarioRunner appends negative-contract phase", () => {
       const runner = new ScenarioRunner({
         environment: fakePhase("environment"),
         onboarding: fakePhase("onboarding"),
+        stateValidation: fakePhase("state-validation"),
         runtime: fakePhase("runtime"),
       });
 
       const results = await runner.run(ctx, plan);
-      expect(results.map((r) => r.phase)).toEqual(["environment", "onboarding", "runtime"]);
+      expect(results.map((r) => r.phase)).toEqual([
+        "environment",
+        "onboarding",
+        "state-validation",
+        "runtime",
+      ]);
     } finally {
       fs.rmSync(ctx.contextDir, { recursive: true, force: true });
     }

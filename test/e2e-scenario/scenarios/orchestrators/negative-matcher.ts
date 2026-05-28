@@ -60,7 +60,23 @@ export interface NegativeContractResult {
 // declared in assertions/registry.ts. The matcher excludes failures of
 // that step from "observed failure" detection so the contract evaluation
 // is not confused by its own enforcement scaffolding.
+//
+// As of the state-validation phase landing, forbidden side effects are
+// observed by the typed gateway-absent / sandbox-absent probes during
+// the state-validation phase, not by this pending step. The exclusion
+// is kept to stay correct for any scenario that still references the
+// legacy step id.
 const SIDE_EFFECT_PROBE_STEP_ID = "runtime.expected-failure.no-side-effects";
+
+// State-validation probe ids the matcher must skip when scanning for
+// observed failures. For a negative scenario, these probes are real
+// post-failure checks (gateway-absent, sandbox-absent) — their pass/fail
+// status does NOT determine which phase advertised the original failure
+// mode, only whether forbidden side effects occurred.
+const STATE_VALIDATION_FORBIDDEN_PROBE_IDS: ReadonlySet<string> = new Set([
+  "state-validation.gateway-absent",
+  "state-validation.sandbox-absent",
+]);
 
 // Map the user-facing expected failure phase to the internal phase
 // orchestrator that owns it. Today preflight assertions live under
@@ -73,7 +89,12 @@ function resolveExpectedPhase(phase: ExpectedFailurePhase): PhaseName {
 }
 
 function isOwnPhaseResult(phase: PhaseResult["phase"]): phase is PhaseName {
-  return phase === "environment" || phase === "onboarding" || phase === "runtime";
+  return (
+    phase === "environment" ||
+    phase === "onboarding" ||
+    phase === "state-validation" ||
+    phase === "runtime"
+  );
 }
 
 function findFirstObservedFailure(results: readonly PhaseResult[]): NegativeContractObservation | undefined {
@@ -81,7 +102,16 @@ function findFirstObservedFailure(results: readonly PhaseResult[]): NegativeCont
     if (!isOwnPhaseResult(result.phase)) {
       continue;
     }
-    const failedAction = result.actions.find((action) => action.status === "failed");
+    // state-validation forbidden-side-effect probes (gateway-absent,
+    // sandbox-absent) are post-failure verification, not the failure
+    // mode itself; skip them when locating the originating failure.
+    // A failed cli-installed probe IS a real observed failure (the
+    // install action passed but the binary isn't reachable) and is
+    // not skipped.
+    const failedAction = result.actions.find(
+      (action) =>
+        action.status === "failed" && !STATE_VALIDATION_FORBIDDEN_PROBE_IDS.has(action.id),
+    );
     if (failedAction) {
       return {
         failedPhase: result.phase,

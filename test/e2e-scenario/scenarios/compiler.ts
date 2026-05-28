@@ -4,6 +4,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { getExpectedState, probesForState } from "./expected-states.ts";
 import { loadManifest } from "./manifests.ts";
 import { requireScenarios } from "./registry.ts";
 import type {
@@ -18,7 +19,12 @@ import type {
   SutBoundary,
 } from "./types.ts";
 
-const PHASES: PhaseName[] = ["environment", "onboarding", "runtime"];
+// Phase order. state-validation runs after onboarding and before
+// runtime so gateway/sandbox/cli probes gate suite execution: a
+// failed probe is a failed phase action, and the existing runner
+// short-circuit reports runtime as skipped without re-running
+// suite assertions against a missing/wedged environment.
+const PHASES: PhaseName[] = ["environment", "onboarding", "state-validation", "runtime"];
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
 function groupsForPhase(scenario: ScenarioDefinition, phase: PhaseName): AssertionGroup[] {
@@ -83,11 +89,16 @@ function validateManifestCompatibility(scenario: ScenarioDefinition, manifest?: 
 // resurrected bash runner.
 const INSTALL_DISPATCH = "test/e2e-scenario/nemoclaw_scenarios/install/dispatch.sh";
 const ONBOARD_DISPATCH = "test/e2e-scenario/nemoclaw_scenarios/onboard/dispatch.sh";
+const PROBES_DISPATCH = "test/e2e-scenario/nemoclaw_scenarios/probes/dispatch.sh";
 
 // Default action timeouts. Install and onboarding can take a while on
 // cold runners (Docker pulls, image builds, sandbox bootstrap).
 const INSTALL_TIMEOUT_SECONDS = 900;
 const ONBOARD_TIMEOUT_SECONDS = 900;
+// State-validation probes are cheap (`command -v`, single curl,
+// `nemoclaw list`); a tight timeout keeps a wedged probe from
+// consuming runner budget.
+const PROBE_TIMEOUT_SECONDS = 30;
 
 // Declared parent-env secrets each onboarding profile actually needs.
 // Anything not listed here (and not in the framework allowlist) is
@@ -182,6 +193,39 @@ function phaseActions(phase: PhaseName, scenario: ScenarioDefinition): PhaseActi
         secretEnv,
       },
     ];
+  }
+  if (phase === "state-validation") {
+    // State-validation actions are emitted from the typed expected-state
+    // registry, NOT from the legacy expected-states.yaml. The compiler
+    // stays a pure function over typed inputs; YAML-vs-typed parity is
+    // enforced by a framework test, not by re-reading the YAML at
+    // compile time.
+    if (!scenario.expectedStateId) {
+      // Scenarios without an expected state (older skeleton scenarios)
+      // legitimately have no probes; do not fail-fast.
+      return [];
+    }
+    const state = getExpectedState(scenario.expectedStateId);
+    if (!state) {
+      // The compiler treats an unknown expected_state id as a hard
+      // error: typed scenarios must reference a typed state. The
+      // legacy YAML resolver has its own validation path; this is a
+      // separate (and stricter) contract for the typed runner.
+      throw new Error(
+        `Scenario ${scenario.id} references unknown expected_state '${scenario.expectedStateId}'`,
+      );
+    }
+    return probesForState(state).map((probeId) => ({
+      id: `state-validation.${probeId}`,
+      phase: "state-validation",
+      description: `Probe ${probeId} from expected_state '${state.id}'.`,
+      kind: "shell-fn",
+      scriptRef: PROBES_DISPATCH,
+      fn: "e2e_state_probe",
+      arg: probeId,
+      timeoutSeconds: PROBE_TIMEOUT_SECONDS,
+      evidencePath: `.e2e/actions/state-validation.${probeId}.log`,
+    }));
   }
   // Runtime phase has no actions; suites are assertion groups.
   return [];
