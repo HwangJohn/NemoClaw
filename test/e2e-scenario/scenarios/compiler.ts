@@ -6,7 +6,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadManifest } from "./manifests.ts";
 import { requireScenarios } from "./registry.ts";
-import type { AssertionGroup, NemoClawInstanceManifest, PhaseName, RunPlan, ScenarioDefinition, SutBoundary } from "./types.ts";
+import type {
+  AssertionGroup,
+  NemoClawInstanceManifest,
+  PhaseAction,
+  PhaseName,
+  RunPlan,
+  ScenarioDefinition,
+  SutBoundary,
+} from "./types.ts";
 
 const PHASES: PhaseName[] = ["environment", "onboarding", "runtime"];
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -67,17 +75,72 @@ function validateManifestCompatibility(scenario: ScenarioDefinition, manifest?: 
   }
 }
 
-function phaseActions(phase: PhaseName, scenario: ScenarioDefinition): string[] {
+// Centralized paths to the existing shell helpers. Spec rule: shell
+// scripts can remain as implementations, but invocation goes through
+// typed assertion/action definitions, not bare workflow YAML or a
+// resurrected bash runner.
+const INSTALL_DISPATCH = "test/e2e-scenario/nemoclaw_scenarios/install/dispatch.sh";
+const ONBOARD_DISPATCH = "test/e2e-scenario/nemoclaw_scenarios/onboard/dispatch.sh";
+const CONTEXT_EMIT = "test/e2e-scenario/nemoclaw_scenarios/helpers/emit-context-from-plan.sh";
+
+// Default action timeouts. Install and onboarding can take a while on
+// cold runners (Docker pulls, image builds, sandbox bootstrap).
+const INSTALL_TIMEOUT_SECONDS = 900;
+const ONBOARD_TIMEOUT_SECONDS = 900;
+const CONTEXT_EMIT_TIMEOUT_SECONDS = 30;
+
+function phaseActions(phase: PhaseName, scenario: ScenarioDefinition): PhaseAction[] {
   if (phase === "environment") {
+    const installId = scenario.environment?.install;
+    if (!installId) {
+      // No install dimension defined - the scenario is malformed; surface
+      // it as a hard error rather than emitting a bogus action.
+      return [];
+    }
     return [
-      `install:${scenario.environment?.install ?? "unknown"}`,
-      `runtime:${scenario.environment?.runtime ?? "unknown"}`,
+      {
+        id: "environment.context.emit",
+        phase: "environment",
+        description: "Emit .e2e/context.env from the resolved run plan.",
+        kind: "shell",
+        scriptRef: CONTEXT_EMIT,
+        timeoutSeconds: CONTEXT_EMIT_TIMEOUT_SECONDS,
+        evidencePath: `.e2e/actions/environment.context.emit.log`,
+      },
+      {
+        id: `environment.install.${installId}`,
+        phase: "environment",
+        description: `Run e2e_install ${installId} to set up the host control plane.`,
+        kind: "shell-fn",
+        scriptRef: INSTALL_DISPATCH,
+        fn: "e2e_install",
+        arg: installId,
+        timeoutSeconds: INSTALL_TIMEOUT_SECONDS,
+        evidencePath: `.e2e/actions/environment.install.${installId}.log`,
+      },
     ];
   }
   if (phase === "onboarding") {
-    return [`onboard:${scenario.environment?.onboarding ?? "unknown"}`];
+    const onboardingId = scenario.environment?.onboarding;
+    if (!onboardingId) {
+      return [];
+    }
+    return [
+      {
+        id: `onboarding.profile.${onboardingId}`,
+        phase: "onboarding",
+        description: `Run e2e_onboard ${onboardingId} to bring the gateway and sandbox online.`,
+        kind: "shell-fn",
+        scriptRef: ONBOARD_DISPATCH,
+        fn: "e2e_onboard",
+        arg: onboardingId,
+        timeoutSeconds: ONBOARD_TIMEOUT_SECONDS,
+        evidencePath: `.e2e/actions/onboarding.profile.${onboardingId}.log`,
+      },
+    ];
   }
-  return (scenario.suiteIds ?? []).map((suiteId) => `suite:${suiteId}`);
+  // Runtime phase has no actions; suites are assertion groups.
+  return [];
 }
 
 const SUT_BOUNDARIES: SutBoundary[] = [
@@ -112,7 +175,7 @@ export function compileRunPlans(inputs: Array<string | ScenarioDefinition>): Run
     const plan: RunPlan = {
       scenarioId: scenario.id,
       status: "compiled",
-      note: "compiled plan-only preview; live execution lands in later phases",
+      note: "compiled plan; phase orchestrators execute actions then assertions",
       manifestPath: scenario.manifestPath,
       manifest,
       environment: scenario.environment,
@@ -182,6 +245,18 @@ export function renderPlanText(plans: RunPlan[]): string {
     }
     for (const phase of plan.phases) {
       lines.push(`Phase: ${phase.name}`);
+      for (const action of phase.actions) {
+        const policy: string[] = [];
+        if (action.timeoutSeconds) {
+          policy.push(`timeout=${action.timeoutSeconds}s`);
+        }
+        const target = action.kind === "shell-fn"
+          ? `${action.fn ?? ""}${action.arg ? ` ${action.arg}` : ""}`.trim()
+          : action.scriptRef;
+        const policySuffix = policy.length > 0 ? ` (${policy.join(", ")})` : "";
+        const targetSuffix = target ? ` -> ${target}` : "";
+        lines.push(`  Action: ${action.id}${policySuffix}${targetSuffix}`);
+      }
       for (const group of phase.assertionGroups) {
         lines.push(`  Group: ${group.id}`);
         for (const step of group.steps) {

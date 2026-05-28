@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 import type {
   AssertionResult,
   AssertionStep,
+  PhaseAction,
+  PhaseActionResult,
   PhaseName,
   PhaseResult,
   RunContext,
@@ -45,18 +47,165 @@ export class PhaseOrchestrator {
   constructor(private readonly phaseName: PhaseName) {}
 
   async run(ctx: RunContext, phase: RunPlanPhase): Promise<PhaseResult> {
-    const assertions: AssertionResult[] = [];
-    for (const group of phase.assertionGroups) {
-      for (const step of group.steps) {
-        assertions.push(await this.runStep(ctx, step));
+    const actions: PhaseActionResult[] = [];
+    let actionFailed = false;
+    for (const action of phase.actions) {
+      const actionResult = await this.runAction(ctx, action);
+      actions.push(actionResult);
+      if (actionResult.status === "failed") {
+        actionFailed = true;
+        // Spec failure-layer rule: setup failure must not let assertions
+        // run and accidentally pass. Stop the phase here.
+        break;
       }
     }
-    const failed = assertions.some((assertion) => assertion.status === "failed");
-    const allSkipped = assertions.length > 0 && assertions.every((assertion) => assertion.status === "skipped");
-    const status: PhaseResult["status"] = failed ? "failed" : allSkipped ? "skipped" : "passed";
-    const result: PhaseResult = { phase: this.phaseName, status, assertions };
+    const assertions: AssertionResult[] = [];
+    if (!actionFailed) {
+      for (const group of phase.assertionGroups) {
+        for (const step of group.steps) {
+          assertions.push(await this.runStep(ctx, step));
+        }
+      }
+    }
+    const assertionsFailed = assertions.some((assertion) => assertion.status === "failed");
+    const allSkipped =
+      !actionFailed &&
+      assertions.length > 0 &&
+      assertions.every((assertion) => assertion.status === "skipped");
+    let status: PhaseResult["status"];
+    if (actionFailed || assertionsFailed) {
+      status = "failed";
+    } else if (allSkipped || (actions.length === 0 && assertions.length === 0)) {
+      status = "skipped";
+    } else {
+      status = "passed";
+    }
+    const result: PhaseResult = { phase: this.phaseName, status, actions, assertions };
     this.writePhaseResult(ctx, result);
     return result;
+  }
+
+  private async runAction(ctx: RunContext, action: PhaseAction): Promise<PhaseActionResult> {
+    const startedAt = Date.now();
+    const scriptPath = path.isAbsolute(action.scriptRef)
+      ? action.scriptRef
+      : path.resolve(REPO_ROOT, action.scriptRef);
+    if (!fs.existsSync(scriptPath)) {
+      return {
+        id: action.id,
+        status: "failed",
+        durationMs: Date.now() - startedAt,
+        message: `phase action ${action.id} script not found: ${scriptPath}`,
+      };
+    }
+    const timeoutSeconds = action.timeoutSeconds ?? DEFAULT_STEP_TIMEOUT_SECONDS;
+    const logDir = path.join(ctx.contextDir, ".e2e", "actions");
+    fs.mkdirSync(logDir, { recursive: true });
+    const logPath = path.join(logDir, `${action.id}.log`);
+
+    // Compose the bash invocation. shell-fn sources the dispatcher and
+    // calls the named function with its single positional arg; shell
+    // executes the script directly. We always go through bash -lc so
+    // sourced shell helpers see a normal interactive-style env.
+    const dispatchAction = path.join(REPO_ROOT, "test/e2e-scenario/nemoclaw_scenarios/dispatch-action.sh");
+    const useDispatchLauncher = action.kind === "shell-fn" && fs.existsSync(dispatchAction);
+    const bashArgs: string[] = useDispatchLauncher
+      ? [dispatchAction, action.fn ?? "", action.arg ?? "", scriptPath]
+      : [scriptPath, ...(action.arg ? [action.arg] : [])];
+
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      E2E_CONTEXT_DIR: ctx.contextDir,
+      E2E_PHASE: action.phase,
+      E2E_ACTION_ID: action.id,
+    };
+
+    return await new Promise<PhaseActionResult>((resolve) => {
+      const child = spawn("bash", bashArgs, { env, cwd: REPO_ROOT, detached: true });
+      const pgid = child.pid;
+      const logStream = fs.createWriteStream(logPath);
+      let stderrTail = "";
+      child.stdout.pipe(logStream, { end: false });
+      child.stderr.pipe(logStream, { end: false });
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderrTail = (stderrTail + chunk.toString("utf8")).slice(-4096);
+      });
+
+      const killGroup = (signal: NodeJS.Signals) => {
+        if (typeof pgid !== "number") {
+          child.kill(signal);
+          return;
+        }
+        try {
+          process.kill(-pgid, signal);
+        } catch {
+          /* group already gone */
+        }
+      };
+
+      let timedOut = false;
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        killGroup("SIGTERM");
+        setTimeout(() => {
+          if (!child.killed) {
+            killGroup("SIGKILL");
+          }
+        }, 5_000).unref();
+      }, timeoutSeconds * 1_000);
+
+      const finishLog = (): Promise<void> =>
+        new Promise((res) => {
+          if ((logStream as unknown as { closed?: boolean }).closed) {
+            res();
+            return;
+          }
+          logStream.once("finish", () => res());
+          logStream.once("error", () => res());
+          logStream.end();
+        });
+
+      child.on("error", (err) => {
+        clearTimeout(timeout);
+        void finishLog().then(() =>
+          resolve({
+            id: action.id,
+            status: "failed",
+            durationMs: Date.now() - startedAt,
+            evidence: logPath,
+            message: `phase action ${action.id} spawn error: ${err.message}`,
+          }),
+        );
+      });
+
+      child.on("close", (code, signal) => {
+        clearTimeout(timeout);
+        void finishLog().then(() => {
+          const durationMs = Date.now() - startedAt;
+          if (timedOut) {
+            resolve({
+              id: action.id,
+              status: "failed",
+              durationMs,
+              evidence: logPath,
+              message: `phase action ${action.id} exceeded ${timeoutSeconds}s (signal=${signal ?? "SIGTERM"})`,
+            });
+            return;
+          }
+          if (code === 0) {
+            resolve({ id: action.id, status: "passed", durationMs, evidence: logPath });
+            return;
+          }
+          resolve({
+            id: action.id,
+            status: "failed",
+            durationMs,
+            evidence: logPath,
+            message: `phase action ${action.id} exit ${code ?? "null"}: ${stderrTail.split("\n").slice(-3).join(" | ").trim()}`,
+          });
+        });
+      });
+    });
   }
 
   private async runStep(ctx: RunContext, step: AssertionStep): Promise<AssertionResult> {

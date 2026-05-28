@@ -100,9 +100,39 @@ export interface ScenarioDefinition {
   expectedFailure?: Record<string, unknown>;
 }
 
+// A phase action is real, deterministic setup work the phase orchestrator
+// performs BEFORE running its assertions: install nemoclaw, run
+// onboarding, emit context.env, etc. Actions short-circuit assertions on
+// failure (assertions don't run if the action they depend on failed).
+//
+// Spec ownership: phase orchestrators own actions. The top-level runner
+// must not execute actions; clients must not embed action policy.
+export interface PhaseAction {
+  id: string;
+  phase: PhaseName;
+  description?: string;
+  // "shell-fn" sources the bash dispatcher and invokes the named function.
+  // "shell"    runs an executable script (used for context-emit helper).
+  kind: "shell-fn" | "shell";
+  // Repo-relative path to the script.
+  scriptRef: string;
+  // For "shell-fn": the bash function to invoke after sourcing scriptRef.
+  fn?: string;
+  // Single positional arg passed to the function/script (install method or
+  // onboarding profile id today). Kept as a single string to keep stable
+  // ids predictable; multi-arg variants can extend this later.
+  arg?: string;
+  // Per-action timeout. No retry by default - install/onboard must fail
+  // loudly so the regression is visible. Retry stays a property of
+  // assertion steps, not actions.
+  timeoutSeconds?: number;
+  // Repo-relative evidence log path.
+  evidencePath?: string;
+}
+
 export interface RunPlanPhase {
   name: PhaseName;
-  actions: string[];
+  actions: PhaseAction[];
   assertionGroups: AssertionGroup[];
 }
 
@@ -138,8 +168,20 @@ export interface AssertionResult {
   message?: string;
 }
 
+export interface PhaseActionResult {
+  id: string;
+  status: "passed" | "failed" | "skipped";
+  durationMs: number;
+  evidence?: string;
+  message?: string;
+}
+
 export interface PhaseResult {
   phase: PhaseName;
   status: "passed" | "failed" | "skipped";
+  // Action results are recorded distinctly from assertion results so
+  // failure-layer attribution stays unambiguous: a failure in actions
+  // means setup never completed; assertions did not have a fair chance.
+  actions: PhaseActionResult[];
   assertions: AssertionResult[];
 }

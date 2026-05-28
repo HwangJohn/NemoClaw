@@ -10,7 +10,14 @@ import { HostCliClient } from "../scenarios/clients/host-cli.ts";
 import { compileRunPlans } from "../scenarios/compiler.ts";
 import { PhaseOrchestrator } from "../scenarios/orchestrators/phase.ts";
 import { ScenarioRunner } from "../scenarios/orchestrators/runner.ts";
-import type { AssertionStep, PhaseName, PhaseResult, RunContext, RunPlanPhase } from "../scenarios/types.ts";
+import type {
+  AssertionStep,
+  PhaseAction,
+  PhaseName,
+  PhaseResult,
+  RunContext,
+  RunPlanPhase,
+} from "../scenarios/types.ts";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
 
@@ -59,6 +66,37 @@ function writeTempScript(dir: string, name: string, body: string): string {
   return p;
 }
 
+function shellAction(
+  id: string,
+  phase: PhaseName,
+  scriptRef: string,
+  opts: { timeoutSeconds?: number; arg?: string } = {},
+): PhaseAction {
+  return {
+    id,
+    phase,
+    kind: "shell",
+    scriptRef,
+    arg: opts.arg,
+    timeoutSeconds: opts.timeoutSeconds,
+  };
+}
+
+function makePhaseWithActions(
+  phase: PhaseName,
+  actions: PhaseAction[],
+  steps: AssertionStep[],
+): RunPlanPhase {
+  return {
+    name: phase,
+    actions,
+    assertionGroups:
+      steps.length > 0
+        ? [{ id: `group.${steps[0].id}`, phase, migrationStatus: "complete", steps }]
+        : [],
+  };
+}
+
 describe("phase orchestrators - top-level delegation", () => {
   it("test_should_execute_phase_assertions_from_phase_orchestrators_not_top_level_runner", async () => {
     const ctx = freshCtx();
@@ -68,7 +106,7 @@ describe("phase orchestrators - top-level delegation", () => {
       const fakeOrchestrator = (phase: PhaseName) => ({
         run: async (_ctx: RunContext, runPhase: RunPlanPhase, _prior?: PhaseResult[]): Promise<PhaseResult> => {
           calls.push(runPhase.name);
-          return { phase, status: "passed", assertions: [] };
+          return { phase, status: "passed", actions: [], assertions: [] };
         },
       });
       const runner = new ScenarioRunner({
@@ -216,6 +254,133 @@ describe("phase orchestrators - real shell execution", () => {
       expect(result.assertions[0].message).toMatch(/^pending:/);
     } finally {
       fs.rmSync(ctx.contextDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("phase orchestrators - actions execute before assertions", () => {
+  it("phase_action_runs_before_assertions_and_records_evidence", async () => {
+    const ctx = freshCtx();
+    try {
+      const actionScript = writeTempScript(ctx.contextDir, "setup.sh", "echo phase-action-evidence");
+      const action = shellAction("environment.setup-ok", "environment", path.relative(REPO_ROOT, actionScript));
+      const stepScript = writeTempScript(ctx.contextDir, "after.sh", "echo after-action");
+      const step = shellStep("environment.assert-ok", "environment", path.relative(REPO_ROOT, stepScript));
+      const orchestrator = new PhaseOrchestrator("environment");
+
+      const result = await orchestrator.run(ctx, makePhaseWithActions("environment", [action], [step]));
+
+      expect(result.status).toBe("passed");
+      expect(result.actions).toHaveLength(1);
+      expect(result.actions[0]).toEqual(
+        expect.objectContaining({ id: "environment.setup-ok", status: "passed" }),
+      );
+      expect(result.actions[0].evidence).toBeTruthy();
+      const actionLog = fs.readFileSync(result.actions[0].evidence!, "utf8");
+      expect(actionLog).toContain("phase-action-evidence");
+      expect(result.assertions).toHaveLength(1);
+      expect(result.assertions[0].status).toBe("passed");
+    } finally {
+      fs.rmSync(ctx.contextDir, { recursive: true, force: true });
+    }
+  });
+
+  it("phase_action_failure_short_circuits_assertions", async () => {
+    const ctx = freshCtx();
+    try {
+      const failScript = writeTempScript(ctx.contextDir, "fail.sh", 'echo "setup boom" >&2; exit 5');
+      const action = shellAction("environment.setup-fail", "environment", path.relative(REPO_ROOT, failScript));
+      const stepScript = writeTempScript(ctx.contextDir, "after.sh", "echo should-not-run");
+      const step = shellStep("environment.never-runs", "environment", path.relative(REPO_ROOT, stepScript));
+      const orchestrator = new PhaseOrchestrator("environment");
+
+      const result = await orchestrator.run(ctx, makePhaseWithActions("environment", [action], [step]));
+
+      expect(result.status).toBe("failed");
+      expect(result.actions).toHaveLength(1);
+      expect(result.actions[0].status).toBe("failed");
+      expect(result.actions[0].message).toMatch(/exit 5/);
+      // Assertions must NOT have run, so they must NOT show a misleading
+      // pass for an environment that was never set up.
+      expect(result.assertions).toEqual([]);
+    } finally {
+      fs.rmSync(ctx.contextDir, { recursive: true, force: true });
+    }
+  });
+
+  it("phase_action_times_out_via_orchestrator_policy", async () => {
+    const ctx = freshCtx();
+    try {
+      const slow = writeTempScript(ctx.contextDir, "slow.sh", "sleep 30");
+      const action = shellAction("environment.setup-slow", "environment", path.relative(REPO_ROOT, slow), {
+        timeoutSeconds: 1,
+      });
+      const orchestrator = new PhaseOrchestrator("environment");
+
+      const started = Date.now();
+      const result = await orchestrator.run(ctx, makePhaseWithActions("environment", [action], []));
+
+      expect(result.status).toBe("failed");
+      expect(result.actions[0].status).toBe("failed");
+      expect(result.actions[0].message).toMatch(/exceeded 1s/);
+      // The orchestrator must enforce the timeout, not depend on the
+      // script self-killing. Allow some headroom but fail if we waited
+      // anywhere near the script's 30s sleep.
+      expect(Date.now() - started).toBeLessThan(15_000);
+    } finally {
+      fs.rmSync(ctx.contextDir, { recursive: true, force: true });
+    }
+  });
+
+  it("phase_action_evidence_log_is_flushed_before_resolve", async () => {
+    const ctx = freshCtx();
+    try {
+      const actionScript = writeTempScript(ctx.contextDir, "flush.sh", "echo flushed-phase-action-output");
+      const action = shellAction("environment.flush", "environment", path.relative(REPO_ROOT, actionScript));
+      const orchestrator = new PhaseOrchestrator("environment");
+
+      const result = await orchestrator.run(ctx, makePhaseWithActions("environment", [action], []));
+
+      // Synchronous read must already see the output - the orchestrator
+      // must wait for the WriteStream's 'finish' before resolving.
+      const log = fs.readFileSync(result.actions[0].evidence!, "utf8");
+      expect(log).toContain("flushed-phase-action-output");
+    } finally {
+      fs.rmSync(ctx.contextDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("plan compiler emits phase actions for canonical scenarios", () => {
+  it("compiler_emits_install_and_onboard_actions_for_canonical_scenarios", async () => {
+    const { compileRunPlans } = await import("../scenarios/compiler.ts");
+    const ids = [
+      "ubuntu-repo-cloud-openclaw",
+      "ubuntu-repo-cloud-hermes",
+      "gpu-repo-local-ollama-openclaw",
+      "macos-repo-cloud-openclaw",
+      "wsl-repo-cloud-openclaw",
+      "brev-launchable-cloud-openclaw",
+      "ubuntu-no-docker-preflight-negative",
+    ];
+    const plans = compileRunPlans(ids);
+    expect(plans).toHaveLength(ids.length);
+    for (const plan of plans) {
+      const env = plan.phases.find((p) => p.name === "environment")!;
+      const onb = plan.phases.find((p) => p.name === "onboarding")!;
+      expect(env.actions.map((a) => a.id)).toContain("environment.context.emit");
+      expect(env.actions.some((a) => a.id.startsWith("environment.install."))).toBe(true);
+      expect(onb.actions.some((a) => a.id.startsWith("onboarding.profile."))).toBe(true);
+      // Every install/onboard action must be a typed shell-fn referencing
+      // the canonical dispatcher script - no free-form strings.
+      for (const action of [...env.actions, ...onb.actions]) {
+        if (action.id.startsWith("environment.install.") || action.id.startsWith("onboarding.profile.")) {
+          expect(action.kind).toBe("shell-fn");
+          expect(action.scriptRef).toMatch(/dispatch\.sh$/);
+          expect(action.fn).toMatch(/^e2e_(install|onboard)$/);
+          expect(action.arg).toBeTruthy();
+        }
+      }
     }
   });
 });
