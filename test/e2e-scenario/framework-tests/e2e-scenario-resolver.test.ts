@@ -202,4 +202,3 @@ suites:
 // run-scenario.sh-based plan-only tests removed: the bash runner is
 // now a fail-fast stub. Equivalent coverage of the typed runner lives in
 // e2e-plan-compiler.test.ts and e2e-scenario-registry.test.ts.
-
