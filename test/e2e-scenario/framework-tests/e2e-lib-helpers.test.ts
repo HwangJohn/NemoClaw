@@ -1150,7 +1150,12 @@ esac
 echo lifecycle-ok
 `, { mode: 0o755 });
       fs.writeFileSync(path.join(tmp, "context.env"), "E2E_SANDBOX_NAME=sb1\nE2E_GATEWAY_URL=http://127.0.0.1:1\n");
-      const r = runBash(`set -euo pipefail; . "${VALIDATION_SUITES}/lib/sandbox_lifecycle.sh"; sandbox_lifecycle_load_context; sandbox_lifecycle_assert_nemoclaw_list_contains_sandbox; sandbox_lifecycle_assert_status_fields_present; sandbox_lifecycle_assert_logs_available; sandbox_lifecycle_assert_openshell_exec_ok`, { E2E_CONTEXT_DIR: tmp, PATH: `${bin}:${process.env.PATH}` });
+      // Force the wrapper's openshell-exec fallback transport: this
+      // stub openshell ignores its argv and always echoes 'lifecycle-ok',
+      // which would corrupt an ssh-config materialization. The opt-out
+      // env var keeps the test exercising openshell-exec directly while
+      // production callers still pick up ssh-config-preferred routing.
+      const r = runBash(`set -euo pipefail; . "${VALIDATION_SUITES}/lib/sandbox_lifecycle.sh"; sandbox_lifecycle_load_context; sandbox_lifecycle_assert_nemoclaw_list_contains_sandbox; sandbox_lifecycle_assert_status_fields_present; sandbox_lifecycle_assert_logs_available; sandbox_lifecycle_assert_openshell_exec_ok`, { E2E_CONTEXT_DIR: tmp, PATH: `${bin}:${process.env.PATH}`, E2E_SANDBOX_EXEC_VIA_OPENSHELL: "1" });
       expect(r.status, r.stderr).toBe(0);
       expect(r.stdout).toMatch(/validation\.sandbox_operations\.sandbox_listed/);
       expect(r.stdout).toMatch(/validation\.sandbox_operations\.openshell_exec_ok/);

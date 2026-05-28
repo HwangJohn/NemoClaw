@@ -5,6 +5,8 @@
 _sandbox_lifecycle_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../../runtime/lib/context.sh
 . "${_sandbox_lifecycle_dir}/../../runtime/lib/context.sh"
+# shellcheck source=../sandbox-exec.sh
+. "${_sandbox_lifecycle_dir}/../sandbox-exec.sh"
 
 SANDBOX_LIFECYCLE_LAST_OUTPUT=""
 
@@ -49,6 +51,37 @@ sandbox_lifecycle_run_with_timeout() {
       printf '%s\n' "${SANDBOX_LIFECYCLE_LAST_OUTPUT}" >&2
       return "${rc}"
     }
+  fi
+  printf '%s\n' "${SANDBOX_LIFECYCLE_LAST_OUTPUT}"
+}
+
+# _sandbox_lifecycle_sandbox_exec <seconds> <cmd> [args...]
+#
+# Routes ssh-into-sandbox calls through the canonical e2e_sandbox_exec
+# wrapper (ssh-config preferred transport, openshell-exec fallback,
+# classified diagnostic on hang) instead of invoking
+# `openshell sandbox exec` directly. Behavior contract for callers:
+#   - On success: SANDBOX_LIFECYCLE_LAST_OUTPUT contains stdout+stderr;
+#     stdout is also printed (matches sandbox_lifecycle_run_with_timeout).
+#   - On failure: returns the wrapper's exit code (124 on hang, real
+#     command exit otherwise) and prints the captured output to stderr.
+#
+# Why a separate helper instead of just calling e2e_sandbox_exec at the
+# call sites: this lib's existing assert helpers all read
+# SANDBOX_LIFECYCLE_LAST_OUTPUT after the timeout helper returns. Keeping
+# that contract intact lets us migrate without rewriting every assert.
+_sandbox_lifecycle_sandbox_exec() {
+  local seconds="$1"
+  shift
+  SANDBOX_LIFECYCLE_LAST_OUTPUT=""
+  local rc=0
+  SANDBOX_LIFECYCLE_LAST_OUTPUT="$(
+    E2E_SANDBOX_EXEC_TIMEOUT_SECONDS="${seconds}" \
+      e2e_sandbox_exec "${E2E_SANDBOX_NAME}" -- "$@" 2>&1
+  )" || rc=$?
+  if [[ "${rc}" -ne 0 ]]; then
+    printf '%s\n' "${SANDBOX_LIFECYCLE_LAST_OUTPUT}" >&2
+    return "${rc}"
   fi
   printf '%s\n' "${SANDBOX_LIFECYCLE_LAST_OUTPUT}"
 }
@@ -112,7 +145,7 @@ sandbox_lifecycle_assert_logs_available() {
 
 sandbox_lifecycle_assert_openshell_exec_ok() {
   local id="validation.sandbox_operations.openshell_exec_ok"
-  sandbox_lifecycle_run_with_timeout 20 openshell sandbox exec -n "${E2E_SANDBOX_NAME}" -- sh -lc 'echo lifecycle-ok' >/dev/null || {
+  _sandbox_lifecycle_sandbox_exec 20 sh -lc 'echo lifecycle-ok' >/dev/null || {
     sandbox_lifecycle_fail "${id}" "openshell exec failed"
     return 1
   }
@@ -146,7 +179,7 @@ sandbox_lifecycle_assert_gateway_recovers_after_probe() {
 }
 
 sandbox_lifecycle_assert_snapshot_create_list_restore_marker() {
-  sandbox_lifecycle_run_with_timeout 30 openshell sandbox exec -n "${E2E_SANDBOX_NAME}" -- sh -lc 'echo lifecycle-marker-before-snapshot > /tmp/nemoclaw-lifecycle-marker' >/dev/null || {
+  _sandbox_lifecycle_sandbox_exec 30 sh -lc 'echo lifecycle-marker-before-snapshot > /tmp/nemoclaw-lifecycle-marker' >/dev/null || {
     sandbox_lifecycle_fail validation.sandbox_snapshot.marker_written "failed to write marker"
     return 1
   }
@@ -156,7 +189,7 @@ sandbox_lifecycle_assert_snapshot_create_list_restore_marker() {
     return 1
   }
   sandbox_lifecycle_pass validation.sandbox_snapshot.create_succeeds "snapshot create succeeded"
-  sandbox_lifecycle_run_with_timeout 30 openshell sandbox exec -n "${E2E_SANDBOX_NAME}" -- sh -lc 'echo lifecycle-marker-after-snapshot > /tmp/nemoclaw-lifecycle-marker' >/dev/null || {
+  _sandbox_lifecycle_sandbox_exec 30 sh -lc 'echo lifecycle-marker-after-snapshot > /tmp/nemoclaw-lifecycle-marker' >/dev/null || {
     sandbox_lifecycle_fail validation.sandbox_snapshot.restore_rolls_back_marker "failed to mutate marker"
     return 1
   }
@@ -169,7 +202,7 @@ sandbox_lifecycle_assert_snapshot_create_list_restore_marker() {
     sandbox_lifecycle_fail validation.sandbox_snapshot.restore_rolls_back_marker "snapshot restore failed"
     return 1
   }
-  sandbox_lifecycle_run_with_timeout 30 openshell sandbox exec -n "${E2E_SANDBOX_NAME}" -- sh -lc 'test -f /tmp/nemoclaw-lifecycle-marker && grep -Fxq lifecycle-marker-before-snapshot /tmp/nemoclaw-lifecycle-marker' >/dev/null || {
+  _sandbox_lifecycle_sandbox_exec 30 sh -lc 'test -f /tmp/nemoclaw-lifecycle-marker && grep -Fxq lifecycle-marker-before-snapshot /tmp/nemoclaw-lifecycle-marker' >/dev/null || {
     sandbox_lifecycle_fail validation.sandbox_snapshot.restore_rolls_back_marker "marker did not roll back"
     return 1
   }
