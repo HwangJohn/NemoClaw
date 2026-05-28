@@ -3,7 +3,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 set -euo pipefail
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/lib/messaging_providers.sh"
+_SLACK_SUITES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+. "${_SLACK_SUITES_DIR}/lib/messaging_providers.sh"
+# shellcheck source=../../sandbox-exec.sh
+. "${_SLACK_SUITES_DIR}/sandbox-exec.sh"
 e2e_messaging_load_context
 provider="$(e2e_messaging_provider_name)"
 case "${provider}" in
@@ -25,7 +28,11 @@ assert cfg["plugins"]["entries"]["slack"]["enabled"] is True
   e2e_pass "expected-state.messaging.slack.openclaw-enabled channel and plugin enabled"
 
   sandbox_name="$(e2e_context_get E2E_SANDBOX_NAME)"
-  runtime_json="$(openshell sandbox exec --name "${sandbox_name}" -- timeout 45 openclaw channels list --all --json --no-color 2>/dev/null || true)"
+  # Wrapper cap (50s) sits just above the inner `timeout 45` so the inner
+  # cap is what fires under normal upstream slowness; the wrapper only
+  # catches the case where openshell itself wedges before delivering the
+  # `timeout` invocation to the sandbox.
+  runtime_json="$(E2E_SANDBOX_EXEC_TIMEOUT_SECONDS=50 e2e_sandbox_exec "${sandbox_name}" -- timeout 45 openclaw channels list --all --json --no-color 2>/dev/null || true)"
   runtime_state="$(printf '%s\n' "${runtime_json}" | python3 -c '
 import json
 import sys

@@ -13,13 +13,17 @@ LIB_DIR="$(cd "${SCRIPT_DIR}/../../../runtime/lib" && pwd)"
 . "${LIB_DIR}/env.sh"
 # shellcheck source=../../../runtime/lib/context.sh
 . "${LIB_DIR}/context.sh"
+# shellcheck source=../../sandbox-exec.sh
+. "${SCRIPT_DIR}/../../sandbox-exec.sh"
 
 echo "inference:sandbox-inference-local"
 e2e_context_require E2E_SANDBOX_NAME E2E_INFERENCE_ROUTE
 
 name="$(e2e_context_get E2E_SANDBOX_NAME)"
 route="$(e2e_context_get E2E_INFERENCE_ROUTE)"
+# Orchestrator step cap is 45s; widen wrapper cap to 35s.
 # CodeRabbit review item #13: capture then truncate to avoid `| head` racing
 # curl under `pipefail` and flagging a successful request as failed.
-body="$(openshell sandbox exec --name "${name}" -- curl -fsS --max-time 10 "https://${route}/v1/models")"
+E2E_SANDBOX_EXEC_TIMEOUT_SECONDS=35 \
+body="$(e2e_sandbox_exec "${name}" -- curl -fsS --max-time 25 "https://${route}/v1/models")"
 printf '%s\n' "${body:0:512}"
