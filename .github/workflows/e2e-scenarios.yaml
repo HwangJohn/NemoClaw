@@ -334,14 +334,25 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: e2e-scenario-${{ inputs.scenarios || github.event.inputs.scenarios }}
+          # Explicit subpath list, NOT a blanket .e2e/ + hidden files.
+          # The framework redacts every byte that flows from spawned
+          # children into actions/*.log, logs/*.log, and onboard.log via
+          # orchestrators/redaction.ts::pipeRedacted. Anything outside
+          # the listed paths (notably the raw context.env file) is
+          # excluded so secret-bearing key=value lines cannot leak via
+          # the artifact even if a future helper writes there.
+          # Diagnostic dumps of context use e2e_context_dump, which
+          # redacts on emit (runtime/lib/context.sh).
           path: |
             .e2e/run-plan.json
             .e2e/plan.txt
             .e2e/environment.result.json
             .e2e/onboarding.result.json
             .e2e/runtime.result.json
-            .e2e/
+            .e2e/actions/
+            .e2e/logs/
+            .e2e/onboard.log
             test/e2e/logs/
           if-no-files-found: warn
           retention-days: 14
-          include-hidden-files: true
+          include-hidden-files: false

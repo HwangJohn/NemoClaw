@@ -87,6 +87,25 @@ const ONBOARD_DISPATCH = "test/e2e-scenario/nemoclaw_scenarios/onboard/dispatch.
 const INSTALL_TIMEOUT_SECONDS = 900;
 const ONBOARD_TIMEOUT_SECONDS = 900;
 
+// Declared parent-env secrets each onboarding profile actually needs.
+// Anything not listed here (and not in the framework allowlist) is
+// dropped before spawn by buildChildEnv. Keep this list minimal —
+// every entry widens the secret blast radius if the child or one of
+// its descendants logs unredacted output.
+const ONBOARD_PROFILE_SECRET_ENV: Readonly<Record<string, readonly string[]>> = {
+  // Cloud profiles invoke `nemoclaw onboard` which authenticates to the
+  // NVIDIA cloud provider via NVIDIA_API_KEY.
+  "cloud-openclaw": ["NVIDIA_API_KEY"],
+  "cloud-openclaw-custom-policies": ["NVIDIA_API_KEY"],
+  "cloud-openclaw-invalid-nvidia-key": ["NVIDIA_API_KEY"],
+  "cloud-openclaw-gateway-port-conflict": ["NVIDIA_API_KEY"],
+  "cloud-hermes": ["NVIDIA_API_KEY"],
+  "cloud-hermes-discord": ["NVIDIA_API_KEY"],
+  "cloud-hermes-slack": ["NVIDIA_API_KEY"],
+  // Local profiles do not need any cloud secret.
+  "local-ollama-openclaw": [],
+};
+
 function phaseActions(phase: PhaseName, scenario: ScenarioDefinition): PhaseAction[] {
   if (phase === "environment") {
     if (!scenario.environment) {
@@ -123,6 +142,11 @@ function phaseActions(phase: PhaseName, scenario: ScenarioDefinition): PhaseActi
     if (!onboardingId) {
       throw new Error(`Scenario ${scenario.id} is missing environment.onboarding`);
     }
+    // secretEnv defaults to [] (no parent-env secrets pass through)
+    // unless the profile is explicitly listed above. Unknown profiles
+    // get the safest setting and surface the gap loudly the first
+    // time they actually need a secret to authenticate.
+    const secretEnv = ONBOARD_PROFILE_SECRET_ENV[onboardingId] ?? [];
     return [
       {
         id: `onboarding.profile.${onboardingId}`,
@@ -137,6 +161,7 @@ function phaseActions(phase: PhaseName, scenario: ScenarioDefinition): PhaseActi
         // Legacy preflight assertions look for ${E2E_CONTEXT_DIR}/onboard.log;
         // publish a stable alias so they keep working without rewiring.
         aliasPath: "onboard.log",
+        secretEnv,
       },
     ];
   }

@@ -555,6 +555,150 @@ describe("ScenarioRunner seeds context.env and short-circuits across phases", ()
   });
 });
 
+describe("framework-owned secret hygiene at the spawn boundary", () => {
+  it("test_should_not_persist_secret_shaped_child_output_into_evidence", async () => {
+    const ctx = freshCtx();
+    try {
+      // Child writes secret-shaped tokens (NVIDIA, GitHub, OpenAI,
+      // Slack, Bearer-prefixed) on both stdout and stderr, then exits
+      // non-zero so stderrTail also flows into result.message. None of
+      // those literal tokens may persist anywhere in the evidence.
+      const body = [
+        'echo "step prints nvapi-1234567890abcdef0123456789"',
+        'echo "and ghp_abcdefghijklmnopqrstuvwxyz0123456789"',
+        'echo "and sk-abcdefghijklmnopqrstuvwxyz0123456789"',
+        'echo "and xoxb-9876543210-fake-bot-token-abc"',
+        'echo "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature" 1>&2',
+        'exit 7',
+      ].join("\n");
+      const script = writeTempScript(ctx.contextDir, "leak.sh", body);
+      const ref = path.relative(REPO_ROOT, script);
+      const step = shellStep("runtime.leak", "runtime", ref);
+      const orchestrator = new PhaseOrchestrator("runtime");
+
+      const result = await orchestrator.run(ctx, makePhase([step]));
+      const assertion = result.assertions[0];
+      const logBody = fs.readFileSync(path.join(ctx.contextDir, ".e2e", "logs", `${step.id}.log`), "utf8");
+      const phaseResultJson = fs.readFileSync(
+        path.join(ctx.contextDir, ".e2e", "runtime.result.json"),
+        "utf8",
+      );
+      const surfaces = [logBody, assertion.message ?? "", phaseResultJson];
+
+      // Every secret-shaped token canonicalized in
+      // src/lib/security/secret-patterns.ts must be redacted on the
+      // way to disk, regardless of which surface is read.
+      const forbiddenPatterns = [
+        /nvapi-[A-Za-z0-9_-]{10,}/,
+        /ghp_[A-Za-z0-9_-]{10,}/,
+        /sk-[A-Za-z0-9_-]{20,}/,
+        /(?:xox[bpas]|xapp)-[A-Za-z0-9-]{10,}/,
+        /Bearer\s+[A-Za-z0-9_.+\/=-]{10,}/i,
+      ];
+      for (const surface of surfaces) {
+        for (const pat of forbiddenPatterns) {
+          expect(surface, `evidence surface must not contain ${pat}`).not.toMatch(pat);
+        }
+        expect(surface).toMatch(/<REDACTED>/);
+      }
+    } finally {
+      fs.rmSync(ctx.contextDir, { recursive: true, force: true });
+    }
+  });
+
+  it("test_should_drop_non_allowlisted_parent_env_unless_declared_in_secretEnv", async () => {
+    const ctx = freshCtx();
+    const sentinelKey = "SECRET_LEAK_PROBE_TOKEN";
+    const previous = process.env[sentinelKey];
+    process.env[sentinelKey] = "sentinel-value-that-must-not-leak";
+    try {
+      const script = writeTempScript(
+        ctx.contextDir,
+        "env-leak.sh",
+        `printenv | sort\n`,
+      );
+      const ref = path.relative(REPO_ROOT, script);
+      // Step does NOT declare SECRET_LEAK_PROBE_TOKEN in secretEnv,
+      // so the framework must drop it before spawn.
+      const step = shellStep("runtime.env-drop", "runtime", ref);
+      const orchestrator = new PhaseOrchestrator("runtime");
+
+      const result = await orchestrator.run(ctx, makePhase([step]));
+      const logBody = fs.readFileSync(path.join(ctx.contextDir, ".e2e", "logs", `${step.id}.log`), "utf8");
+
+      expect(result.assertions[0].status).toBe("passed");
+      expect(logBody, "non-allowlisted parent env must not reach the child").not.toContain(sentinelKey);
+      expect(logBody).not.toContain("sentinel-value-that-must-not-leak");
+      // Framework allowlist + overlay still arrive: PATH and E2E_PHASE.
+      expect(logBody).toMatch(/^PATH=/m);
+      expect(logBody).toMatch(/^E2E_PHASE=runtime$/m);
+    } finally {
+      if (previous === undefined) delete process.env[sentinelKey];
+      else process.env[sentinelKey] = previous;
+      fs.rmSync(ctx.contextDir, { recursive: true, force: true });
+    }
+  });
+
+  it("test_should_pass_declared_secretEnv_through_to_child", async () => {
+    const ctx = freshCtx();
+    const declaredKey = "NEMOCLAW_TEST_API_KEY"; // matches SECRET_ENV_KEY_SHAPE
+    const previous = process.env[declaredKey];
+    process.env[declaredKey] = "declared-secret-value-passes-through";
+    try {
+      const script = writeTempScript(
+        ctx.contextDir,
+        "declared.sh",
+        `printenv ${declaredKey} || echo MISSING\n`,
+      );
+      const ref = path.relative(REPO_ROOT, script);
+      const step: AssertionStep = {
+        ...shellStep("runtime.env-declared", "runtime", ref),
+        secretEnv: [declaredKey],
+      };
+      const orchestrator = new PhaseOrchestrator("runtime");
+
+      const result = await orchestrator.run(ctx, makePhase([step]));
+      const logBody = fs.readFileSync(path.join(ctx.contextDir, ".e2e", "logs", `${step.id}.log`), "utf8");
+
+      expect(result.assertions[0].status).toBe("passed");
+      // Declared secret reaches the child verbatim.
+      expect(logBody).toContain("declared-secret-value-passes-through");
+      // It is NOT redacted in printenv output because nothing about
+      // the literal value matches a token-shape pattern. (Real
+      // secrets that match secret-patterns.ts WILL be redacted as a
+      // second line of defense; this synthetic value is intentionally
+      // shape-free to isolate the env-passthrough behavior.)
+    } finally {
+      if (previous === undefined) delete process.env[declaredKey];
+      else process.env[declaredKey] = previous;
+      fs.rmSync(ctx.contextDir, { recursive: true, force: true });
+    }
+  });
+
+  it("test_should_reject_non_secret_shaped_keys_in_secretEnv_at_runtime", async () => {
+    const { buildChildEnv } = await import("../scenarios/orchestrators/redaction.ts");
+    expect(() =>
+      buildChildEnv(process.env, { secretEnv: ["FOO_VAR"], frameworkOverlay: {} }),
+    ).toThrow(/secret-key shape/);
+  });
+
+  it("test_should_declare_NVIDIA_API_KEY_only_for_cloud_onboarding_actions", async () => {
+    const { compileRunPlans } = await import("../scenarios/compiler.ts");
+    const plans = compileRunPlans([
+      "ubuntu-repo-cloud-openclaw",
+      "gpu-repo-local-ollama-openclaw",
+    ]);
+    const cloudOnboard = plans[0].phases
+      .find((p) => p.name === "onboarding")
+      ?.actions.find((a) => a.id.startsWith("onboarding.profile."));
+    const localOnboard = plans[1].phases
+      .find((p) => p.name === "onboarding")
+      ?.actions.find((a) => a.id.startsWith("onboarding.profile."));
+    expect(cloudOnboard?.secretEnv).toEqual(["NVIDIA_API_KEY"]);
+    expect(localOnboard?.secretEnv).toEqual([]);
+  });
+});
+
 describe("clients are pass/fail/policy free", () => {
   it("test_should_keep_clients_free_of_pass_fail_and_retry_semantics", () => {
     const observation = new HostCliClient().observeVersion();

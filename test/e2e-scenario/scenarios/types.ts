@@ -66,6 +66,12 @@ export interface AssertionStep {
   };
   evidencePath?: string;
   reliability?: AssertionStepReliability;
+  // Declared parent-env keys this step requires beyond the framework's
+  // allowlist. Anything not allowlisted and not declared here is
+  // dropped before spawn. See orchestrators/redaction.ts. Each entry
+  // must match the secret-key shape; the framework rejects non-secret
+  // names to keep the allowlist-vs-declared-secret boundary honest.
+  secretEnv?: readonly string[];
 }
 
 export interface AssertionGroup {
@@ -133,6 +139,15 @@ export interface PhaseAction {
   // reference well-known filenames (e.g. ${E2E_CONTEXT_DIR}/onboard.log)
   // keep working without coupling them to the action's stable id.
   aliasPath?: string;
+  // Declared parent-env keys this action requires beyond the
+  // framework's allowlist (PATH, HOME, E2E_*, NEMOCLAW_*, ...).
+  // Anything not allowlisted and not declared here is dropped before
+  // spawn. See orchestrators/redaction.ts. Each entry must match the
+  // secret-key shape; the framework rejects non-secret names so the
+  // allowlist-vs-declared-secret boundary stays honest. Cloud install
+  // declares ["NVIDIA_API_KEY"]; slack onboarding declares the slack
+  // tokens it actually needs; etc.
+  secretEnv?: readonly string[];
 }
 
 export interface RunPlanPhase {

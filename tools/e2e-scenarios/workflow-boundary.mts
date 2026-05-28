@@ -143,11 +143,28 @@ export function validateE2eScenariosWorkflowBoundary(
   if (uploadWith.name !== "e2e-scenario-${{ inputs.scenarios || github.event.inputs.scenarios }}") {
     errors.push("artifact upload name must include the scenarios input");
   }
-  if (uploadWith["include-hidden-files"] !== true) {
-    errors.push("artifact upload must include hidden .e2e files");
+  // Framework-owned secret hygiene: include-hidden-files MUST be false.
+  // Hidden dotfiles under the workspace can carry raw secrets (notably
+  // .e2e/context.env, written by e2e_context_set without redaction).
+  // The redacted surfaces are explicit subpaths under .e2e/ that the
+  // framework writes via orchestrators/redaction.ts::pipeRedacted.
+  if (uploadWith["include-hidden-files"] !== false) {
+    errors.push("artifact upload must set include-hidden-files: false (raw context.env must not leak)");
   }
-  if (!stringValue(uploadWith.path).includes(".e2e/")) {
-    errors.push("artifact upload path must include .e2e/");
+  const uploadPath = stringValue(uploadWith.path);
+  if (!uploadPath.includes(".e2e/actions/")) {
+    errors.push("artifact upload path must include .e2e/actions/ (redacted action evidence)");
+  }
+  if (!uploadPath.includes(".e2e/logs/")) {
+    errors.push("artifact upload path must include .e2e/logs/ (redacted shell-step evidence)");
+  }
+  // Bare blanket '.e2e/' (without a trailing subdir) would re-include
+  // the raw context.env file. Reject it so the explicit-subpath
+  // contract stays honest. Subpaths like '.e2e/actions/' are fine.
+  for (const line of uploadPath.split("\n")) {
+    if (line.trim() === ".e2e/") {
+      errors.push("artifact upload path must not list bare .e2e/ (use explicit subpaths to avoid context.env leakage)");
+    }
   }
 
   return errors;

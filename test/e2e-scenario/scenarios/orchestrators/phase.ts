@@ -16,6 +16,7 @@ import type {
   RunPlanPhase,
   TransientClassifier,
 } from "../types.ts";
+import { buildChildEnv, pipeRedacted, redactString } from "./redaction.ts";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const DEFAULT_STEP_TIMEOUT_SECONDS = 300;
@@ -116,22 +117,30 @@ export class PhaseOrchestrator {
       ? [dispatchAction, action.fn ?? "", action.arg ?? "", scriptPath]
       : [scriptPath, ...(action.arg ? [action.arg] : [])];
 
-    const env: NodeJS.ProcessEnv = {
-      ...process.env,
-      E2E_CONTEXT_DIR: ctx.contextDir,
-      E2E_PHASE: action.phase,
-      E2E_ACTION_ID: action.id,
-    };
+    // Framework-owned secret hygiene at the spawn boundary. The child
+    // gets a minimal allowlisted env plus only the secrets this action
+    // explicitly declared via PhaseAction.secretEnv. See
+    // orchestrators/redaction.ts for the full contract.
+    const env = buildChildEnv(process.env, {
+      secretEnv: action.secretEnv,
+      frameworkOverlay: {
+        E2E_CONTEXT_DIR: ctx.contextDir,
+        E2E_PHASE: action.phase,
+        E2E_ACTION_ID: action.id,
+      },
+    });
 
     return await new Promise<PhaseActionResult>((resolve) => {
       const child = spawn("bash", bashArgs, { env, cwd: REPO_ROOT, detached: true });
       const pgid = child.pid;
       const logStream = fs.createWriteStream(logPath);
       let stderrTail = "";
-      child.stdout.pipe(logStream, { end: false });
-      child.stderr.pipe(logStream, { end: false });
-      child.stderr.on("data", (chunk: Buffer) => {
-        stderrTail = (stderrTail + chunk.toString("utf8")).slice(-4096);
+      // Every byte from the child passes through redactString before
+      // hitting the evidence log or the stderr tail; raw output never
+      // touches disk or PhaseActionResult.message.
+      pipeRedacted(child.stdout, logStream);
+      pipeRedacted(child.stderr, logStream, (redactedChunk) => {
+        stderrTail = (stderrTail + redactedChunk).slice(-4096);
       });
 
       const killGroup = (signal: NodeJS.Signals) => {
@@ -176,7 +185,7 @@ export class PhaseOrchestrator {
             status: "failed",
             durationMs: Date.now() - startedAt,
             evidence: logPath,
-            message: `phase action ${action.id} spawn error: ${err.message}`,
+            message: redactString(`phase action ${action.id} spawn error: ${err.message}`),
           }),
         );
       });
@@ -310,12 +319,18 @@ export class PhaseOrchestrator {
     fs.mkdirSync(logDir, { recursive: true });
     const logPath = path.join(logDir, `${step.id}.log`);
 
-    const env: NodeJS.ProcessEnv = {
-      ...process.env,
-      E2E_CONTEXT_DIR: ctx.contextDir,
-      E2E_STEP_ID: step.id,
-      E2E_PHASE: step.phase,
-    };
+    // Framework-owned secret hygiene at the spawn boundary (mirrors
+    // runAction). The shell step's child gets only the framework
+    // allowlist + scenario context.env keys + step.secretEnv
+    // declarations. See orchestrators/redaction.ts.
+    const env = buildChildEnv(process.env, {
+      secretEnv: step.secretEnv,
+      frameworkOverlay: {
+        E2E_CONTEXT_DIR: ctx.contextDir,
+        E2E_STEP_ID: step.id,
+        E2E_PHASE: step.phase,
+      },
+    });
     // Surface scenario-derived context (E2E_SCENARIO, E2E_SANDBOX_NAME,
     // E2E_GATEWAY_URL, etc.) that the framework wrote at the start of the
     // run and that environment+onboarding phases extended via
@@ -352,10 +367,12 @@ export class PhaseOrchestrator {
       const pgid = child.pid;
       const logStream = fs.createWriteStream(logPath);
       let stderrTail = "";
-      child.stdout.pipe(logStream, { end: false });
-      child.stderr.pipe(logStream, { end: false });
-      child.stderr.on("data", (chunk: Buffer) => {
-        stderrTail = (stderrTail + chunk.toString("utf8")).slice(-4096);
+      // Redact at the I/O boundary; raw bytes from the child must not
+      // reach the evidence log or the stderr tail that flows into
+      // step result.message.
+      pipeRedacted(child.stdout, logStream);
+      pipeRedacted(child.stderr, logStream, (redactedChunk) => {
+        stderrTail = (stderrTail + redactedChunk).slice(-4096);
       });
 
       const killGroup = (signal: NodeJS.Signals) => {
@@ -401,7 +418,7 @@ export class PhaseOrchestrator {
         void finishLog().then(() =>
           resolve({
             status: "failed",
-            message: `shell step ${step.id} spawn error: ${err.message}`,
+            message: redactString(`shell step ${step.id} spawn error: ${err.message}`),
             evidence: logPath,
           }),
         );
