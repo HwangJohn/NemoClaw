@@ -3,6 +3,9 @@
 
 import { diagnosticsProbe } from "./diagnostics.ts";
 import { docsValidationProbe } from "./docs-validation.ts";
+import { injectionBlockedProbe } from "./injection-blocked.ts";
+import { networkPolicyProbe } from "./network-policy.ts";
+import { shieldsConfigProbe } from "./shields-config.ts";
 import { lookupProbe, registerProbe } from "./registry.ts";
 
 /**
@@ -17,19 +20,18 @@ import { lookupProbe, registerProbe } from "./registry.ts";
  *   - Scenario-specific probes (if any) belong in a per-scenario
  *     module that calls `registerProbe()` directly.
  *
- * Probes intentionally NOT yet registered (probe-registry follow-up):
- *   - shieldsConfigProbe       (security; required: true)
- *   - networkPolicyProbe       (security; required: true)
- *   - injectionBlockedProbe    (security; required: true)
- *
- * Until those land, the orchestrator surfaces them as failed (not
- * skipped) because the typed registry marks them required: true.
- * That is intentional — security-sensitive suites must NEVER show
- * fake-green when their probe is missing.
+ * Security probes (shieldsConfigProbe, networkPolicyProbe,
+ * injectionBlockedProbe) are marked `required: true` in
+ * scenarios/assertions/registry.ts. With the implementations
+ * registered below, the orchestrator runs them and fails the phase
+ * on real assertion violations — not on a missing implementation.
  */
 const BUILTIN_PROBES = {
   diagnosticsProbe,
   docsValidationProbe,
+  shieldsConfigProbe,
+  networkPolicyProbe,
+  injectionBlockedProbe,
 } as const;
 
 export function registerBuiltinProbes(): void {

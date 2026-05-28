@@ -71,17 +71,17 @@ describe("probe registry", () => {
     expect(listRegisteredProbes()).toEqual(first);
   });
 
-  it("registerBuiltinProbes_does_NOT_register_security_probes_yet", () => {
-    // The shieldsConfig / networkPolicy / injectionBlocked probes
-    // are intentionally not registered yet \u2014 their `required: true`
-    // status in scenarios/assertions/registry.ts means the
-    // orchestrator fails closed when they're missing, which is the
-    // contract we want until real implementations land.
+  it("registerBuiltinProbes_registers_security_probes", () => {
+    // shieldsConfig / networkPolicy / injectionBlocked are marked
+    // `required: true` in scenarios/assertions/registry.ts. The
+    // orchestrator fails closed when a required probe is missing,
+    // so registering all three turns the security suites from
+    // 'silently skipped' into 'actually verified'.
     registerBuiltinProbes();
     const registered = listRegisteredProbes();
-    expect(registered).not.toContain("shieldsConfigProbe");
-    expect(registered).not.toContain("networkPolicyProbe");
-    expect(registered).not.toContain("injectionBlockedProbe");
+    expect(registered).toContain("shieldsConfigProbe");
+    expect(registered).toContain("networkPolicyProbe");
+    expect(registered).toContain("injectionBlockedProbe");
   });
 });
 
@@ -299,6 +299,371 @@ esac
       expect(outcome.status).toBe("failed");
       expect(outcome.message).toMatch(/check-docs\.sh not found/);
     } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// Security probes — stub `nemoclaw` (host CLI) and `openshell` so the
+// canonical sandbox-exec wrapper resolves through the stub. The
+// wrapper's openshell-fallback path is exercised because the stub
+// does not implement `sandbox ssh-config`.
+// ──────────────────────────────────────────────────────────────────────────
+
+function makeProbeCtxFor(
+  tmp: string,
+  sandboxName: string,
+  contextEnv: Record<string, string> = {},
+): ProbeContext {
+  // Write context.env so spawned bash scripts that source the
+  // wrapper can pick up E2E_SANDBOX_NAME if needed.
+  const lines = Object.entries({ E2E_SANDBOX_NAME: sandboxName, ...contextEnv })
+    .map(([k, v]) => `${k}=${v}`)
+    .join("\n");
+  fs.writeFileSync(path.join(tmp, "context.env"), lines + "\n");
+  return {
+    contextDir: tmp,
+    evidencePath: path.join(tmp, "probe-evidence.json"),
+    contextEnv: { E2E_SANDBOX_NAME: sandboxName, ...contextEnv },
+    sandboxName,
+    gatewayUrl: null,
+    repoRoot: REPO_ROOT,
+  };
+}
+
+describe("shieldsConfigProbe", () => {
+  it("passes_when_shields_status_matches_expected_and_perms_match_state", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "shields-probe-pass-"));
+    const fakeBin = path.join(tmp, "bin");
+    fs.mkdirSync(fakeBin);
+    fs.writeFileSync(
+      path.join(fakeBin, "nemoclaw"),
+      `#!/usr/bin/env bash
+# nemoclaw <sandbox> shields status
+if [[ "$2" == "shields" && "$3" == "status" ]]; then
+  echo "Shields: DOWN"
+  exit 0
+fi
+exit 99
+`,
+      { mode: 0o755 },
+    );
+    fs.writeFileSync(
+      path.join(fakeBin, "openshell"),
+      `#!/usr/bin/env bash
+# Stub openshell. Reject ssh-config so wrapper falls back to sandbox exec.
+# Then implement 'sandbox exec --name <sb> -- <cmd>' by stripping args
+# until '--' and running what's left.
+if [[ "$1" == "sandbox" && "$2" == "ssh-config" ]]; then
+  exit 1
+fi
+if [[ "$1" == "sandbox" && "$2" == "exec" ]]; then
+  shift 2
+  while [[ "$#" -gt 0 && "$1" != "--" ]]; do shift; done
+  shift || true
+  # The 'stat -c %a %U:%G <path>' invocation: emit a fake permissions
+  # line that matches a DOWN-state sandbox config (sandbox-owned).
+  if [[ "$1" == "stat" ]]; then
+    echo "644 sandbox:sandbox"
+    exit 0
+  fi
+  exit 0
+fi
+exit 99
+`,
+      { mode: 0o755 },
+    );
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${fakeBin}:${oldPath ?? ""}`;
+    try {
+      const { shieldsConfigProbe } = await import("../scenarios/probes/shields-config.ts");
+      const ctx = makeProbeCtxFor(tmp, "sb1", {
+        E2E_AGENT: "openclaw",
+        E2E_SHIELDS_EXPECTED_STATE: "down",
+      });
+      const outcome = await shieldsConfigProbe(ctx);
+      expect(outcome.status).toBe("passed");
+      expect(outcome.message).toMatch(/shields=down/);
+      const ev = JSON.parse(fs.readFileSync(ctx.evidencePath, "utf8"));
+      expect(ev.observed).toBe("down");
+      expect(ev.expected).toBe("down");
+      expect(ev.permissionsLine).toBe("644 sandbox:sandbox");
+    } finally {
+      process.env.PATH = oldPath;
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("fails_when_observed_state_disagrees_with_expected", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "shields-probe-mismatch-"));
+    const fakeBin = path.join(tmp, "bin");
+    fs.mkdirSync(fakeBin);
+    fs.writeFileSync(
+      path.join(fakeBin, "nemoclaw"),
+      `#!/usr/bin/env bash
+if [[ "$2" == "shields" && "$3" == "status" ]]; then
+  echo "Shields: UP"
+  exit 0
+fi
+exit 99
+`,
+      { mode: 0o755 },
+    );
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${fakeBin}:${oldPath ?? ""}`;
+    try {
+      const { shieldsConfigProbe } = await import("../scenarios/probes/shields-config.ts");
+      const ctx = makeProbeCtxFor(tmp, "sb1", {
+        E2E_AGENT: "openclaw",
+        E2E_SHIELDS_EXPECTED_STATE: "down",
+      });
+      const outcome = await shieldsConfigProbe(ctx);
+      expect(outcome.status).toBe("failed");
+      expect(outcome.message).toMatch(/expected shields 'down', observed 'up'/);
+    } finally {
+      process.env.PATH = oldPath;
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("fails_when_perms_dont_match_observed_state", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "shields-probe-perms-"));
+    const fakeBin = path.join(tmp, "bin");
+    fs.mkdirSync(fakeBin);
+    fs.writeFileSync(
+      path.join(fakeBin, "nemoclaw"),
+      `#!/usr/bin/env bash
+if [[ "$2" == "shields" && "$3" == "status" ]]; then
+  # Shields claim UP, but the stub openshell will report sandbox-owned
+  # perms below — a mismatch the probe must catch.
+  echo "Shields: UP"
+  exit 0
+fi
+exit 99
+`,
+      { mode: 0o755 },
+    );
+    fs.writeFileSync(
+      path.join(fakeBin, "openshell"),
+      `#!/usr/bin/env bash
+if [[ "$1" == "sandbox" && "$2" == "ssh-config" ]]; then exit 1; fi
+if [[ "$1" == "sandbox" && "$2" == "exec" ]]; then
+  shift 2
+  while [[ "$#" -gt 0 && "$1" != "--" ]]; do shift; done
+  shift || true
+  # Sandbox-owned perms: would pass for DOWN, must FAIL for UP.
+  echo "644 sandbox:sandbox"
+  exit 0
+fi
+exit 99
+`,
+      { mode: 0o755 },
+    );
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${fakeBin}:${oldPath ?? ""}`;
+    try {
+      const { shieldsConfigProbe } = await import("../scenarios/probes/shields-config.ts");
+      // Don't declare expected state — the probe should still fail on
+      // perms-vs-observed mismatch alone.
+      const ctx = makeProbeCtxFor(tmp, "sb1", { E2E_AGENT: "openclaw" });
+      const outcome = await shieldsConfigProbe(ctx);
+      expect(outcome.status).toBe("failed");
+      expect(outcome.message).toMatch(/shields are 'up' but .* permissions are/);
+    } finally {
+      process.env.PATH = oldPath;
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("networkPolicyProbe", () => {
+  function fakeOpenshellEmittingHttpStatus(
+    binDir: string,
+    httpStatus: string,
+    curlExitCode: number = 0,
+  ): void {
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(binDir, "openshell"),
+      `#!/usr/bin/env bash
+# Opt out of ssh-config; force wrapper to use 'sandbox exec' fallback.
+if [[ "$1" == "sandbox" && "$2" == "ssh-config" ]]; then exit 1; fi
+if [[ "$1" == "sandbox" && "$2" == "exec" ]]; then
+  shift 2
+  while [[ "$#" -gt 0 && "$1" != "--" ]]; do shift; done
+  shift || true
+  # We're being asked to run curl inside the sandbox. Emit the test's
+  # chosen status to stdout (mirrors curl -w '%{http_code}') and exit
+  # with the test's chosen curl exit code.
+  printf '%s' "${httpStatus}"
+  exit ${curlExitCode}
+fi
+exit 99
+`,
+      { mode: 0o755 },
+    );
+  }
+
+  it("passes_when_blocked_url_returns_403", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netpolicy-probe-403-"));
+    fakeOpenshellEmittingHttpStatus(path.join(tmp, "bin"), "403", 0);
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${path.join(tmp, "bin")}:${oldPath ?? ""}`;
+    try {
+      const { networkPolicyProbe } = await import("../scenarios/probes/network-policy.ts");
+      const ctx = makeProbeCtxFor(tmp, "sb1");
+      const outcome = await networkPolicyProbe(ctx);
+      expect(outcome.status).toBe("passed");
+      expect(outcome.message).toMatch(/blocked .*http_code=403/);
+    } finally {
+      process.env.PATH = oldPath;
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("passes_when_curl_exits_nonzero_and_no_http_response", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netpolicy-probe-conn-"));
+    // curl exit 7 = couldn't connect; status '000' = no HTTP response.
+    fakeOpenshellEmittingHttpStatus(path.join(tmp, "bin"), "000", 7);
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${path.join(tmp, "bin")}:${oldPath ?? ""}`;
+    try {
+      const { networkPolicyProbe } = await import("../scenarios/probes/network-policy.ts");
+      const ctx = makeProbeCtxFor(tmp, "sb1");
+      const outcome = await networkPolicyProbe(ctx);
+      expect(outcome.status).toBe("passed");
+      expect(outcome.message).toMatch(/curl exit 7/);
+    } finally {
+      process.env.PATH = oldPath;
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("fails_when_blocked_url_returns_200", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netpolicy-probe-200-"));
+    fakeOpenshellEmittingHttpStatus(path.join(tmp, "bin"), "200", 0);
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${path.join(tmp, "bin")}:${oldPath ?? ""}`;
+    try {
+      const { networkPolicyProbe } = await import("../scenarios/probes/network-policy.ts");
+      const ctx = makeProbeCtxFor(tmp, "sb1");
+      const outcome = await networkPolicyProbe(ctx);
+      expect(outcome.status).toBe("failed");
+      expect(outcome.message).toMatch(/reachable from sandbox.*http_code=200/);
+    } finally {
+      process.env.PATH = oldPath;
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("fails_when_blocked_url_returns_401_indicating_policy_bypass", async () => {
+    // 401 means the request reached upstream auth, NOT that gateway
+    // dropped it. The probe must classify this as a policy bypass.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netpolicy-probe-401-"));
+    fakeOpenshellEmittingHttpStatus(path.join(tmp, "bin"), "401", 0);
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${path.join(tmp, "bin")}:${oldPath ?? ""}`;
+    try {
+      const { networkPolicyProbe } = await import("../scenarios/probes/network-policy.ts");
+      const ctx = makeProbeCtxFor(tmp, "sb1");
+      const outcome = await networkPolicyProbe(ctx);
+      expect(outcome.status).toBe("failed");
+      expect(outcome.message).toMatch(/reachable from sandbox.*http_code=401/);
+    } finally {
+      process.env.PATH = oldPath;
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("injectionBlockedProbe", () => {
+  // For the injection probe we need a stub openshell that simulates a
+  // sandbox shell honestly: pre-clean, echo back stdin, and respond
+  // SAFE/EXPLOITED based on whether the marker file exists. We give
+  // each test its own tmp dir and stub script.
+  function setupInjectionStub(tmp: string, exploited: boolean): { restore: () => void } {
+    const binDir = path.join(tmp, "bin");
+    fs.mkdirSync(binDir, { recursive: true });
+    // Use a state file in tmp to track whether the 'exploit' branch
+    // should claim the marker exists.
+    const stateFile = path.join(tmp, "exploit.state");
+    fs.writeFileSync(stateFile, exploited ? "yes" : "no");
+    fs.writeFileSync(
+      path.join(binDir, "openshell"),
+      `#!/usr/bin/env bash
+state=\$(cat "${stateFile}" 2>/dev/null || echo no)
+if [[ "\$1" == "sandbox" && "\$2" == "ssh-config" ]]; then exit 1; fi
+if [[ "\$1" == "sandbox" && "\$2" == "exec" ]]; then
+  shift 2
+  while [[ "\$#" -gt 0 && "\$1" != "--" ]]; do shift; done
+  shift || true
+  # Recognize the three operations the probe issues:
+  #   1. sh -c 'rm -f <marker>'              — cleanup; always succeeds
+  #   2. sh -c 'MSG=\$(cat); printf %s\\n "\$MSG"'  — echo back stdin
+  #   3. sh -c 'test -f <marker> && echo EXPLOITED || echo SAFE'
+  cmd="\$*"
+  case "\$cmd" in
+    *"MSG="*"printf"*)
+      cat
+      ;;
+    *"test -f"*"EXPLOITED"*"SAFE"*)
+      if [[ "\$state" == "yes" ]]; then echo EXPLOITED; else echo SAFE; fi
+      ;;
+    *"rm -f"*)
+      :
+      ;;
+    *)
+      echo "unrecognized cmd: \$cmd" >&2
+      exit 64
+      ;;
+  esac
+  exit 0
+fi
+exit 99
+`,
+      { mode: 0o755 },
+    );
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${binDir}:${oldPath ?? ""}`;
+    return {
+      restore: () => {
+        process.env.PATH = oldPath;
+      },
+    };
+  }
+
+  it("passes_when_payload_is_preserved_and_marker_absent", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "inj-probe-pass-"));
+    const stub = setupInjectionStub(tmp, false);
+    try {
+      const { injectionBlockedProbe } = await import("../scenarios/probes/injection-blocked.ts");
+      const ctx = makeProbeCtxFor(tmp, "sb1");
+      const outcome = await injectionBlockedProbe(ctx);
+      expect(outcome.status).toBe("passed");
+      const ev = JSON.parse(fs.readFileSync(ctx.evidencePath, "utf8"));
+      expect(ev.payloadPreservedLiterally).toBe(true);
+      expect(ev.markerAbsent).toBe(true);
+    } finally {
+      stub.restore();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("fails_when_marker_file_was_created_indicating_command_substitution_executed", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "inj-probe-fail-"));
+    const stub = setupInjectionStub(tmp, true);
+    try {
+      const { injectionBlockedProbe } = await import("../scenarios/probes/injection-blocked.ts");
+      const ctx = makeProbeCtxFor(tmp, "sb1");
+      const outcome = await injectionBlockedProbe(ctx);
+      expect(outcome.status).toBe("failed");
+      expect(outcome.message).toMatch(/marker file .* present/);
+      expect(outcome.message).toMatch(/command substitution executed/);
+      const ev = JSON.parse(fs.readFileSync(ctx.evidencePath, "utf8"));
+      expect(ev.markerAbsent).toBe(false);
+    } finally {
+      stub.restore();
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });
