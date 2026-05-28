@@ -211,37 +211,54 @@ export class PhaseOrchestrator {
         }, 5_000).unref();
       }, timeoutSeconds * 1_000);
 
+      // Wait for the log writeStream to fully flush before resolving so
+      // callers can synchronously read the evidence file. Without this, the
+      // 'close' event on the child fires before the WriteStream finishes
+      // draining, and tests/orchestrators see an empty log file.
+      const finishLog = (): Promise<void> =>
+        new Promise((res) => {
+          if ((logStream as unknown as { closed?: boolean }).closed) {
+            res();
+            return;
+          }
+          logStream.once("finish", () => res());
+          logStream.once("error", () => res());
+          logStream.end();
+        });
+
       child.on("error", (err) => {
         clearTimeout(timeout);
-        logStream.end();
-        resolve({
-          status: "failed",
-          message: `shell step ${step.id} spawn error: ${err.message}`,
-          evidence: logPath,
-        });
+        void finishLog().then(() =>
+          resolve({
+            status: "failed",
+            message: `shell step ${step.id} spawn error: ${err.message}`,
+            evidence: logPath,
+          }),
+        );
       });
 
       child.on("close", (code, signal) => {
         clearTimeout(timeout);
-        logStream.end();
-        if (timedOut) {
+        void finishLog().then(() => {
+          if (timedOut) {
+            resolve({
+              status: "failed",
+              classifier: "runner-infra",
+              message: `shell step ${step.id} exceeded ${timeoutSeconds}s (signal=${signal ?? "SIGTERM"})`,
+              evidence: logPath,
+            });
+            return;
+          }
+          if (code === 0) {
+            resolve({ status: "passed", evidence: logPath });
+            return;
+          }
           resolve({
             status: "failed",
-            classifier: "runner-infra",
-            message: `shell step ${step.id} exceeded ${timeoutSeconds}s (signal=${signal ?? "SIGTERM"})`,
+            classifier: classifierForRef(ref),
+            message: `shell step ${step.id} exit ${code ?? "null"}: ${stderrTail.split("\n").slice(-3).join(" | ").trim()}`,
             evidence: logPath,
           });
-          return;
-        }
-        if (code === 0) {
-          resolve({ status: "passed", evidence: logPath });
-          return;
-        }
-        resolve({
-          status: "failed",
-          classifier: classifierForRef(ref),
-          message: `shell step ${step.id} exit ${code ?? "null"}: ${stderrTail.split("\n").slice(-3).join(" | ").trim()}`,
-          evidence: logPath,
         });
       });
     });

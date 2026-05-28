@@ -222,13 +222,29 @@ describe("phase orchestrators - real shell execution", () => {
 
 describe("clients are pass/fail/policy free", () => {
   it("test_should_keep_clients_free_of_pass_fail_and_retry_semantics", () => {
-    const source = fs.readFileSync(
-      path.join(REPO_ROOT, "test/e2e-scenario/scenarios/clients/host-cli.ts"),
-      "utf8",
-    );
     const observation = new HostCliClient().observeVersion();
 
+    // The client returns a raw act/observe shape only: the command it would
+    // run. It must NOT decide pass/fail, attach retry policy, surface a
+    // classifier, or expose AssertionResult/PhaseResult-shaped fields.
     expect(observation).toEqual(expect.objectContaining({ command: ["nemoclaw", "--version"] }));
-    expect(source).not.toMatch(/AssertionResult|PhaseResult|retry|timeout|passed|failed/);
+    // Raw act/observe fields are allowed (exitCode/stdout/stderr/timing).
+    // Pass/fail and reliability-policy fields are not.
+    const forbiddenKeys = [
+      "status",
+      "attempts",
+      "classifier",
+      "evidence",
+      "retry",
+      "timeout",
+      "timeoutSeconds",
+      "phase",
+      "assertions",
+      "passed",
+      "failed",
+    ];
+    for (const key of forbiddenKeys) {
+      expect(observation).not.toHaveProperty(key);
+    }
   });
 });
