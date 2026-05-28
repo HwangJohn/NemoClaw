@@ -126,7 +126,6 @@ export interface RunPlan {
 
 export interface RunContext {
   contextDir: string;
-  dryRun: boolean;
 }
 
 export interface AssertionResult {

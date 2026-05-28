@@ -49,6 +49,13 @@ function requireRunContains(errors: string[], step: WorkflowStep | undefined, ex
   }
 }
 
+function requireRunDoesNotContain(errors: string[], step: WorkflowStep | undefined, forbidden: string): void {
+  if (!step) return;
+  if (stringValue(step.run).includes(forbidden)) {
+    errors.push(`step '${step.name ?? "<unnamed>"}' run script must not include ${forbidden}`);
+  }
+}
+
 export function validateE2eScenariosWorkflowBoundary(
   workflowPath = DEFAULT_WORKFLOW_PATH,
 ): string[] {
@@ -92,12 +99,18 @@ export function validateE2eScenariosWorkflowBoundary(
   const normalRun = requireStep(errors, steps, "Run typed scenarios");
   requireRunContains(errors, normalRun, "npx tsx test/e2e-scenario/scenarios/run.ts");
   requireRunContains(errors, normalRun, "--scenarios");
-  requireRunContains(errors, normalRun, "--dry-run");
+  // The TS runner has one execution mode: live. Workflows must not pass
+  // --dry-run, --plan-only, or --validate-only — they hide real test runs.
+  requireRunDoesNotContain(errors, normalRun, "--dry-run");
+  requireRunDoesNotContain(errors, normalRun, "--plan-only");
+  requireRunDoesNotContain(errors, normalRun, "--validate-only");
 
   const wslRun = requireStep(errors, steps, "Run typed scenarios in WSL");
   requireRunContains(errors, wslRun, "npx tsx test/e2e-scenario/scenarios/run.ts");
   requireRunContains(errors, wslRun, "--scenarios");
-  requireRunContains(errors, wslRun, "--dry-run");
+  requireRunDoesNotContain(errors, wslRun, "--dry-run");
+  requireRunDoesNotContain(errors, wslRun, "--plan-only");
+  requireRunDoesNotContain(errors, wslRun, "--validate-only");
 
   const upload = requireStep(errors, steps, "Upload scenario artifacts");
   const uploadWith = asRecord(upload?.with);

@@ -12,7 +12,6 @@
 # Functions:
 #   e2e_sandbox_exec       <sandbox> -- <cmd> [args...]
 #       Run <cmd> inside <sandbox> via `openshell sandbox exec`. No stdin passed.
-#       Exit code propagates from <cmd>. Honors E2E_DRY_RUN.
 #
 #   e2e_sandbox_exec_stdin <sandbox> -- <cmd> [args...]
 #       Like e2e_sandbox_exec but pipes the caller's stdin into the
@@ -52,10 +51,6 @@ _e2e_sbex_parse() {
 e2e_sandbox_exec() {
   _e2e_sbex_parse "$@" || return $?
   e2e_env_trace "sandbox:exec" "${_E2E_SBEX_SB_NAME}" "${_E2E_SBEX_CMD[*]}"
-  if e2e_env_is_dry_run; then
-    echo "[dry-run] sandbox_exec ${_E2E_SBEX_SB_NAME} -- ${_E2E_SBEX_CMD[*]} (skipped)"
-    return 0
-  fi
   if ! command -v openshell >/dev/null 2>&1; then
     echo "e2e_sandbox_exec: openshell CLI not on PATH" >&2
     return 127
@@ -70,12 +65,6 @@ e2e_sandbox_exec() {
 e2e_sandbox_exec_stdin() {
   _e2e_sbex_parse "$@" || return $?
   e2e_env_trace "sandbox:exec_stdin" "${_E2E_SBEX_SB_NAME}" "${_E2E_SBEX_CMD[*]}"
-  if e2e_env_is_dry_run; then
-    # Consume stdin so the caller's pipeline doesn't SIGPIPE.
-    cat >/dev/null 2>&1 || true
-    echo "[dry-run] sandbox_exec_stdin ${_E2E_SBEX_SB_NAME} -- ${_E2E_SBEX_CMD[*]} (skipped)"
-    return 0
-  fi
   if ! command -v openshell >/dev/null 2>&1; then
     echo "e2e_sandbox_exec_stdin: openshell CLI not on PATH" >&2
     return 127

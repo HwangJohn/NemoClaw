@@ -32,23 +32,24 @@ test plan, expected state, and post-onboard suites. Test plans can also declare
 onboarding assertions that run after install/onboard and before expected-state
 validation.
 
-Plan-only resolution accepts either an alias or a test plan ID:
-
-```bash
-bash test/e2e-scenario/runtime/run-scenario.sh ubuntu-repo-cloud-openclaw --plan-only
-bash test/e2e-scenario/runtime/run-scenario.sh ubuntu-repo-docker__cloud-nvidia-openclaw --plan-only
-```
-
 ## How to run
 
+The TypeScript runner is the only supported entrypoint. There is one
+execution mode: live. There is no `--dry-run`, no `--validate-only`, no
+fake-pass code path. Plan output is emitted as a side effect of the
+live run.
+
 ```bash
-bash test/e2e-scenario/runtime/run-scenario.sh <id> --plan-only       # resolve + print plan, no side effects
-bash test/e2e-scenario/runtime/run-scenario.sh <id> --dry-run         # helpers short-circuit with trace
-bash test/e2e-scenario/runtime/run-scenario.sh <id> --validate-only   # assume setup done; validate expected state
-bash test/e2e-scenario/runtime/run-scenario.sh <id>                   # full live run
-bash test/e2e-scenario/runtime/run-suites.sh <suite-id> [<suite-id>…]
-bash test/e2e-scenario/runtime/coverage-report.sh                     # Markdown matrix of scenario × suite
+npx tsx test/e2e-scenario/scenarios/run.ts --scenarios <id[,id...]>     # live execution (the only mode)
+npx tsx test/e2e-scenario/scenarios/run.ts --list                       # list canonical scenario ids
+npx tsx test/e2e-scenario/scenarios/run.ts --emit-matrix                # JSON registry payload for CI matrix fan-out
+npx tsx test/e2e-scenario/scenarios/run.ts --scenarios <id> --plan-only # local debug only; MUST NOT appear in any workflow
+bash test/e2e-scenario/runtime/coverage-report.sh                       # Markdown matrix of scenario × suite
 ```
+
+The deprecated bash entrypoints `runtime/run-scenario.sh` and
+`runtime/run-suites.sh` exist only as fail-fast stubs; they print a
+pointer at `run.ts` and exit non-zero.
 
 Override the runtime context dir with `E2E_CONTEXT_DIR=<path>` (default
 `.e2e/`, gitignored). The scenario runner and suites communicate only
@@ -72,7 +73,8 @@ test/e2e/
     assert/        # outcome assertions (inference, credentials, policy, messaging)
     smoke/ inference/ hermes/ platform/ security/   # suite scripts grouped by concern
   runtime/                           # entry points + cross-cutting shared libs
-    run-scenario.sh / run-suites.sh / coverage-report.sh
+    run-scenario.sh / run-suites.sh    # DEPRECATED fail-fast stubs (see above)
+    coverage-report.sh
     resolver/      # TypeScript: load, plan, validate, coverage (invoked via tsx)
     lib/           # shared shell helpers: context, env, cleanup, logging, artifacts, sandbox-teardown
 ```
@@ -89,7 +91,7 @@ three YAML files above, plus shell scripts under
 `validation_suites/assert/`, or `validation_suites/<category>/`. The
 schemas in
 [`../runtime/resolver/schema.ts`](../runtime/resolver/schema.ts)
-describe the required shape; `run-scenario.sh <id> --plan-only`
+describe the required shape; `npx tsx test/e2e-scenario/scenarios/run.ts --scenarios <id> --plan-only`
 validates your change without running anything destructive.
 
 When adding a suite assertion, emit or preserve a stable `PASS: <id>` /

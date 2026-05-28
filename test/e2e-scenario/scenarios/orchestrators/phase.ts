@@ -1,8 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type {
   AssertionResult,
   AssertionStep,
@@ -13,18 +15,28 @@ import type {
   TransientClassifier,
 } from "../types.ts";
 
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+const DEFAULT_STEP_TIMEOUT_SECONDS = 300;
+
 interface StepAttemptOutcome {
-  status: "passed" | "failed";
+  status: "passed" | "failed" | "skipped";
   classifier?: TransientClassifier;
   message?: string;
+  evidence?: string;
 }
 
-function transientForRef(ref: string): TransientClassifier {
-  if (ref.includes("provider") || ref.includes("transient")) {
-    return "provider-transient";
+// Heuristic transient classifier for shell step refs that don't print
+// their own classifier hint. Phase orchestrators own classification;
+// clients/scripts do not.
+function classifierForRef(ref: string): TransientClassifier {
+  if (/provider|inference|chat-completion|cloudflared|tunnel/i.test(ref)) {
+    return ref.includes("tunnel") || ref.includes("cloudflared") ? "external-tunnel" : "provider-transient";
   }
-  if (ref.includes("gateway")) {
+  if (/gateway/i.test(ref)) {
     return "gateway-transient";
+  }
+  if (/event-capture|tui|chat-events/i.test(ref)) {
+    return "empty-event-capture";
   }
   return "runner-infra";
 }
@@ -39,7 +51,9 @@ export class PhaseOrchestrator {
         assertions.push(await this.runStep(ctx, step));
       }
     }
-    const status = assertions.some((assertion) => assertion.status === "failed") ? "failed" : "passed";
+    const failed = assertions.some((assertion) => assertion.status === "failed");
+    const allSkipped = assertions.length > 0 && assertions.every((assertion) => assertion.status === "skipped");
+    const status: PhaseResult["status"] = failed ? "failed" : allSkipped ? "skipped" : "passed";
     const result: PhaseResult = { phase: this.phaseName, status, assertions };
     this.writePhaseResult(ctx, result);
     return result;
@@ -48,20 +62,21 @@ export class PhaseOrchestrator {
   private async runStep(ctx: RunContext, step: AssertionStep): Promise<AssertionResult> {
     const startedAt = Date.now();
     const rawAttempts = step.reliability?.retry?.attempts;
-    const maxAttempts = typeof rawAttempts === "number" && Number.isFinite(rawAttempts) ? Math.max(1, Math.floor(rawAttempts)) : 1;
+    const maxAttempts =
+      typeof rawAttempts === "number" && Number.isFinite(rawAttempts) ? Math.max(1, Math.floor(rawAttempts)) : 1;
     let attempts = 0;
     let lastOutcome: StepAttemptOutcome = { status: "failed", message: "step did not run" };
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       attempts = attempt;
       lastOutcome = await this.executeStep(ctx, step, attempt);
-      if (lastOutcome.status === "passed") {
+      if (lastOutcome.status === "passed" || lastOutcome.status === "skipped") {
         return {
           id: step.id,
-          status: "passed",
+          status: lastOutcome.status,
           attempts,
           durationMs: Date.now() - startedAt,
           classifier: attempt > 1 ? step.reliability?.retry?.on[0] : lastOutcome.classifier,
-          evidence: step.evidencePath,
+          evidence: lastOutcome.evidence ?? step.evidencePath,
           message: lastOutcome.message,
         };
       }
@@ -75,7 +90,7 @@ export class PhaseOrchestrator {
       attempts,
       durationMs: Date.now() - startedAt,
       classifier: lastOutcome.classifier,
-      evidence: step.evidencePath,
+      evidence: lastOutcome.evidence ?? step.evidencePath,
       message: lastOutcome.message,
     };
   }
@@ -92,26 +107,144 @@ export class PhaseOrchestrator {
     return step.reliability?.retry?.on.includes(classifier) ?? false;
   }
 
-  private async executeStep(_ctx: RunContext, step: AssertionStep, attempt: number): Promise<StepAttemptOutcome> {
-    const ref = step.implementation?.ref ?? "";
-    if (ref === "fake-pass" || ref === "phase-1-skeleton") {
-      return { status: "passed" };
+  private async executeStep(ctx: RunContext, step: AssertionStep, _attempt: number): Promise<StepAttemptOutcome> {
+    const kind = step.implementation?.kind;
+    if (kind === "shell") {
+      return this.runShellStep(ctx, step);
     }
-    if (ref === "fake-retry-once-pass") {
-      return attempt === 1
-        ? { status: "failed", classifier: step.reliability?.retry?.on[0] ?? "gateway-transient" }
-        : { status: "passed" };
+    if (kind === "probe") {
+      // Probe registry lands in a follow-up PR. Until then, surface
+      // unimplemented probes as visibly skipped — never as fake green.
+      return {
+        status: "skipped",
+        message: `probe not registered: ${step.implementation?.ref ?? "<no ref>"}`,
+      };
     }
-    if (ref === "fake-always-transient") {
-      return { status: "failed", classifier: step.reliability?.retry?.on[0] ?? transientForRef(ref) };
+    if (kind === "pending") {
+      // pending steps surface as skipped with the placeholder ref so
+      // gaps are visible in plan output and phase results.
+      return { status: "skipped", message: `pending: ${step.implementation?.ref ?? ""}` };
     }
-    if (step.implementation?.kind === "shell" && _ctx.dryRun) {
-      return { status: "passed", message: `dry-run shell ${ref}` };
+    throw new Error(`Unknown assertion step kind for ${step.id}: ${String(kind)}`);
+  }
+
+  private async runShellStep(ctx: RunContext, step: AssertionStep): Promise<StepAttemptOutcome> {
+    const ref = step.implementation?.ref;
+    if (!ref) {
+      return { status: "failed", message: `shell step ${step.id} missing implementation.ref` };
     }
-    if (step.implementation?.kind === "probe" && _ctx.dryRun) {
-      return { status: "passed", message: `dry-run probe ${ref}` };
+    const scriptPath = path.isAbsolute(ref) ? ref : path.resolve(REPO_ROOT, ref);
+    if (!fs.existsSync(scriptPath)) {
+      return { status: "failed", message: `shell step ${step.id} script not found: ${scriptPath}` };
     }
-    return { status: "failed", message: `unsupported live step ${step.id}` };
+
+    const timeoutSeconds = step.reliability?.timeoutSeconds ?? DEFAULT_STEP_TIMEOUT_SECONDS;
+    const logDir = path.join(ctx.contextDir, ".e2e", "logs");
+    fs.mkdirSync(logDir, { recursive: true });
+    const logPath = path.join(logDir, `${step.id}.log`);
+
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      E2E_CONTEXT_DIR: ctx.contextDir,
+      E2E_STEP_ID: step.id,
+      E2E_PHASE: step.phase,
+    };
+    // Surface scenario-derived context (E2E_SANDBOX_NAME, E2E_GATEWAY_URL,
+    // etc.) that the environment+onboarding phases wrote into context.env.
+    const contextEnvPath = path.join(ctx.contextDir, ".e2e", "context.env");
+    if (fs.existsSync(contextEnvPath)) {
+      const contextEnv = fs.readFileSync(contextEnvPath, "utf8");
+      for (const line of contextEnv.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#")) {
+          continue;
+        }
+        const eq = trimmed.indexOf("=");
+        if (eq <= 0) {
+          continue;
+        }
+        const key = trimmed.slice(0, eq);
+        let value = trimmed.slice(eq + 1);
+        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+          value = value.slice(1, -1);
+        }
+        env[key] = value;
+      }
+    }
+
+    return await new Promise<StepAttemptOutcome>((resolve) => {
+      // detached: true puts the child (and any of its children, e.g. a `sleep`
+      // spawned by bash) into its own process group. We send signals to the
+      // negative pid so the whole group dies on timeout. Without this, bash
+      // ignores SIGTERM until its current foreground command (e.g. sleep)
+      // returns, and timeouts effectively don't work.
+      const child = spawn("bash", [scriptPath], { env, cwd: REPO_ROOT, detached: true });
+      const pgid = child.pid;
+      const logStream = fs.createWriteStream(logPath);
+      let stderrTail = "";
+      child.stdout.pipe(logStream, { end: false });
+      child.stderr.pipe(logStream, { end: false });
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderrTail = (stderrTail + chunk.toString("utf8")).slice(-4096);
+      });
+
+      const killGroup = (signal: NodeJS.Signals) => {
+        if (typeof pgid !== "number") {
+          child.kill(signal);
+          return;
+        }
+        try {
+          process.kill(-pgid, signal);
+        } catch {
+          /* group already gone */
+        }
+      };
+
+      let timedOut = false;
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        killGroup("SIGTERM");
+        setTimeout(() => {
+          if (!child.killed) {
+            killGroup("SIGKILL");
+          }
+        }, 5_000).unref();
+      }, timeoutSeconds * 1_000);
+
+      child.on("error", (err) => {
+        clearTimeout(timeout);
+        logStream.end();
+        resolve({
+          status: "failed",
+          message: `shell step ${step.id} spawn error: ${err.message}`,
+          evidence: logPath,
+        });
+      });
+
+      child.on("close", (code, signal) => {
+        clearTimeout(timeout);
+        logStream.end();
+        if (timedOut) {
+          resolve({
+            status: "failed",
+            classifier: "runner-infra",
+            message: `shell step ${step.id} exceeded ${timeoutSeconds}s (signal=${signal ?? "SIGTERM"})`,
+            evidence: logPath,
+          });
+          return;
+        }
+        if (code === 0) {
+          resolve({ status: "passed", evidence: logPath });
+          return;
+        }
+        resolve({
+          status: "failed",
+          classifier: classifierForRef(ref),
+          message: `shell step ${step.id} exit ${code ?? "null"}: ${stderrTail.split("\n").slice(-3).join(" | ").trim()}`,
+          evidence: logPath,
+        });
+      });
+    });
   }
 
   private writePhaseResult(ctx: RunContext, result: PhaseResult) {

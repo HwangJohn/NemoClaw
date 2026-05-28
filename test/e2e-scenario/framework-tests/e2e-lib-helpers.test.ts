@@ -15,7 +15,6 @@ const ASSERT = path.join(VALIDATION_SUITES, "assert");
 const REBUILD_UPGRADE_LIB = path.join(VALIDATION_SUITES, "lib/rebuild_upgrade.sh");
 const FIXTURES = path.join(REPO_ROOT, "test/e2e-scenario/nemoclaw_scenarios/fixtures");
 const INSTALL_DIR = path.join(REPO_ROOT, "test/e2e-scenario/nemoclaw_scenarios/install");
-const RUN_SCENARIO = path.join(REPO_ROOT, "test/e2e-scenario/runtime/run-scenario.sh");
 
 function runBash(script: string, env: Record<string, string> = {}): SpawnSyncReturns<string> {
   return spawnSync("bash", ["-c", script], {
@@ -61,51 +60,6 @@ describe("E2E shell helpers", () => {
     }
   });
 
-  it("test_should_emit_plan_only_checks_without_live_infrastructure", () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-inf-plan-"));
-    try {
-      const r = runBash(
-        `
-        set -euo pipefail
-        . "${RUNTIME_LIB}/context.sh"
-        . "${VALIDATION_SUITES}/lib/inference_routing.sh"
-        e2e_context_init
-        e2e_context_set E2E_SANDBOX_NAME sandbox-1
-        e2e_inference_routing_assert_chat_completion "post-onboard.inference-routing.inference-local-chat-completion"
-      `,
-        { E2E_CONTEXT_DIR: tmp, E2E_DRY_RUN: "1" },
-      );
-      expect(r.status, r.stderr).toBe(0);
-      expect(r.stdout).toContain("post-onboard.inference-routing.inference-local-chat-completion");
-      expect(r.stdout).toMatch(/dry-run|plan/i);
-    } finally {
-      fs.rmSync(tmp, { recursive: true, force: true });
-    }
-  });
-
-  it("test_should_not_print_secret_values_in_helper_output", () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-inf-secret-"));
-    try {
-      const r = runBash(
-        `
-        set -euo pipefail
-        . "${RUNTIME_LIB}/context.sh"
-        . "${VALIDATION_SUITES}/lib/inference_routing.sh"
-        e2e_context_init
-        e2e_context_set E2E_SANDBOX_NAME sandbox-1
-        e2e_context_set E2E_PROVIDER_API_KEY super-secret-test-token
-        e2e_inference_routing_assert_auth_proxy "post-onboard.ollama-auth-proxy.authenticated-request-accepted" "valid"
-      `,
-        { E2E_CONTEXT_DIR: tmp, E2E_DRY_RUN: "1" },
-      );
-      expect(r.status, r.stderr).toBe(0);
-      expect(r.stdout + r.stderr).not.toContain("super-secret-test-token");
-      expect(r.stdout + r.stderr).toMatch(/REDACTED|dry-run|plan/i);
-    } finally {
-      fs.rmSync(tmp, { recursive: true, force: true });
-    }
-  });
-
   it("security_policy_credentials_helper_should_load_with_context_library", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "spc-context-"));
     try {
@@ -117,7 +71,7 @@ describe("E2E shell helpers", () => {
         spc_require_context E2E_SCENARIO E2E_PROVIDER
         echo "provider=$(spc_context_get E2E_PROVIDER)"
         `,
-        { E2E_CONTEXT_DIR: tmp, E2E_DRY_RUN: "1" },
+        { E2E_CONTEXT_DIR: tmp },
       );
       expect(r.status, r.stderr).toBe(0);
       expect(r.stdout).toContain("provider=nvidia");
@@ -136,7 +90,7 @@ describe("E2E shell helpers", () => {
         . "${VALIDATION_SUITES}/lib/security_policy_credentials.sh"
         spc_require_context E2E_PROVIDER
         `,
-        { E2E_CONTEXT_DIR: tmp, E2E_DRY_RUN: "1" },
+        { E2E_CONTEXT_DIR: tmp },
       );
       expect(r.status).not.toBe(0);
       expect(r.stderr).toContain("E2E_PROVIDER");
@@ -474,38 +428,6 @@ exit 0
     }
   });
 
-  it("scenario_dry_run_should_trace_helper_sequence_in_order", () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-trace-"));
-    try {
-      const trace = path.join(tmp, "trace.log");
-      const r = spawnSync(
-        "bash",
-        [RUN_SCENARIO, "ubuntu-repo-cloud-openclaw", "--dry-run"],
-        {
-          env: {
-            ...process.env,
-            E2E_CONTEXT_DIR: tmp,
-            E2E_TRACE_FILE: trace,
-          },
-          encoding: "utf8",
-    timeout: Number(process.env.E2E_SPAWN_TIMEOUT_MS ?? 60_000),
-          cwd: REPO_ROOT,
-        },
-      );
-      expect(r.status, r.stderr).toBe(0);
-      expect(fs.existsSync(trace), "trace log missing").toBe(true);
-      const contents = fs.readFileSync(trace, "utf8");
-      const order = ["env:noninteractive", "install:", "onboard:", "gateway:check", "sandbox:check"];
-      let pos = 0;
-      for (const marker of order) {
-        const idx = contents.indexOf(marker, pos);
-        expect(idx, `trace missing marker in order: ${marker}\nfull:\n${contents}`).toBeGreaterThanOrEqual(0);
-        pos = idx + marker.length;
-      }
-    } finally {
-      fs.rmSync(tmp, { recursive: true, force: true });
-    }
-  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -681,21 +603,6 @@ exec "$@"
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
-  });
-
-  it("sandbox_exec_should_dry_run_short_circuit_when_e2e_dry_run_set", () => {
-    // Use a PATH that has bash itself but no nemoclaw — dry-run must
-    // short-circuit before the CLI lookup.
-    const r = runBash(
-      `
-        set -euo pipefail
-        . "${VALIDATION_SUITES}/sandbox-exec.sh"
-        e2e_sandbox_exec sb1 -- rm -rf /
-      `,
-      { E2E_DRY_RUN: "1", PATH: "/usr/bin:/bin" },
-    );
-    expect(r.status, r.stderr).toBe(0);
-    expect(r.stdout + r.stderr).toMatch(/dry[- ]run/i);
   });
 
   it("sandbox_exec_stdin_should_quote_args_safely_when_piped", () => {
@@ -968,53 +875,6 @@ describe("Issue #3810 messaging provider helper library", () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Phase 1.E — Install-method dispatcher splits
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe("Phase 1.E install dispatcher splits", () => {
-  function dispatchDryRun(profile: string): SpawnSyncReturns<string> {
-    return runBash(
-      `
-        set -euo pipefail
-        . "${INSTALL_DIR}/dispatch.sh"
-        e2e_install "${profile}"
-      `,
-      { E2E_DRY_RUN: "1" },
-    );
-  }
-
-  it("install_should_dispatch_to_install_repo_helper_for_repo_current_profile", () => {
-    const r = dispatchDryRun("repo-current");
-    expect(r.status, r.stderr).toBe(0);
-    expect(r.stdout + r.stderr).toMatch(/install-repo/);
-    expect(r.stdout + r.stderr).not.toMatch(/install-curl|install-ollama|install-launchable/);
-  });
-
-  it("install_should_dispatch_to_install_curl_helper_for_public_installer_profile", () => {
-    const r = dispatchDryRun("public-installer");
-    expect(r.status, r.stderr).toBe(0);
-    expect(r.stdout + r.stderr).toMatch(/install-curl/);
-    expect(r.stdout + r.stderr).not.toMatch(/install-repo|install-ollama|install-launchable/);
-  });
-
-  it("install_should_dispatch_to_install_ollama_helper_for_ollama_profile", () => {
-    const r = dispatchDryRun("ollama");
-    expect(r.status, r.stderr).toBe(0);
-    expect(r.stdout + r.stderr).toMatch(/install-ollama/);
-    expect(r.stdout + r.stderr).not.toMatch(/install-repo|install-curl|install-launchable/);
-  });
-
-  it("install_should_dispatch_to_install_launchable_helper_for_launchable_profile", () => {
-    const r = dispatchDryRun("launchable");
-    expect(r.status, r.stderr).toBe(0);
-    expect(r.stdout + r.stderr).toMatch(/install-launchable/);
-    expect(r.stdout + r.stderr).not.toMatch(/install-repo|install-curl|install-ollama/);
-  });
-});
-
-
-
 describe("baseline onboarding validation helper", () => {
   it("baseline_helper_should_source_under_strict_shell_options", () => {
     const r = runBash(`set -euo pipefail; source "${VALIDATION_SUITES}/lib/baseline_onboarding.sh"`);
@@ -1080,7 +940,7 @@ describe("sandbox lifecycle validation helper", () => {
     try {
       const bin = path.join(tmp, "bin"); fs.mkdirSync(bin);
       fs.writeFileSync(path.join(bin, "timeout"), "#!/usr/bin/env bash\necho timed out >&2\nexit 124\n", { mode: 0o755 });
-      const r = runBash(`set -e; unset E2E_DRY_RUN; . "${VALIDATION_SUITES}/lib/sandbox_lifecycle.sh"; sandbox_lifecycle_run_with_timeout 1 bash -c 'sleep 5'`, { PATH: `${bin}:${process.env.PATH}` });
+      const r = runBash(`set -e; . "${VALIDATION_SUITES}/lib/sandbox_lifecycle.sh"; sandbox_lifecycle_run_with_timeout 1 bash -c 'sleep 5'`, { PATH: `${bin}:${process.env.PATH}` });
       expect(r.status).toBe(124);
       expect(r.stderr).toMatch(/timed out/);
     } finally { fs.rmSync(tmp, { recursive: true, force: true }); }

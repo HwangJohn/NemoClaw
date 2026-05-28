@@ -32,10 +32,6 @@ _rebuild_upgrade_run() {
 
 rebuild_upgrade_assert_sandbox_reachable() {
   rebuild_upgrade_require_context || return 1
-  if [[ "${E2E_DRY_RUN:-0}" == "1" ]]; then
-    e2e_pass "suite.upgrade.survivor_agent_reachable dry-run"
-    return 0
-  fi
   local sandbox
   sandbox="$(_rebuild_upgrade_ctx E2E_SANDBOX_NAME)"
   if _rebuild_upgrade_run REBUILD_UPGRADE_SANDBOX_CMD openshell sandbox exec -n "${sandbox}" -- true; then
@@ -47,10 +43,6 @@ rebuild_upgrade_assert_sandbox_reachable() {
 
 rebuild_upgrade_assert_marker_preserved() {
   rebuild_upgrade_require_context || return 1
-  if [[ "${E2E_DRY_RUN:-0}" == "1" ]]; then
-    e2e_pass "suite.rebuild.workspace_state_preserved dry-run"
-    return 0
-  fi
   local sandbox marker_path expected actual
   sandbox="$(_rebuild_upgrade_ctx E2E_SANDBOX_NAME)"
   marker_path="${E2E_REBUILD_MARKER_PATH:-/workspace/.nemoclaw-rebuild-marker}"
@@ -65,10 +57,6 @@ rebuild_upgrade_assert_marker_preserved() {
 
 rebuild_upgrade_assert_agent_version_upgraded() {
   rebuild_upgrade_require_context || return 1
-  if [[ "${E2E_DRY_RUN:-0}" == "1" ]]; then
-    e2e_pass "suite.rebuild.agent_version_upgraded dry-run"
-    return 0
-  fi
   local sandbox old expected actual cmd
   sandbox="$(_rebuild_upgrade_ctx E2E_SANDBOX_NAME)"
   old="${E2E_OLD_AGENT_VERSION:-}"
@@ -84,10 +72,6 @@ rebuild_upgrade_assert_agent_version_upgraded() {
 
 rebuild_upgrade_assert_inference_works() {
   rebuild_upgrade_require_context || return 1
-  if [[ "${E2E_DRY_RUN:-0}" == "1" ]]; then
-    e2e_pass "suite.rebuild.inference_still_works dry-run"
-    return 0
-  fi
   local sandbox cmd output
   sandbox="$(_rebuild_upgrade_ctx E2E_SANDBOX_NAME)"
   cmd="${E2E_INFERENCE_CHECK_COMMAND:-curl -fsS http://inference.local/v1/models}"
@@ -101,10 +85,6 @@ rebuild_upgrade_assert_inference_works() {
 
 rebuild_upgrade_assert_policy_presets_preserved() {
   rebuild_upgrade_require_context || return 1
-  if [[ "${E2E_DRY_RUN:-0}" == "1" ]]; then
-    e2e_pass "suite.rebuild.policy_presets_preserved dry-run"
-    return 0
-  fi
   local presets output preset
   presets="${E2E_EXPECTED_POLICY_PRESETS:-npm pypi}"
   output="$(_rebuild_upgrade_run REBUILD_UPGRADE_NEMOCLAW_CMD nemoclaw policy status 2>/dev/null || true)"
@@ -123,10 +103,6 @@ rebuild_upgrade_assert_hermes_config_preserved() {
     e2e_pass "suite.rebuild.hermes_config_preserved skipped non-hermes"
     return 0
   fi
-  if [[ "${E2E_DRY_RUN:-0}" == "1" ]]; then
-    e2e_pass "suite.rebuild.hermes_config_preserved dry-run"
-    return 0
-  fi
   local sandbox output
   sandbox="$(_rebuild_upgrade_ctx E2E_SANDBOX_NAME)"
   output="$(_rebuild_upgrade_run REBUILD_UPGRADE_SANDBOX_CMD openshell sandbox exec -n "${sandbox}" -- bash -lc "grep -R 'platforms.discord\|DISCORD' ~/.hermes . 2>/dev/null" || true)"
@@ -139,10 +115,6 @@ rebuild_upgrade_assert_hermes_config_preserved() {
 
 rebuild_upgrade_assert_sandbox_registry_preserved() {
   rebuild_upgrade_require_context || return 1
-  if [[ "${E2E_DRY_RUN:-0}" == "1" ]]; then
-    e2e_pass "suite.upgrade.sandbox_registry_preserved dry-run"
-    return 0
-  fi
   local sandbox output
   sandbox="$(_rebuild_upgrade_ctx E2E_SANDBOX_NAME)"
   output="$(_rebuild_upgrade_run REBUILD_UPGRADE_NEMOCLAW_CMD nemoclaw list 2>/dev/null || true)"
@@ -155,10 +127,6 @@ rebuild_upgrade_assert_sandbox_registry_preserved() {
 
 rebuild_upgrade_assert_gateway_version_upgraded() {
   rebuild_upgrade_require_context || return 1
-  if [[ "${E2E_DRY_RUN:-0}" == "1" ]]; then
-    e2e_pass "suite.upgrade.gateway_version_upgraded dry-run"
-    return 0
-  fi
   local expected output
   expected="${E2E_EXPECTED_OPENSHELL_VERSION:-}"
   output="$(_rebuild_upgrade_run REBUILD_UPGRADE_GATEWAY_CMD curl -fsS "$(_rebuild_upgrade_ctx E2E_GATEWAY_URL)/version" 2>/dev/null || true)"

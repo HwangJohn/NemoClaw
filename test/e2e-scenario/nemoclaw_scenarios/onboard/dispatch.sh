@@ -26,10 +26,6 @@ e2e_onboard() {
     return 2
   fi
   e2e_env_trace "onboard:${profile}"
-  if e2e_env_is_dry_run; then
-    echo "[dry-run] onboard profile=${profile} (skipped)"
-    return 0
-  fi
   case "${profile}" in
     cloud-openclaw)
       e2e_onboard_cloud_openclaw

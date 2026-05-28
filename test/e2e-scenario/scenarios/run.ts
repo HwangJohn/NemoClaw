@@ -4,33 +4,29 @@
 import { compileRunPlans, renderPlanText, writePlanArtifacts } from "./compiler.ts";
 import { ScenarioRunner } from "./orchestrators/runner.ts";
 import { listScenarios } from "./registry.ts";
+import type { PhaseResult } from "./types.ts";
 
 interface Args {
   list: boolean;
+  emitMatrix: boolean;
   planOnly: boolean;
-  dryRun: boolean;
-  validateOnly: boolean;
   scenarios: string[];
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { list: false, planOnly: false, dryRun: false, validateOnly: false, scenarios: [] };
+  const args: Args = { list: false, emitMatrix: false, planOnly: false, scenarios: [] };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--list") {
       args.list = true;
       continue;
     }
+    if (arg === "--emit-matrix") {
+      args.emitMatrix = true;
+      continue;
+    }
     if (arg === "--plan-only") {
       args.planOnly = true;
-      continue;
-    }
-    if (arg === "--dry-run") {
-      args.dryRun = true;
-      continue;
-    }
-    if (arg === "--validate-only") {
-      args.validateOnly = true;
       continue;
     }
     if (arg === "--scenarios") {
@@ -54,17 +50,29 @@ function printList() {
   }
 }
 
+function emitMatrix() {
+  // Read-only emission of the typed registry as a GitHub Actions matrix
+  // payload. Consumed by the dynamic matrix workflow (PR #4359).
+  const payload = {
+    include: listScenarios().map((scenario) => ({
+      id: scenario.id,
+      description: scenario.description ?? "",
+    })),
+  };
+  console.log(JSON.stringify(payload));
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.list) {
     printList();
     return;
   }
-
-  const modeCount = [args.planOnly, args.dryRun, args.validateOnly].filter(Boolean).length;
-  if (modeCount !== 1) {
-    throw new Error("Use exactly one of --plan-only, --dry-run, or --validate-only with --scenarios <id[,id...]>");
+  if (args.emitMatrix) {
+    emitMatrix();
+    return;
   }
+
   if (args.scenarios.length === 0) {
     throw new Error("scenario execution requires --scenarios <id[,id...]>");
   }
@@ -78,11 +86,42 @@ async function main() {
   writePlanArtifacts(plans, contextDir);
   console.log(renderPlanText(plans));
 
-  if (args.dryRun) {
-    const runner = new ScenarioRunner();
-    for (const plan of plans) {
-      await runner.run({ contextDir, dryRun: true }, plan);
+  if (args.planOnly) {
+    // Local debug only. Workflows must not pass --plan-only.
+    return;
+  }
+
+  const runner = new ScenarioRunner();
+  const allResults: PhaseResult[] = [];
+  let anyFailed = false;
+  for (const plan of plans) {
+    const results = await runner.run({ contextDir }, plan);
+    allResults.push(...results);
+    if (results.some((result) => result.status === "failed")) {
+      anyFailed = true;
     }
+  }
+
+  // Surface a compact run summary so phase results don't have to be opened
+  // to see what passed.
+  console.log("");
+  console.log("Phase results:");
+  for (const result of allResults) {
+    const counts = result.assertions.reduce(
+      (acc, assertion) => {
+        acc[assertion.status] = (acc[assertion.status] ?? 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
+    const detail = Object.entries(counts)
+      .map(([status, count]) => `${status}=${count}`)
+      .join(" ");
+    console.log(`  ${result.phase}: ${result.status} (${detail || "no steps"})`);
+  }
+
+  if (anyFailed) {
+    process.exitCode = 1;
   }
 }
 

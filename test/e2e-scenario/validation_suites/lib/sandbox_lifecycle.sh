@@ -37,11 +37,6 @@ sandbox_lifecycle_run_with_timeout() {
   local seconds="$1"
   shift
   SANDBOX_LIFECYCLE_LAST_OUTPUT=""
-  if [[ "${E2E_DRY_RUN:-0}" == "1" ]]; then
-    SANDBOX_LIFECYCLE_LAST_OUTPUT="dry-run: $*"
-    printf '%s\n' "${SANDBOX_LIFECYCLE_LAST_OUTPUT}"
-    return 0
-  fi
   if command -v timeout >/dev/null 2>&1; then
     SANDBOX_LIFECYCLE_LAST_OUTPUT="$(timeout "${seconds}" "$@" 2>&1)" || {
       local rc=$?
@@ -64,7 +59,7 @@ sandbox_lifecycle_assert_nemoclaw_list_contains_sandbox() {
     sandbox_lifecycle_fail "${id}" "nemoclaw list failed"
     return 1
   }
-  [[ "${E2E_DRY_RUN:-0}" == "1" || "${SANDBOX_LIFECYCLE_LAST_OUTPUT}" == *"${E2E_SANDBOX_NAME}"* ]] || {
+  [[ "${SANDBOX_LIFECYCLE_LAST_OUTPUT}" == *"${E2E_SANDBOX_NAME}"* ]] || {
     sandbox_lifecycle_fail "${id}" "sandbox not listed: ${E2E_SANDBOX_NAME}"
     return 1
   }
@@ -77,16 +72,14 @@ sandbox_lifecycle_assert_status_fields_present() {
     sandbox_lifecycle_fail "${id}" "nemoclaw status failed"
     return 1
   }
-  if [[ "${E2E_DRY_RUN:-0}" != "1" ]]; then
-    local status_output_lower
-    status_output_lower="$(printf '%s' "${SANDBOX_LIFECYCLE_LAST_OUTPUT}" | tr '[:upper:]' '[:lower:]')"
-    for field in status gateway sandbox; do
-      [[ "${status_output_lower}" == *"${field}"* ]] || {
-        sandbox_lifecycle_fail "${id}" "missing status field: ${field}"
-        return 1
-      }
-    done
-  fi
+  local status_output_lower
+  status_output_lower="$(printf '%s' "${SANDBOX_LIFECYCLE_LAST_OUTPUT}" | tr '[:upper:]' '[:lower:]')"
+  for field in status gateway sandbox; do
+    [[ "${status_output_lower}" == *"${field}"* ]] || {
+      sandbox_lifecycle_fail "${id}" "missing status field: ${field}"
+      return 1
+    }
+  done
   sandbox_lifecycle_pass "${id}" "status fields present"
 }
 
@@ -96,7 +89,7 @@ sandbox_lifecycle_assert_logs_available() {
     sandbox_lifecycle_fail "${id}" "nemoclaw logs failed"
     return 1
   }
-  [[ "${E2E_DRY_RUN:-0}" == "1" || -n "${SANDBOX_LIFECYCLE_LAST_OUTPUT}" ]] || {
+  [[ -n "${SANDBOX_LIFECYCLE_LAST_OUTPUT}" ]] || {
     sandbox_lifecycle_fail "${id}" "logs empty"
     return 1
   }
@@ -109,7 +102,7 @@ sandbox_lifecycle_assert_openshell_exec_ok() {
     sandbox_lifecycle_fail "${id}" "openshell exec failed"
     return 1
   }
-  [[ "${E2E_DRY_RUN:-0}" == "1" || "${SANDBOX_LIFECYCLE_LAST_OUTPUT}" == *"lifecycle-ok"* ]] || {
+  [[ "${SANDBOX_LIFECYCLE_LAST_OUTPUT}" == *"lifecycle-ok"* ]] || {
     sandbox_lifecycle_fail "${id}" "unexpected exec output"
     return 1
   }

@@ -199,62 +199,7 @@ suites:
   });
 });
 
-describe("run-scenario.sh --plan-only", () => {
-  it("run_scenario_plan_only_should_print_plan", () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-plan-"));
-    try {
-      const result = spawnSync(
-        "bash",
-        [
-          path.join(E2E_DIR, "runtime", "run-scenario.sh"),
-          "ubuntu-repo-cloud-openclaw",
-          "--plan-only",
-        ],
-        {
-          env: { ...process.env, E2E_CONTEXT_DIR: tmp },
-          encoding: "utf8",
-    timeout: Number(process.env.E2E_SPAWN_TIMEOUT_MS ?? 60_000),
-          cwd: REPO_ROOT,
-        },
-      );
-      expect(result.status, result.stderr).toBe(0);
-      expect(result.stdout).toContain("ubuntu-repo-cloud-openclaw");
-      expect(result.stdout).toContain("cloud-openclaw-ready");
-      expect(result.stdout).toContain("smoke");
-      expect(result.stdout).toContain("inference");
-      const planJsonPath = path.join(tmp, "plan.json");
-      expect(fs.existsSync(planJsonPath)).toBe(true);
-      const doc = JSON.parse(fs.readFileSync(planJsonPath, "utf8"));
-      expect(doc.scenario_id).toBe("ubuntu-repo-cloud-openclaw");
-      expect(doc.expected_state.id).toBe("cloud-openclaw-ready");
-      expect(Array.isArray(doc.suites)).toBe(true);
-      expect(doc.suites.map((s: { id: string }) => s.id)).toContain("smoke");
-    } finally {
-      fs.rmSync(tmp, { recursive: true, force: true });
-    }
-  });
+// run-scenario.sh-based plan-only tests removed: the bash runner is
+// now a fail-fast stub. Equivalent coverage of the typed runner lives in
+// e2e-plan-compiler.test.ts and e2e-scenario-registry.test.ts.
 
-  it("run_scenario_plan_only_should_fail_for_unknown_scenario", () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-plan-"));
-    try {
-      const result = spawnSync(
-        "bash",
-        [
-          path.join(E2E_DIR, "runtime", "run-scenario.sh"),
-          "does-not-exist",
-          "--plan-only",
-        ],
-        {
-          env: { ...process.env, E2E_CONTEXT_DIR: tmp },
-          encoding: "utf8",
-    timeout: Number(process.env.E2E_SPAWN_TIMEOUT_MS ?? 60_000),
-          cwd: REPO_ROOT,
-        },
-      );
-      expect(result.status).not.toBe(0);
-      expect(`${result.stderr}${result.stdout}`).toMatch(/does-not-exist/);
-    } finally {
-      fs.rmSync(tmp, { recursive: true, force: true });
-    }
-  });
-});

@@ -23,10 +23,6 @@ e2e_gateway_assert_healthy() {
     return 2
   fi
   e2e_env_trace "gateway:check" "${url}"
-  if e2e_env_is_dry_run; then
-    echo "[dry-run] gateway check ${url} (skipped)"
-    return 0
-  fi
   # Prefer /health if available, otherwise just hit the base URL.
   local http_code
   http_code="$(curl -fsS -o /dev/null -w '%{http_code}' --max-time 5 "${url%/}/health" 2>/dev/null || echo 000)"

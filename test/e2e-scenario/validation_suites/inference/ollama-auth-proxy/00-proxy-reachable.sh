@@ -15,10 +15,6 @@ LIB_DIR="$(cd "${SCRIPT_DIR}/../../../runtime/lib" && pwd)"
 
 echo "ollama-proxy:proxy-reachable"
 e2e_context_require E2E_SANDBOX_NAME
-if e2e_env_is_dry_run; then
-  echo "[dry-run] would verify the Ollama auth proxy is reachable from the sandbox"
-  exit 0
-fi
 name="$(e2e_context_get E2E_SANDBOX_NAME)"
 # The Ollama auth proxy intentionally rejects unauthenticated requests to
 # /api/tags (legacy test-gpu-e2e.sh accepts 401/403 as proof the proxy is

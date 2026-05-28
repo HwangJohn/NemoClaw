@@ -4,7 +4,6 @@
 #
 # smoke step: sandbox-shell
 # Verifies that OpenShell can execute a trivial command inside the sandbox.
-# Honors E2E_DRY_RUN.
 
 set -euo pipefail
 
@@ -17,11 +16,6 @@ LIB_DIR="$(cd "${SCRIPT_DIR}/../../runtime/lib" && pwd)"
 
 echo "smoke:sandbox-shell"
 e2e_context_require E2E_SANDBOX_NAME
-
-if e2e_env_is_dry_run; then
-  echo "[dry-run] would run: openshell sandbox exec --name <sandbox> -- echo ok"
-  exit 0
-fi
 
 name="$(e2e_context_get E2E_SANDBOX_NAME)"
 output="$(openshell sandbox exec --name "${name}" -- echo ok 2>&1)"

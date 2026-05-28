@@ -17,11 +17,6 @@ LIB_DIR="$(cd "${SCRIPT_DIR}/../../../runtime/lib" && pwd)"
 echo "inference:sandbox-inference-local"
 e2e_context_require E2E_SANDBOX_NAME E2E_INFERENCE_ROUTE
 
-if e2e_env_is_dry_run; then
-  echo "[dry-run] would resolve inference-local from inside the sandbox"
-  exit 0
-fi
-
 name="$(e2e_context_get E2E_SANDBOX_NAME)"
 route="$(e2e_context_get E2E_INFERENCE_ROUTE)"
 # CodeRabbit review item #13: capture then truncate to avoid `| head` racing
