@@ -597,7 +597,9 @@ exec "$@"
         e2e_sandbox_exec sb1 -- false
         echo "rc=$?"
       `,
-        { PATH: `${bin}:${process.env.PATH}` },
+        // Force the openshell-direct transport so the stubbed openshell
+        // (which has no `sandbox ssh-config` subcommand) is exercised.
+        { PATH: `${bin}:${process.env.PATH}`, E2E_SANDBOX_EXEC_VIA_OPENSHELL: "1" },
       );
       expect(r.stdout).toMatch(/rc=1/);
     } finally {
@@ -624,11 +626,121 @@ exec "$@"
           . "${VALIDATION_SUITES}/sandbox-exec.sh"
           printf 'hello $TOKEN' | e2e_sandbox_exec_stdin sb1 -- cat
         `,
-        { PATH: `${bin}:${process.env.PATH}`, TOKEN: "SHOULD_NOT_EXPAND" },
+        {
+          PATH: `${bin}:${process.env.PATH}`,
+          TOKEN: "SHOULD_NOT_EXPAND",
+          // Stub only handles the openshell-direct transport.
+          E2E_SANDBOX_EXEC_VIA_OPENSHELL: "1",
+        },
       );
       expect(r.status, r.stderr).toBe(0);
       expect(r.stdout).toContain("hello $TOKEN");
       expect(r.stdout).not.toContain("SHOULD_NOT_EXPAND");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("sandbox_exec_should_prefer_ssh_config_transport_when_openshell_offers_one", () => {
+    // Verify the new default: when `openshell sandbox ssh-config <name>`
+    // succeeds, the wrapper routes through `ssh -F <cfg>` instead of
+    // `openshell sandbox exec`.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-sbex-ssh-"));
+    try {
+      const bin = path.join(tmp, "bin");
+      fs.mkdirSync(bin);
+      const trace = path.join(tmp, "ssh.trace");
+      fs.writeFileSync(
+        path.join(bin, "openshell"),
+        `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == "sandbox" && "$2" == "ssh-config" ]]; then
+  printf 'Host openshell-%s\\n  HostName 127.0.0.1\\n  Port 2222\\n  User sandbox\\n' "$3"
+  exit 0
+fi
+echo "unexpected openshell call: $*" >&2
+exit 99
+`,
+        { mode: 0o755 },
+      );
+      fs.writeFileSync(
+        path.join(bin, "ssh"),
+        `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "ssh-args:$*" >> "${trace}"
+remote="\${@: -1}"
+printf '%s\\n' "remote-cmd:\${remote}" >> "${trace}"
+echo ok-from-ssh
+exit 0
+`,
+        { mode: 0o755 },
+      );
+      const ctxDir = path.join(tmp, "ctx");
+      fs.mkdirSync(ctxDir);
+      const r = runBash(
+        `
+          set -euo pipefail
+          . "${VALIDATION_SUITES}/sandbox-exec.sh"
+          e2e_sandbox_exec sb1 -- echo hello
+        `,
+        {
+          PATH: `${bin}:${process.env.PATH}`,
+          E2E_CONTEXT_DIR: ctxDir,
+        },
+      );
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stdout).toContain("ok-from-ssh");
+      const traceContents = fs.readFileSync(trace, "utf8");
+      expect(traceContents).toMatch(/ssh-args:.*-F /);
+      expect(traceContents).toContain("openshell-sb1");
+      expect(traceContents).toMatch(/remote-cmd:echo hello$/m);
+      const cfg = path.join(ctxDir, ".ssh-config-cache", "sb1.cfg");
+      expect(fs.existsSync(cfg)).toBe(true);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("sandbox_exec_should_fall_back_to_openshell_when_ssh_config_unavailable", () => {
+    // If `openshell sandbox ssh-config` fails, the wrapper must fall
+    // back to `openshell sandbox exec`.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-sbex-fb-"));
+    try {
+      const bin = path.join(tmp, "bin");
+      fs.mkdirSync(bin);
+      fs.writeFileSync(
+        path.join(bin, "openshell"),
+        `#!/usr/bin/env bash
+set -uo pipefail
+if [[ "$1" == "sandbox" && "$2" == "ssh-config" ]]; then
+  exit 1
+fi
+if [[ "$1" == "sandbox" && "$2" == "exec" ]]; then
+  shift 2
+  while [[ "$#" -gt 0 && "$1" != "--" ]]; do shift; done
+  shift || true
+  exec "$@"
+fi
+exit 99
+`,
+        { mode: 0o755 },
+      );
+      const ctxDir = path.join(tmp, "ctx");
+      fs.mkdirSync(ctxDir);
+      const r = runBash(
+        `
+          set -euo pipefail
+          . "${VALIDATION_SUITES}/sandbox-exec.sh"
+          e2e_sandbox_exec sb1 -- echo fallback-ok
+        `,
+        {
+          PATH: `${bin}:${process.env.PATH}`,
+          E2E_CONTEXT_DIR: ctxDir,
+        },
+      );
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stdout).toContain("fallback-ok");
+      expect(r.stderr).toMatch(/ssh-config unavailable for sb1/);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
