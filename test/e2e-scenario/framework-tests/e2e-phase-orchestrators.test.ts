@@ -368,9 +368,13 @@ describe("plan compiler emits phase actions for canonical scenarios", () => {
     for (const plan of plans) {
       const env = plan.phases.find((p) => p.name === "environment")!;
       const onb = plan.phases.find((p) => p.name === "onboarding")!;
-      expect(env.actions.map((a) => a.id)).toContain("environment.context.emit");
       expect(env.actions.some((a) => a.id.startsWith("environment.install."))).toBe(true);
       expect(onb.actions.some((a) => a.id.startsWith("onboarding.profile."))).toBe(true);
+      // context.env emission is framework infrastructure (ScenarioRunner),
+      // not a shell action. The compiler must NOT emit a shell context
+      // action - if it did we'd be coupling back to the old resolver's
+      // plan.json shape.
+      expect(env.actions.map((a) => a.id)).not.toContain("environment.context.emit");
       // Every install/onboard action must be a typed shell-fn referencing
       // the canonical dispatcher script - no free-form strings.
       for (const action of [...env.actions, ...onb.actions]) {
@@ -381,6 +385,144 @@ describe("plan compiler emits phase actions for canonical scenarios", () => {
           expect(action.arg).toBeTruthy();
         }
       }
+    }
+  });
+});
+
+describe("ScenarioRunner seeds context.env and short-circuits across phases", () => {
+  it("seedContextEnv_writes_normalized_keys_at_top_level_context_env_path", async () => {
+    const { compileRunPlans } = await import("../scenarios/compiler.ts");
+    const { seedContextEnv } = await import("../scenarios/orchestrators/context.ts");
+    const ctx = freshCtx();
+    try {
+      const [plan] = compileRunPlans(["ubuntu-repo-cloud-openclaw"]);
+      const result = seedContextEnv(ctx, plan);
+
+      // Path matches the shell helper's e2e_context_init: top-level,
+      // not under .e2e/. Runtime steps source ${E2E_CONTEXT_DIR}/context.env.
+      expect(result.path).toBe(path.join(ctx.contextDir, "context.env"));
+      const body = fs.readFileSync(result.path, "utf8");
+      // Required keys downstream shell assertions look up.
+      expect(body).toMatch(/^E2E_SCENARIO=ubuntu-repo-cloud-openclaw$/m);
+      expect(body).toMatch(/^E2E_PLATFORM_OS=ubuntu$/m);
+      expect(body).toMatch(/^E2E_AGENT=openclaw$/m);
+      expect(body).toMatch(/^E2E_PROVIDER=nvidia$/m);
+      expect(body).toMatch(/^E2E_GATEWAY_URL=http:\/\/127\.0\.0\.1:18789$/m);
+      expect(body).toMatch(/^E2E_SANDBOX_NAME=e2e-ubuntu-repo-cloud-openclaw$/m);
+    } finally {
+      fs.rmSync(ctx.contextDir, { recursive: true, force: true });
+    }
+  });
+
+  it("hermes_scenario_seeds_hermes_gateway_url", async () => {
+    const { compileRunPlans } = await import("../scenarios/compiler.ts");
+    const { seedContextEnv } = await import("../scenarios/orchestrators/context.ts");
+    const ctx = freshCtx();
+    try {
+      const [plan] = compileRunPlans(["ubuntu-repo-cloud-hermes"]);
+      const result = seedContextEnv(ctx, plan);
+      const body = fs.readFileSync(result.path, "utf8");
+      expect(body).toMatch(/^E2E_AGENT=hermes$/m);
+      expect(body).toMatch(/^E2E_GATEWAY_URL=http:\/\/127\.0\.0\.1:8642$/m);
+    } finally {
+      fs.rmSync(ctx.contextDir, { recursive: true, force: true });
+    }
+  });
+
+  it("runner_skips_downstream_phases_when_prior_phase_action_fails", async () => {
+    const { ScenarioRunner } = await import("../scenarios/orchestrators/runner.ts");
+    const { compileRunPlans } = await import("../scenarios/compiler.ts");
+    const ctx = freshCtx();
+    try {
+      const [plan] = compileRunPlans(["ubuntu-repo-cloud-openclaw"]);
+      // Inject a failing environment phase to simulate an install action
+      // failure. Onboarding and runtime must report skipped, not run
+      // their own actions or assertions.
+      const failingEnv = {
+        run: async () => ({
+          phase: "environment" as const,
+          status: "failed" as const,
+          actions: [
+            {
+              id: "environment.install.repo-current",
+              status: "failed" as const,
+              durationMs: 5,
+              message: "simulated install failure",
+            },
+          ],
+          assertions: [],
+        }),
+      };
+      let onboardingCalled = false;
+      let runtimeCalled = false;
+      const onboarding = {
+        run: async () => {
+          onboardingCalled = true;
+          return { phase: "onboarding" as const, status: "passed" as const, actions: [], assertions: [] };
+        },
+      };
+      const runtime = {
+        run: async () => {
+          runtimeCalled = true;
+          return { phase: "runtime" as const, status: "passed" as const, actions: [], assertions: [] };
+        },
+      };
+      const runner = new ScenarioRunner({ environment: failingEnv, onboarding, runtime });
+
+      const results = await runner.run(ctx, plan);
+
+      // Downstream orchestrators must NOT have been invoked.
+      expect(onboardingCalled).toBe(false);
+      expect(runtimeCalled).toBe(false);
+      // Each phase still has a result, and the downstream ones are
+      // skipped with a message that names the blocking action.
+      expect(results.map((r) => r.phase)).toEqual(["environment", "onboarding", "runtime"]);
+      expect(results[1].status).toBe("skipped");
+      expect(results[2].status).toBe("skipped");
+      expect(results[1].assertions[0].message).toMatch(/blocked by prior failure/);
+      expect(results[1].assertions[0].message).toMatch(/environment.install.repo-current/);
+    } finally {
+      fs.rmSync(ctx.contextDir, { recursive: true, force: true });
+    }
+  });
+
+  it("runner_does_not_short_circuit_on_assertion_failure_only", async () => {
+    // Assertion failures (as opposed to action failures) must not block
+    // downstream phases - reviewers need to see all failure layers.
+    const { ScenarioRunner } = await import("../scenarios/orchestrators/runner.ts");
+    const { compileRunPlans } = await import("../scenarios/compiler.ts");
+    const ctx = freshCtx();
+    try {
+      const [plan] = compileRunPlans(["ubuntu-repo-cloud-openclaw"]);
+      const env = {
+        run: async () => ({
+          phase: "environment" as const,
+          status: "failed" as const,
+          actions: [],
+          assertions: [
+            { id: "environment.something", status: "failed" as const, attempts: 1, durationMs: 1 },
+          ],
+        }),
+      };
+      let onboardingCalled = false;
+      const onboarding = {
+        run: async () => {
+          onboardingCalled = true;
+          return { phase: "onboarding" as const, status: "passed" as const, actions: [], assertions: [] };
+        },
+      };
+      const runner = new ScenarioRunner({
+        environment: env,
+        onboarding,
+        runtime: {
+          run: async () => ({ phase: "runtime" as const, status: "passed" as const, actions: [], assertions: [] }),
+        },
+      });
+
+      await runner.run(ctx, plan);
+      expect(onboardingCalled).toBe(true);
+    } finally {
+      fs.rmSync(ctx.contextDir, { recursive: true, force: true });
     }
   });
 });

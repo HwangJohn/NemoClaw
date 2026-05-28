@@ -298,9 +298,12 @@ export class PhaseOrchestrator {
       E2E_STEP_ID: step.id,
       E2E_PHASE: step.phase,
     };
-    // Surface scenario-derived context (E2E_SANDBOX_NAME, E2E_GATEWAY_URL,
-    // etc.) that the environment+onboarding phases wrote into context.env.
-    const contextEnvPath = path.join(ctx.contextDir, ".e2e", "context.env");
+    // Surface scenario-derived context (E2E_SCENARIO, E2E_SANDBOX_NAME,
+    // E2E_GATEWAY_URL, etc.) that the framework wrote at the start of the
+    // run and that environment+onboarding phases extended via
+    // e2e_context_set. The shell context library writes to
+    // ${E2E_CONTEXT_DIR}/context.env, NOT to ${E2E_CONTEXT_DIR}/.e2e/.
+    const contextEnvPath = path.join(ctx.contextDir, "context.env");
     if (fs.existsSync(contextEnvPath)) {
       const contextEnv = fs.readFileSync(contextEnvPath, "utf8");
       for (const line of contextEnv.split("\n")) {

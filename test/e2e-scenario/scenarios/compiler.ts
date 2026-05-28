@@ -81,13 +81,11 @@ function validateManifestCompatibility(scenario: ScenarioDefinition, manifest?: 
 // resurrected bash runner.
 const INSTALL_DISPATCH = "test/e2e-scenario/nemoclaw_scenarios/install/dispatch.sh";
 const ONBOARD_DISPATCH = "test/e2e-scenario/nemoclaw_scenarios/onboard/dispatch.sh";
-const CONTEXT_EMIT = "test/e2e-scenario/nemoclaw_scenarios/helpers/emit-context-from-plan.sh";
 
 // Default action timeouts. Install and onboarding can take a while on
 // cold runners (Docker pulls, image builds, sandbox bootstrap).
 const INSTALL_TIMEOUT_SECONDS = 900;
 const ONBOARD_TIMEOUT_SECONDS = 900;
-const CONTEXT_EMIT_TIMEOUT_SECONDS = 30;
 
 function phaseActions(phase: PhaseName, scenario: ScenarioDefinition): PhaseAction[] {
   if (phase === "environment") {
@@ -98,15 +96,6 @@ function phaseActions(phase: PhaseName, scenario: ScenarioDefinition): PhaseActi
       return [];
     }
     return [
-      {
-        id: "environment.context.emit",
-        phase: "environment",
-        description: "Emit .e2e/context.env from the resolved run plan.",
-        kind: "shell",
-        scriptRef: CONTEXT_EMIT,
-        timeoutSeconds: CONTEXT_EMIT_TIMEOUT_SECONDS,
-        evidencePath: `.e2e/actions/environment.context.emit.log`,
-      },
       {
         id: `environment.install.${installId}`,
         phase: "environment",
