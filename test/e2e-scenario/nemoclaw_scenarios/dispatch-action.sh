@@ -55,9 +55,12 @@ RUNTIME_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../runtime/lib" && pwd)"
 e2e_env_apply_noninteractive
 e2e_env_trace "phase:${E2E_PHASE:-unknown}/action:${E2E_ACTION_ID:-unknown}"
 
-# Make sure the context directory exists; e2e_context_init is also
-# idempotent and safe to call from any phase.
-e2e_context_init || true
+# IMPORTANT: do NOT call e2e_context_init here. The TS framework
+# (ScenarioRunner.seedContextEnv) is the single owner of context.env
+# initialization for the run; e2e_context_init opens with `: > ctx`
+# which would truncate the file and wipe seeded keys (E2E_SCENARIO,
+# E2E_GATEWAY_URL, ...) that runtime assertions require.
+# Workers may still call e2e_context_set to extend context.env in place.
 
 # Source the dispatcher last so its function definitions are in scope
 # when we invoke the requested function.

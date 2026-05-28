@@ -332,6 +332,29 @@ describe("phase orchestrators - actions execute before assertions", () => {
     }
   });
 
+  it("phase_action_publishes_alias_path_on_success", async () => {
+    const ctx = freshCtx();
+    try {
+      const actionScript = writeTempScript(ctx.contextDir, "alias.sh", "echo aliased-output");
+      const action: PhaseAction = {
+        id: "onboarding.profile.alias-demo",
+        phase: "onboarding",
+        kind: "shell",
+        scriptRef: path.relative(REPO_ROOT, actionScript),
+        aliasPath: "onboard.log",
+      };
+      const orchestrator = new PhaseOrchestrator("onboarding");
+
+      const result = await orchestrator.run(ctx, makePhaseWithActions("onboarding", [action], []));
+
+      expect(result.actions[0].status).toBe("passed");
+      const aliasContents = fs.readFileSync(path.join(ctx.contextDir, "onboard.log"), "utf8");
+      expect(aliasContents).toContain("aliased-output");
+    } finally {
+      fs.rmSync(ctx.contextDir, { recursive: true, force: true });
+    }
+  });
+
   it("phase_action_evidence_log_is_flushed_before_resolve", async () => {
     const ctx = freshCtx();
     try {
@@ -375,6 +398,11 @@ describe("plan compiler emits phase actions for canonical scenarios", () => {
       // action - if it did we'd be coupling back to the old resolver's
       // plan.json shape.
       expect(env.actions.map((a) => a.id)).not.toContain("environment.context.emit");
+      // Onboarding action must publish a stable alias path so legacy
+      // shell assertions referencing ${E2E_CONTEXT_DIR}/onboard.log
+      // keep working without coupling them to action ids.
+      const onboardingAction = onb.actions.find((a) => a.id.startsWith("onboarding.profile."));
+      expect(onboardingAction?.aliasPath).toBe("onboard.log");
       // Every install/onboard action must be a typed shell-fn referencing
       // the canonical dispatcher script - no free-form strings.
       for (const action of [...env.actions, ...onb.actions]) {

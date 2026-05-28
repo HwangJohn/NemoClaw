@@ -128,6 +128,11 @@ export interface PhaseAction {
   timeoutSeconds?: number;
   // Repo-relative evidence log path.
   evidencePath?: string;
+  // Optional stable alias the orchestrator copies the evidence log to
+  // after a successful action. Lets legacy shell assertions that
+  // reference well-known filenames (e.g. ${E2E_CONTEXT_DIR}/onboard.log)
+  // keep working without coupling them to the action's stable id.
+  aliasPath?: string;
 }
 
 export interface RunPlanPhase {

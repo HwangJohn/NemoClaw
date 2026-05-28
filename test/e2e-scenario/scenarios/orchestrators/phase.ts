@@ -193,6 +193,21 @@ export class PhaseOrchestrator {
             return;
           }
           if (code === 0) {
+            // Publish the action's evidence log under a stable alias for
+            // legacy assertions that reference fixed filenames
+            // (onboard.log, install.log, ...). Best-effort; alias copy
+            // failures do not fail the action.
+            if (action.aliasPath) {
+              try {
+                const aliasFull = path.isAbsolute(action.aliasPath)
+                  ? action.aliasPath
+                  : path.join(ctx.contextDir, action.aliasPath);
+                fs.mkdirSync(path.dirname(aliasFull), { recursive: true });
+                fs.copyFileSync(logPath, aliasFull);
+              } catch {
+                /* alias is a convenience; never fail action on copy */
+              }
+            }
             resolve({ id: action.id, status: "passed", durationMs, evidence: logPath });
             return;
           }

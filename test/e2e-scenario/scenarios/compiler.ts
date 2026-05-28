@@ -125,6 +125,9 @@ function phaseActions(phase: PhaseName, scenario: ScenarioDefinition): PhaseActi
         arg: onboardingId,
         timeoutSeconds: ONBOARD_TIMEOUT_SECONDS,
         evidencePath: `.e2e/actions/onboarding.profile.${onboardingId}.log`,
+        // Legacy preflight assertions look for ${E2E_CONTEXT_DIR}/onboard.log;
+        // publish a stable alias so they keep working without rewiring.
+        aliasPath: "onboard.log",
       },
     ];
   }
