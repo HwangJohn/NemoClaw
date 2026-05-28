@@ -32,7 +32,10 @@ interface StepAttemptOutcome {
 // clients/scripts do not.
 function classifierForRef(ref: string): TransientClassifier {
   if (/provider|inference|chat-completion|cloudflared|tunnel/i.test(ref)) {
-    return ref.includes("tunnel") || ref.includes("cloudflared") ? "external-tunnel" : "provider-transient";
+    // Use case-insensitive matching here too; the outer guard is /i, so
+    // mixed-case refs (Tunnel, Cloudflared) must still classify as
+    // external-tunnel rather than fall through to provider-transient.
+    return /tunnel|cloudflared/i.test(ref) ? "external-tunnel" : "provider-transient";
   }
   if (/gateway/i.test(ref)) {
     return "gateway-transient";

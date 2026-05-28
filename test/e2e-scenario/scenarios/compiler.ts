@@ -89,11 +89,17 @@ const ONBOARD_TIMEOUT_SECONDS = 900;
 
 function phaseActions(phase: PhaseName, scenario: ScenarioDefinition): PhaseAction[] {
   if (phase === "environment") {
-    const installId = scenario.environment?.install;
-    if (!installId) {
-      // No install dimension defined - the scenario is malformed; surface
-      // it as a hard error rather than emitting a bogus action.
+    if (!scenario.environment) {
+      // Scenarios without any environment dimension (skeleton scenarios)
+      // legitimately have no actions yet. Don't fail-fast here.
       return [];
+    }
+    const installId = scenario.environment.install;
+    if (!installId) {
+      // Environment is declared but install is missing - that IS a
+      // malformed scenario; fail fast so the caller sees a clear error
+      // rather than a phase that silently no-ops setup work.
+      throw new Error(`Scenario ${scenario.id} is missing environment.install`);
     }
     return [
       {
@@ -110,9 +116,12 @@ function phaseActions(phase: PhaseName, scenario: ScenarioDefinition): PhaseActi
     ];
   }
   if (phase === "onboarding") {
-    const onboardingId = scenario.environment?.onboarding;
-    if (!onboardingId) {
+    if (!scenario.environment) {
       return [];
+    }
+    const onboardingId = scenario.environment.onboarding;
+    if (!onboardingId) {
+      throw new Error(`Scenario ${scenario.id} is missing environment.onboarding`);
     }
     return [
       {

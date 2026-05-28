@@ -59,7 +59,10 @@ sandbox_lifecycle_assert_nemoclaw_list_contains_sandbox() {
     sandbox_lifecycle_fail "${id}" "nemoclaw list failed"
     return 1
   }
-  [[ "${SANDBOX_LIFECYCLE_LAST_OUTPUT}" == *"${E2E_SANDBOX_NAME}"* ]] || {
+  # Match the sandbox name exactly as a whole token; substring match
+  # would let `sb1` falsely match `sb10`.
+  awk -v n="${E2E_SANDBOX_NAME}" '$1 == n { found = 1 } END { exit !found }' \
+    <<<"${SANDBOX_LIFECYCLE_LAST_OUTPUT}" || {
     sandbox_lifecycle_fail "${id}" "sandbox not listed: ${E2E_SANDBOX_NAME}"
     return 1
   }
