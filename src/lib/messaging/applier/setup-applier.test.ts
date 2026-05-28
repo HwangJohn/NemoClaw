@@ -23,11 +23,15 @@ async function withEnv<T>(
   values: Readonly<Record<string, string | undefined>>,
   run: () => Promise<T>,
 ): Promise<T> {
+  const scopedValues = {
+    NEMOCLAW_SKIP_TELEGRAM_REACHABILITY: "1",
+    ...values,
+  };
   const previous = Object.fromEntries(
-    Object.keys(values).map((key) => [key, process.env[key]]),
+    Object.keys(scopedValues).map((key) => [key, process.env[key]]),
   );
   try {
-    for (const [key, value] of Object.entries(values)) {
+    for (const [key, value] of Object.entries(scopedValues)) {
       if (value === undefined) {
         delete process.env[key];
       } else {

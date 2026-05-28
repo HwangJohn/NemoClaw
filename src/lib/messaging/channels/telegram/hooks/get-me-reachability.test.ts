@@ -100,9 +100,6 @@ describe("Telegram getMe reachability hook implementation", () => {
       {
         id: TELEGRAM_GET_ME_REACHABILITY_HOOK_ID,
         handler: createTelegramGetMeReachabilityHook({
-          env: {
-            NEMOCLAW_NON_INTERACTIVE: "1",
-          },
           fetch: async () => {
             throw new Error("network unavailable");
           },
@@ -112,11 +109,41 @@ describe("Telegram getMe reachability hook implementation", () => {
     await expect(
       runMessagingHook(TELEGRAM_REACHABILITY_HOOK, registry, {
         channelId: "telegram",
+        isInteractive: false,
         inputs: {
           botToken: "123456:telegram-token",
         },
       }),
     ).rejects.toThrow("Telegram reachability check failed: Bot API request failed.");
+  });
+
+  it("bounds hung Bot API requests with a timeout", async () => {
+    const logs: string[] = [];
+    const registry = new MessagingHookRegistry([
+      {
+        id: TELEGRAM_GET_ME_REACHABILITY_HOOK_ID,
+        handler: createTelegramGetMeReachabilityHook({
+          log: (message) => logs.push(message),
+          timeoutMs: 1,
+          fetch: async () => new Promise(() => {}),
+        }),
+      },
+    ]);
+
+    await expect(
+      runMessagingHook(TELEGRAM_REACHABILITY_HOOK, registry, {
+        channelId: "telegram",
+        inputs: {
+          botToken: "123456:telegram-token",
+        },
+      }),
+    ).resolves.toMatchObject({
+      hookId: "telegram-reachability",
+      outputs: {},
+    });
+    expect(logs).toEqual([
+      "  ⚠ Telegram reachability check failed: Bot API request failed.",
+    ]);
   });
 
   it("honors the explicit skip env without calling Telegram", async () => {

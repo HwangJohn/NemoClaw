@@ -5,6 +5,7 @@ import { normalizeCredentialValue } from "../../../../credentials/store";
 import type { MessagingHookHandler, MessagingHookRegistration } from "../../../hooks/types";
 
 export const TELEGRAM_GET_ME_REACHABILITY_HOOK_ID = "telegram.getMeReachability";
+const DEFAULT_TELEGRAM_REACHABILITY_TIMEOUT_MS = 10_000;
 
 interface TelegramFetchResponse {
   readonly ok: boolean;
@@ -14,12 +15,20 @@ interface TelegramFetchResponse {
   text(): Promise<string>;
 }
 
-type TelegramFetch = (url: string) => Promise<TelegramFetchResponse>;
+interface TelegramFetchOptions {
+  readonly signal?: AbortSignal;
+}
+
+type TelegramFetch = (
+  url: string,
+  options?: TelegramFetchOptions,
+) => Promise<TelegramFetchResponse>;
 
 export interface TelegramGetMeReachabilityHookOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly fetch?: TelegramFetch;
   readonly apiBaseUrl?: string;
+  readonly timeoutMs?: number;
   readonly log?: (message: string) => void;
 }
 
@@ -39,9 +48,10 @@ export function createTelegramGetMeReachabilityHook(
     }
 
     const log = options.log ?? console.log;
+    const isInteractive = context.isInteractive !== false;
     const response = await fetchTelegramGetMe(token, options).catch(() => {
       const message = "Telegram reachability check failed: Bot API request failed.";
-      if (env.NEMOCLAW_NON_INTERACTIVE === "1") throw new Error(message);
+      if (!isInteractive) throw new Error(message);
       log(`  ⚠ ${message}`);
       return null;
     });
@@ -77,14 +87,49 @@ async function fetchTelegramGetMe(
 ): Promise<TelegramFetchResponse> {
   const fetchImpl = options.fetch ?? defaultFetch;
   const baseUrl = (options.apiBaseUrl ?? "https://api.telegram.org").replace(/\/+$/, "");
-  return fetchImpl(`${baseUrl}/bot${token}/getMe`);
+  const timeoutMs = normalizeTimeoutMs(options.timeoutMs);
+  return fetchWithTimeout(fetchImpl, `${baseUrl}/bot${token}/getMe`, timeoutMs);
 }
 
-async function defaultFetch(url: string): Promise<TelegramFetchResponse> {
+async function defaultFetch(
+  url: string,
+  options?: TelegramFetchOptions,
+): Promise<TelegramFetchResponse> {
   if (typeof fetch !== "function") {
     throw new Error("Telegram reachability check requires global fetch.");
   }
-  return fetch(url) as Promise<TelegramFetchResponse>;
+  return fetch(url, options) as Promise<TelegramFetchResponse>;
+}
+
+function normalizeTimeoutMs(timeoutMs: number | undefined): number {
+  return typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
+    ? timeoutMs
+    : DEFAULT_TELEGRAM_REACHABILITY_TIMEOUT_MS;
+}
+
+async function fetchWithTimeout(
+  fetchImpl: TelegramFetch,
+  url: string,
+  timeoutMs: number,
+): Promise<TelegramFetchResponse> {
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => {
+      controller?.abort();
+      reject(new Error("Telegram reachability check timed out."));
+    }, timeoutMs);
+    timeout.unref?.();
+  });
+
+  try {
+    return await Promise.race([
+      fetchImpl(url, controller ? { signal: controller.signal } : undefined),
+      timeoutPromise,
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 async function readTelegramJson(response: TelegramFetchResponse): Promise<unknown> {
