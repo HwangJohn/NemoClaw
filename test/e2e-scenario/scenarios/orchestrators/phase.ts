@@ -16,7 +16,17 @@ import type {
   RunPlanPhase,
   TransientClassifier,
 } from "../types.ts";
+import { lookupProbe } from "../probes/registry.ts";
+import type { ProbeContext } from "../probes/types.ts";
 import { buildChildEnv, pipeRedacted, redactString } from "./redaction.ts";
+
+// Auto-register the built-in probes the moment the orchestrator is
+// imported. This is a deliberate side-effect import: registry state is
+// module-scoped and we want every entry point that runs assertions
+// (run.ts, ScenarioRunner, framework tests) to see the same wired set
+// without each one repeating the registration.
+import { registerBuiltinProbes } from "../probes/builtin.ts";
+registerBuiltinProbes();
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const DEFAULT_STEP_TIMEOUT_SECONDS = 300;
@@ -45,6 +55,44 @@ function classifierForRef(ref: string): TransientClassifier {
     return "empty-event-capture";
   }
   return "runner-infra";
+}
+
+/**
+ * Build the typed ProbeContext handed to a probe runner. Mirrors the
+ * subset of state that shell steps already get via
+ * ${E2E_CONTEXT_DIR}/context.env, but parsed up front so probe code
+ * doesn't reach into the file system itself.
+ */
+function buildProbeContext(ctx: RunContext, step: AssertionStep): ProbeContext {
+  const contextEnvPath = path.join(ctx.contextDir, "context.env");
+  const contextEnv: Record<string, string> = {};
+  if (fs.existsSync(contextEnvPath)) {
+    const raw = fs.readFileSync(contextEnvPath, "utf8");
+    for (const line of raw.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq <= 0) continue;
+      const key = trimmed.slice(0, eq);
+      let value = trimmed.slice(eq + 1);
+      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
+      contextEnv[key] = value;
+    }
+  }
+  const evidenceRel = step.evidencePath ?? `.e2e/assertions/${step.id}.json`;
+  const evidencePath = path.isAbsolute(evidenceRel)
+    ? evidenceRel
+    : path.join(ctx.contextDir, evidenceRel);
+  return {
+    contextDir: ctx.contextDir,
+    evidencePath,
+    contextEnv,
+    sandboxName: contextEnv.E2E_SANDBOX_NAME ?? null,
+    gatewayUrl: contextEnv.E2E_GATEWAY_URL ?? null,
+    repoRoot: REPO_ROOT,
+  };
 }
 
 export class PhaseOrchestrator {
@@ -289,21 +337,44 @@ export class PhaseOrchestrator {
       return this.runShellStep(ctx, step);
     }
     if (kind === "probe") {
-      // Probe registry lands in a follow-up PR. Until then, probes
-      // surface as visibly skipped — never as fake green. For
-      // security-sensitive or otherwise required probes, the run
-      // must NOT pass on this gap; the typed registry marks those
-      // with `required: true` and we reclassify the skip as a
-      // failure so the phase result fails closed.
       const ref = step.implementation?.ref ?? "<no ref>";
-      if (step.required) {
+      const probe = lookupProbe(ref);
+      if (!probe) {
+        // Probe is referenced by the typed registry but no
+        // implementation has been registered yet. Surface as
+        // skipped — unless the step is marked required, in which
+        // case fail closed so security-sensitive suites never
+        // pass on a missing probe.
+        if (step.required) {
+          return {
+            status: "failed",
+            classifier: "runner-infra",
+            message: `required probe not registered: ${ref} (step ${step.id})`,
+          };
+        }
+        return { status: "skipped", message: `probe not registered: ${ref}` };
+      }
+      const probeCtx = buildProbeContext(ctx, step);
+      try {
+        const outcome = await probe(probeCtx);
+        return {
+          status: outcome.status,
+          classifier: outcome.classifier,
+          message: outcome.message,
+          evidence: outcome.evidence ?? probeCtx.evidencePath,
+        };
+      } catch (err) {
+        // Probes must not throw — but a thrown error must NEVER
+        // cause an unobservable failure. Convert to a failed
+        // outcome with a redacted message so the orchestrator's
+        // result aggregation still records evidence.
+        const message = err instanceof Error ? err.message : String(err);
         return {
           status: "failed",
-          classifier: "runner-infra",
-          message: `required probe not registered: ${ref} (step ${step.id})`,
+          message: redactString(`probe ${ref} threw: ${message}`),
+          evidence: probeCtx.evidencePath,
         };
       }
-      return { status: "skipped", message: `probe not registered: ${ref}` };
     }
     if (kind === "pending") {
       // pending steps surface as skipped with the placeholder ref so

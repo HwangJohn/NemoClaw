@@ -612,7 +612,13 @@ describe("required probe and pending steps fail closed", () => {
       const step: AssertionStep = {
         id: "runtime.diagnostics.non-required-probe",
         phase: "runtime",
-        implementation: { kind: "probe", ref: "diagnosticsProbe" },
+        // Use an intentionally-unregistered ref so this test exercises
+        // the "missing probe" code path. `diagnosticsProbe` is now a
+        // real built-in registered at orchestrator import time, so
+        // referring to it here would actually invoke nemoclaw and the
+        // assertion would fail (or pass) on real CLI behavior —
+        // unrelated to what this test verifies.
+        implementation: { kind: "probe", ref: "unregisteredFakeProbe" },
         evidencePath: ".e2e/assertions/runtime.diagnostics.non-required-probe.json",
         // required intentionally omitted (defaults to false)
       };
