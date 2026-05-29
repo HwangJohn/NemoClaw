@@ -102,13 +102,12 @@ async function withEnv<T>(
 }
 
 describe("MessagingWorkflowPlanner", () => {
-  it("builds onboard plans from selected and configured channels", async () => {
+  it("builds onboard plans from configured channels", async () => {
     const plan = await planner().buildPlan({
       sandboxName: "demo",
       agent: "openclaw",
       workflow: "onboard",
       isInteractive: true,
-      selectedChannels: ["wechat", "telegram"],
       configuredChannels: ["wechat", "telegram"],
     });
 
@@ -154,7 +153,6 @@ describe("MessagingWorkflowPlanner", () => {
       agent: "openclaw",
       workflow: "add-channel",
       isInteractive: true,
-      selectedChannels: ["slack"],
       configuredChannels: ["telegram", "slack"],
       disabledChannels: ["telegram"],
     });
@@ -165,7 +163,7 @@ describe("MessagingWorkflowPlanner", () => {
       configured: true,
       disabled: true,
       active: false,
-      selected: false,
+      selected: true,
     });
     expect(plan.channels.find((channel) => channel.channelId === "slack")).toMatchObject({
       configured: true,
@@ -179,7 +177,7 @@ describe("MessagingWorkflowPlanner", () => {
     ]);
   });
 
-  it("runs add-channel enrollment only for the selected channel", async () => {
+  it("runs add-channel enrollment only for active configured channels", async () => {
     const hooks = new MessagingHookRegistry([
       {
         id: "common.tokenPaste",
@@ -208,13 +206,13 @@ describe("MessagingWorkflowPlanner", () => {
       agent: "openclaw",
       workflow: "add-channel",
       isInteractive: true,
-      selectedChannels: ["slack"],
       configuredChannels: ["telegram", "slack"],
+      disabledChannels: ["telegram"],
     });
 
     expect(plan.channels.find((channel) => channel.channelId === "telegram")).toMatchObject({
-      active: true,
-      selected: false,
+      active: false,
+      selected: true,
     });
     expect(
       plan.channels
@@ -230,7 +228,6 @@ describe("MessagingWorkflowPlanner", () => {
       agent: "openclaw",
       workflow: "stop-channel",
       isInteractive: false,
-      selectedChannels: ["telegram"],
       configuredChannels: ["telegram", "slack"],
       disabledChannels: ["telegram"],
     });
@@ -247,7 +244,7 @@ describe("MessagingWorkflowPlanner", () => {
       configured: true,
       disabled: false,
       active: true,
-      selected: false,
+      selected: true,
     });
     expect(plan.networkPolicy.entries.map((entry) => entry.channelId)).toEqual([
       "telegram",
@@ -264,7 +261,6 @@ describe("MessagingWorkflowPlanner", () => {
       agent: "openclaw",
       workflow: "start-channel",
       isInteractive: false,
-      selectedChannels: ["telegram"],
       configuredChannels: ["telegram", "slack"],
       credentialAvailability: {
         TELEGRAM_BOT_TOKEN: true,
@@ -330,7 +326,7 @@ describe("MessagingWorkflowPlanner", () => {
       configured: true,
       disabled: true,
       active: false,
-      selected: false,
+      selected: true,
     });
     expect(plan.networkPolicy.entries.map((entry) => entry.channelId)).toEqual([
       "telegram",
@@ -346,7 +342,6 @@ describe("MessagingWorkflowPlanner", () => {
         agent: "openclaw",
         workflow: "onboard",
         isInteractive: false,
-        selectedChannels: ["slack", "discord"],
         configuredChannels: ["slack", "discord"],
         supportedChannelIds: ["telegram"],
       }),
@@ -364,7 +359,6 @@ describe("MessagingWorkflowPlanner", () => {
           agent: "openclaw",
           workflow: "add-channel",
           isInteractive: false,
-          selectedChannels: ["telegram"],
           configuredChannels: ["telegram"],
         });
         const serialized = JSON.stringify(plan);

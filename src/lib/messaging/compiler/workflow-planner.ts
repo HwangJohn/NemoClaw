@@ -20,7 +20,6 @@ export interface MessagingWorkflowPlannerBuildContext {
   readonly agent: MessagingAgentId;
   readonly workflow: MessagingCompilerWorkflow;
   readonly isInteractive: boolean;
-  readonly selectedChannels?: readonly MessagingChannelId[];
   readonly configuredChannels?: readonly MessagingChannelId[];
   readonly disabledChannels?: readonly MessagingChannelId[];
   readonly supportedChannelIds?: readonly MessagingChannelId[];
@@ -40,20 +39,15 @@ export class MessagingWorkflowPlanner {
   async buildPlan(
     context: MessagingWorkflowPlannerBuildContext,
   ): Promise<SandboxMessagingPlan> {
-    const selectedChannels = uniqueChannels(context.selectedChannels);
     const configuredChannels = uniqueChannels(context.configuredChannels);
     const disabledChannels = onlyConfiguredChannels(context.disabledChannels, configuredChannels);
-    this.assertSupportedChannels(
-      [...selectedChannels, ...configuredChannels, ...disabledChannels],
-      context,
-    );
+    this.assertSupportedChannels(configuredChannels, context);
 
     const compilerContext: ManifestCompilerContext = {
       sandboxName: context.sandboxName,
       agent: context.agent,
       isInteractive: context.isInteractive,
       workflow: context.workflow,
-      selectedChannels,
       configuredChannels,
       disabledChannels,
       supportedChannelIds: context.supportedChannelIds,
