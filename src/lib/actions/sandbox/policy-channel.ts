@@ -14,6 +14,7 @@ import {
   createBuiltInChannelManifestRegistry,
   createBuiltInMessagingHookRegistry,
   getMessagingManifestAvailabilityContext,
+  MessagingHostStateApplier,
   MessagingSetupApplier,
   MessagingWorkflowPlanner,
   type SandboxMessagingChannelPlan,
@@ -863,6 +864,7 @@ export async function addSandboxChannel(
     }
     await applyChannelAddToGatewayAndRegistry(sandboxName, canonical, {});
     persistManifestAddState(sandboxName, manifest);
+    MessagingHostStateApplier.applyPlanToRegistry(sandboxName, plan, { mode: "merge" });
     console.log("");
     const help = manifest.enrollmentHelp ?? manifest.inputs[0]?.prompt?.help;
     if (help) console.log(`  ${help}`);
@@ -887,6 +889,7 @@ export async function addSandboxChannel(
   console.log(`  ${G}✓${R} Registered ${canonical} bridge with the OpenShell gateway.`);
 
   applyChannelPresetIfAvailable(sandboxName, canonical);
+  MessagingHostStateApplier.applyPlanToRegistry(sandboxName, plan, { mode: "merge" });
 
   const rebuilt = await promptAndRebuild(sandboxName, `add '${canonical}'`);
   if (rebuilt) verifyChannelBridgeAfterRebuild(sandboxName, canonical);

@@ -6,6 +6,7 @@ import path from "node:path";
 
 import { ensureConfigDir, readConfigFile, writeConfigFile } from "./config-io";
 import { isErrnoException } from "../core/errno";
+import type { SandboxMessagingPlan } from "../messaging/manifest";
 import type { MessagingChannelConfig } from "../messaging-channel-config";
 
 export interface CustomPolicyEntry {
@@ -37,6 +38,7 @@ export interface SandboxEntry {
   providerCredentialHashes?: Record<string, string>;
   messagingChannels?: string[];
   messagingChannelConfig?: MessagingChannelConfig;
+  messaging?: SandboxMessagingState;
   hermesToolGateways?: string[];
   hermesDashboardEnabled?: boolean;
   hermesDashboardPort?: number | null;
@@ -44,6 +46,11 @@ export interface SandboxEntry {
   hermesDashboardTui?: boolean;
   disabledChannels?: string[];
   dashboardPort?: number | null;
+}
+
+export interface SandboxMessagingState {
+  schemaVersion: 1;
+  plan: SandboxMessagingPlan;
 }
 
 export interface SandboxRegistry {
@@ -219,6 +226,7 @@ export function registerSandbox(entry: SandboxEntry): void {
         entry.messagingChannelConfig && Object.keys(entry.messagingChannelConfig).length > 0
           ? { ...entry.messagingChannelConfig }
           : undefined,
+      messaging: cloneSandboxMessagingState(entry.messaging),
       hermesToolGateways:
         Array.isArray(entry.hermesToolGateways) && entry.hermesToolGateways.length > 0
           ? [...entry.hermesToolGateways]
@@ -238,6 +246,16 @@ export function registerSandbox(entry: SandboxEntry): void {
     }
     save(data);
   });
+}
+
+function cloneSandboxMessagingState(
+  messaging: SandboxMessagingState | undefined,
+): SandboxMessagingState | undefined {
+  if (!messaging || messaging.schemaVersion !== 1) return undefined;
+  return {
+    schemaVersion: 1,
+    plan: JSON.parse(JSON.stringify(messaging.plan)) as SandboxMessagingPlan,
+  };
 }
 
 export function updateSandbox(name: string, updates: Partial<SandboxEntry>): boolean {

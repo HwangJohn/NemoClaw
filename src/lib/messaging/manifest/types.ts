@@ -238,6 +238,7 @@ export interface SandboxMessagingCredentialBindingPlan {
   readonly providerEnvKey: string;
   readonly placeholder: MessagingTemplateString;
   readonly credentialAvailable: boolean;
+  readonly credentialHash?: string;
 }
 
 /** Network policy presets and concrete policy keys required by active channels. */

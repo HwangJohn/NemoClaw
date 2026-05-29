@@ -93,6 +93,7 @@ const {
 const {
   setupMessagingChannels: setupMessagingChannelsImpl,
 } = require("./onboard/messaging-channel-setup") as typeof import("./onboard/messaging-channel-setup");
+const { MessagingHostStateApplier }: typeof import("./messaging") = require("./messaging");
 const {
   clearAgentScopedResumeState,
 }: typeof import("./onboard/agent-resume-state") = require("./onboard/agent-resume-state");
@@ -3792,6 +3793,9 @@ async function createSandbox(
   const resolvedImageTag = resolveSandboxImageTagFromCreateOutput(createResult.output, buildId);
 
   const sandboxRuntimeFields = getSandboxRuntimeRegistryFields(effectiveSandboxGpuConfig);
+  const plannedMessagingState = MessagingHostStateApplier.readPlanStateFromEnv();
+  const messagingState =
+    plannedMessagingState?.plan.sandboxName === sandboxName ? plannedMessagingState : undefined;
   registry.registerSandbox({
     name: sandboxName,
     model: model || null,
@@ -3810,6 +3814,7 @@ async function createSandbox(
     messagingChannels:
       enabledChannels != null ? [...new Set(enabledChannels)] : activeMessagingChannels,
     messagingChannelConfig: messagingChannelConfig || undefined,
+    messaging: messagingState,
     disabledChannels: disabledChannels.length > 0 ? [...disabledChannels] : undefined,
     hermesToolGateways: hermesToolGateways.length > 0 ? [...hermesToolGateways] : undefined,
     ...onboardHermesDashboard.getHermesDashboardRegistryFields(finalHermesDashboardState),

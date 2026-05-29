@@ -309,12 +309,30 @@ const ctx = module.exports;
     assert.ok(!payload.error, `unexpected error: ${payload.error}\n${payload.stack || ""}`);
 
     assert.deepEqual(payload.providerCalls, [], "WhatsApp must not create host-side providers");
-    assert.deepEqual(payload.registryUpdates, [
-      {
-        name: "test-sb",
-        updates: { messagingChannels: ["whatsapp"], disabledChannels: [] },
-      },
-    ]);
+    assert.deepEqual(payload.registryUpdates[0], {
+      name: "test-sb",
+      updates: { messagingChannels: ["whatsapp"], disabledChannels: [] },
+    });
+    const messagingStateUpdate = payload.registryUpdates.find(
+      (entry: { updates?: { messaging?: { plan?: { channels?: Array<{ channelId?: string }> } } } }) =>
+        entry.updates?.messaging?.plan,
+    );
+    assert.ok(
+      messagingStateUpdate,
+      `expected a registry update that stores durable messaging state; got ${JSON.stringify(payload.registryUpdates)}`,
+    );
+    assert.deepEqual(
+      messagingStateUpdate.updates.messaging.plan.channels.map(
+        (channel: { channelId: string }) => channel.channelId,
+      ),
+      ["whatsapp"],
+    );
+    assert.equal(messagingStateUpdate.updates.messaging.plan.agent, "hermes");
+    assert.deepEqual(messagingStateUpdate.updates.messaging.plan.credentialBindings, []);
+    assert.deepEqual(
+      payload.registryUpdates.map((entry: { name: string }) => entry.name),
+      ["test-sb", "test-sb"],
+    );
     assert.deepEqual(
       payload.appliedCalls,
       [{ sandboxName: "test-sb", presetName: "whatsapp" }],
