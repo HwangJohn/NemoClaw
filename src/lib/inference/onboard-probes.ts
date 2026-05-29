@@ -834,7 +834,21 @@ module.exports = {
   RETRIABLE_HTTP_PROBE_STATUSES,
 };
 
-function shouldSmokeOpenAiLikeOnboardRoute(provider) {
+export function shouldSmokeOpenAiLikeOnboardRoute(provider: string, credentialEnv: string | null = null) {
+  const {
+    HERMES_INFERENCE_CREDENTIAL_ENV,
+    HERMES_PROVIDER_NAME,
+  } = require("../hermes-provider-auth");
+  // Hermes Provider OAuth mints a short-lived agent key and stores it with
+  // OpenShell provider storage. A host-side direct probe would resolve the
+  // ambient OPENAI_API_KEY instead, which can falsely fail after successful
+  // OAuth if the user's shell has a different OpenAI key staged. The Nous API
+  // key path still has a host credential and should keep the direct smoke.
+  // Remove this exception once the host smoke can resolve the actual Hermes
+  // OAuth agent key from OpenShell provider storage.
+  if (provider === HERMES_PROVIDER_NAME && credentialEnv === HERMES_INFERENCE_CREDENTIAL_ENV) {
+    return false;
+  }
   const { REMOTE_PROVIDER_CONFIG } = require("../onboard/providers");
   if (provider === "nvidia-nim" || provider === "nvidia-router") return true;
   return Object.values(REMOTE_PROVIDER_CONFIG).some(
@@ -842,8 +856,13 @@ function shouldSmokeOpenAiLikeOnboardRoute(provider) {
   );
 }
 
-function verifyOnboardInferenceSmoke(options) {
-  if (!options.forceOpenAiLike && !shouldSmokeOpenAiLikeOnboardRoute(options.provider)) return;
+export function verifyOnboardInferenceSmoke(options: any) {
+  if (
+    !options.forceOpenAiLike &&
+    !shouldSmokeOpenAiLikeOnboardRoute(options.provider, options.credentialEnv)
+  ) {
+    return;
+  }
   if (process.env.VITEST === "true") return;
 
   const endpointUrl = options.endpointUrl || require("./config").INFERENCE_ROUTE_URL;
