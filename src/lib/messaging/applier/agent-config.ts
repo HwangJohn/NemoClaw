@@ -22,6 +22,7 @@ import type {
   MessagingHookApplyRunner,
   MessagingOpenShellRunner,
 } from "./types";
+import { enabledPlanChannels, filterEnabledPlanEntries } from "./plan-filter";
 
 const AGENT_CONFIG_HOOK_PHASES = new Set<ChannelHookPhase>([
   "apply",
@@ -32,7 +33,7 @@ export function listHookRequests(
   plan: SandboxMessagingPlan,
   phase?: ChannelHookPhase,
 ): MessagingHookApplyRequest[] {
-  return plan.channels.flatMap((channel) =>
+  return enabledPlanChannels(plan).flatMap((channel) =>
     channel.hooks
       .filter((hook) => !phase || hook.phase === phase)
       .map((hook) => toHookApplyRequest(plan, channel, hook)),
@@ -64,7 +65,9 @@ export async function applyAgentConfigAtOpenShell(
     });
   }
 
-  for (const [target, render] of groupRenderByTarget(plan.agentRender)) {
+  const enabledRender = filterEnabledPlanEntries(plan, plan.agentRender);
+
+  for (const [target, render] of groupRenderByTarget(enabledRender)) {
     const resolvedTarget = resolveSandboxAgentConfigTarget(target, plan.agent);
     const kind = render[0]?.kind;
     if (!kind) continue;
@@ -95,7 +98,7 @@ export async function applyAgentConfigAtOpenShell(
     appliedTargets: uniqueStrings(appliedTargets),
     appliedHooks,
     unresolvedTemplateRefs: uniqueStrings(
-      plan.agentRender.flatMap((render) => render.templateRefs),
+      enabledRender.flatMap((render) => render.templateRefs),
     ),
   };
 }
@@ -104,7 +107,7 @@ function hookRequestsForPhases(
   plan: SandboxMessagingPlan,
   phases: ReadonlySet<ChannelHookPhase>,
 ): MessagingHookApplyRequest[] {
-  return plan.channels.flatMap((channel) =>
+  return enabledPlanChannels(plan).flatMap((channel) =>
     channel.hooks
       .filter((hook) => phases.has(hook.phase))
       .map((hook) => toHookApplyRequest(plan, channel, hook)),

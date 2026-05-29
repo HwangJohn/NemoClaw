@@ -186,6 +186,7 @@ export interface SandboxMessagingPlan {
   readonly agent: MessagingAgentId;
   readonly workflow: MessagingCompilerWorkflow;
   readonly channels: readonly SandboxMessagingChannelPlan[];
+  readonly disabledChannels: readonly MessagingChannelId[];
   readonly credentialBindings: readonly SandboxMessagingCredentialBindingPlan[];
   readonly networkPolicy: SandboxMessagingNetworkPolicyPlan;
   readonly agentRender: readonly SandboxMessagingAgentRenderPlan[];

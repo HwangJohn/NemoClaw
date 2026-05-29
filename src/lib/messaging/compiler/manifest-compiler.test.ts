@@ -308,9 +308,10 @@ describe("ManifestCompiler", () => {
       active: false,
       disabled: true,
     });
-    expect(plan.networkPolicy.entries).toEqual([]);
-    expect(plan.agentRender).toEqual([]);
-    expect(plan.healthChecks).toEqual([]);
+    expect(plan.disabledChannels).toEqual(["wechat"]);
+    expect(plan.networkPolicy.entries.map((entry) => entry.channelId)).toEqual(["wechat"]);
+    expect(plan.agentRender.map((render) => render.channelId)).toEqual(["wechat"]);
+    expect(plan.healthChecks.map((entry) => entry.channelId)).toEqual(["wechat"]);
   });
 
   it("runs enrollment hooks before returning the final channel input plan", async () => {
@@ -343,7 +344,7 @@ describe("ManifestCompiler", () => {
     });
   });
 
-  it("disables a channel and suppresses side effects when enrollment opts to skip it", async () => {
+  it("disables a channel when enrollment opts to skip it", async () => {
     const hooks = new MessagingHookRegistry([
       {
         id: "common.tokenPaste",
@@ -377,13 +378,30 @@ describe("ManifestCompiler", () => {
       configured: false,
       disabled: true,
     });
-    expect(plan.channels[0]?.hooks).toEqual([]);
-    expect(plan.credentialBindings).toEqual([]);
-    expect(plan.networkPolicy.entries).toEqual([]);
-    expect(plan.agentRender).toEqual([]);
+    expect(plan.disabledChannels).toEqual(["telegram"]);
+    expect(plan.channels[0]?.hooks.map((hook) => hook.id)).toEqual([
+      "telegram-token-paste",
+      "telegram-config-prompt",
+      "telegram-get-me-reachability",
+    ]);
+    expect(plan.credentialBindings.map((binding) => binding.channelId)).toEqual([
+      "telegram",
+    ]);
+    expect(plan.networkPolicy.entries.map((entry) => entry.channelId)).toEqual([
+      "telegram",
+    ]);
+    expect(plan.agentRender.map((render) => render.channelId)).toEqual([
+      "telegram",
+      "telegram",
+    ]);
     expect(plan.buildSteps).toEqual([]);
-    expect(plan.stateUpdates).toEqual([]);
-    expect(plan.healthChecks).toEqual([]);
+    expect(plan.stateUpdates.map((entry) => entry.channelId)).toEqual([
+      "telegram",
+      "telegram",
+      "telegram",
+      "telegram",
+    ]);
+    expect(plan.healthChecks.map((entry) => entry.channelId)).toEqual(["telegram"]);
   });
 
   it("runs non-interactive enrollment hooks to validate and feed reachability checks", async () => {
@@ -498,6 +516,7 @@ describe("ManifestCompiler", () => {
       "agent",
       "workflow",
       "channels",
+      "disabledChannels",
       "credentialBindings",
       "networkPolicy",
       "agentRender",
@@ -507,7 +526,7 @@ describe("ManifestCompiler", () => {
     ] satisfies Array<keyof SandboxMessagingPlan>);
   });
 
-  it("records disabled configured channels without planning side effects for them", async () => {
+  it("records disabled configured channels and leaves applier exclusion to disabledChannels", async () => {
     const plan = await compiler().compile({
       sandboxName: "demo",
       agent: "openclaw",
@@ -525,13 +544,30 @@ describe("ManifestCompiler", () => {
       configured: true,
       disabled: true,
     });
-    expect(plan.credentialBindings).toEqual([]);
-    expect(plan.networkPolicy.entries).toEqual([]);
-    expect(plan.agentRender).toEqual([]);
+    expect(plan.disabledChannels).toEqual(["telegram"]);
+    expect(plan.credentialBindings.map((binding) => binding.channelId)).toEqual([
+      "telegram",
+    ]);
+    expect(plan.networkPolicy.entries.map((entry) => entry.channelId)).toEqual([
+      "telegram",
+    ]);
+    expect(plan.agentRender.map((render) => render.channelId)).toEqual([
+      "telegram",
+      "telegram",
+    ]);
     expect(plan.buildSteps).toEqual([]);
-    expect(plan.stateUpdates).toEqual([]);
-    expect(plan.healthChecks).toEqual([]);
-    expect(plan.channels[0]?.hooks).toEqual([]);
+    expect(plan.stateUpdates.map((entry) => entry.channelId)).toEqual([
+      "telegram",
+      "telegram",
+      "telegram",
+      "telegram",
+    ]);
+    expect(plan.healthChecks.map((entry) => entry.channelId)).toEqual(["telegram"]);
+    expect(plan.channels[0]?.hooks.map((hook) => hook.id)).toEqual([
+      "telegram-token-paste",
+      "telegram-config-prompt",
+      "telegram-get-me-reachability",
+    ]);
   });
 
   it("compiles a non-built-in channel manifest through the same generic path", async () => {

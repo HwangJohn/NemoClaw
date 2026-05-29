@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { BUILT_IN_MESSAGING_HOOK_REGISTRY } from "../hooks";
+import { MessagingHookRegistry } from "../hooks";
 import type {
   ChannelManifestRegistry,
   MessagingAgentId,
@@ -15,158 +15,47 @@ import type {
   MessagingCompilerCredentialAvailability,
 } from "./types";
 
-export interface MessagingWorkflowPlannerBaseContext {
+export interface MessagingWorkflowPlannerBuildContext {
   readonly sandboxName: string;
   readonly agent: MessagingAgentId;
+  readonly workflow: MessagingCompilerWorkflow;
   readonly isInteractive: boolean;
+  readonly selectedChannels?: readonly MessagingChannelId[];
   readonly configuredChannels?: readonly MessagingChannelId[];
   readonly disabledChannels?: readonly MessagingChannelId[];
   readonly supportedChannelIds?: readonly MessagingChannelId[];
   readonly credentialAvailability?: MessagingCompilerCredentialAvailability;
 }
 
-export interface MessagingWorkflowPlannerOnboardContext
-  extends MessagingWorkflowPlannerBaseContext {
-  readonly selectedChannels: readonly MessagingChannelId[];
-}
-
-export interface MessagingWorkflowPlannerChannelContext
-  extends MessagingWorkflowPlannerBaseContext {
-  readonly channelId: MessagingChannelId;
-}
-
 export class MessagingWorkflowPlanner {
   private readonly compiler: ManifestCompiler;
 
-  constructor(private readonly registry: ChannelManifestRegistry) {
-    this.compiler = new ManifestCompiler(registry, BUILT_IN_MESSAGING_HOOK_REGISTRY);
+  constructor(
+    private readonly registry: ChannelManifestRegistry,
+    hooks = new MessagingHookRegistry(),
+  ) {
+    this.compiler = new ManifestCompiler(registry, hooks);
   }
 
-  async planOnboard(
-    context: MessagingWorkflowPlannerOnboardContext,
+  async buildPlan(
+    context: MessagingWorkflowPlannerBuildContext,
   ): Promise<SandboxMessagingPlan> {
     const selectedChannels = uniqueChannels(context.selectedChannels);
-    this.assertSupportedChannels(selectedChannels, context);
-
-    return this.compileWorkflow(context, {
-      workflow: "onboard",
-      selectedChannels,
-      configuredChannels: selectedChannels,
-      disabledChannels: [],
-    });
-  }
-
-  async planAddChannel(
-    context: MessagingWorkflowPlannerChannelContext,
-  ): Promise<SandboxMessagingPlan> {
-    const configuredChannels = addChannels(context.configuredChannels, [context.channelId]);
-    const disabledChannels = removeChannels(
-      onlyConfiguredChannels(context.disabledChannels, configuredChannels),
-      [context.channelId],
-    );
-    this.assertSupportedChannels([...configuredChannels, context.channelId], context);
-
-    return this.compileWorkflow(context, {
-      workflow: "add-channel",
-      selectedChannels: [context.channelId],
-      configuredChannels,
-      disabledChannels,
-    });
-  }
-
-  async planRemoveChannel(
-    context: MessagingWorkflowPlannerChannelContext,
-  ): Promise<SandboxMessagingPlan> {
-    const configuredChannels = removeChannels(context.configuredChannels, [context.channelId]);
-    const disabledChannels = removeChannels(
-      onlyConfiguredChannels(context.disabledChannels, configuredChannels),
-      [context.channelId],
-    );
-    this.assertSupportedChannels([...configuredChannels, context.channelId], context);
-
-    return this.compileWorkflow(context, {
-      workflow: "remove-channel",
-      selectedChannels: [],
-      configuredChannels,
-      disabledChannels,
-    });
-  }
-
-  async planStartChannel(
-    context: MessagingWorkflowPlannerChannelContext,
-  ): Promise<SandboxMessagingPlan> {
-    const configuredChannels = uniqueChannels(context.configuredChannels);
-    const selectedChannels = configuredChannels.includes(context.channelId)
-      ? [context.channelId]
-      : [];
-    const disabledChannels = removeChannels(
-      onlyConfiguredChannels(context.disabledChannels, configuredChannels),
-      [context.channelId],
-    );
-    this.assertSupportedChannels([...configuredChannels, context.channelId], context);
-
-    return this.compileWorkflow(context, {
-      workflow: "start-channel",
-      selectedChannels,
-      configuredChannels,
-      disabledChannels,
-    });
-  }
-
-  async planStopChannel(
-    context: MessagingWorkflowPlannerChannelContext,
-  ): Promise<SandboxMessagingPlan> {
-    const configuredChannels = uniqueChannels(context.configuredChannels);
-    const selectedChannels = configuredChannels.includes(context.channelId)
-      ? [context.channelId]
-      : [];
-    const disabledChannels = configuredChannels.includes(context.channelId)
-      ? addChannels(onlyConfiguredChannels(context.disabledChannels, configuredChannels), [
-          context.channelId,
-        ])
-      : onlyConfiguredChannels(context.disabledChannels, configuredChannels);
-    this.assertSupportedChannels([...configuredChannels, context.channelId], context);
-
-    return this.compileWorkflow(context, {
-      workflow: "stop-channel",
-      selectedChannels,
-      configuredChannels,
-      disabledChannels,
-    });
-  }
-
-  async planRebuild(
-    context: MessagingWorkflowPlannerBaseContext,
-  ): Promise<SandboxMessagingPlan> {
     const configuredChannels = uniqueChannels(context.configuredChannels);
     const disabledChannels = onlyConfiguredChannels(context.disabledChannels, configuredChannels);
-    this.assertSupportedChannels(configuredChannels, context);
+    this.assertSupportedChannels(
+      [...selectedChannels, ...configuredChannels, ...disabledChannels],
+      context,
+    );
 
-    return this.compileWorkflow(context, {
-      workflow: "rebuild",
-      selectedChannels: [],
-      configuredChannels,
-      disabledChannels,
-    });
-  }
-
-  private compileWorkflow(
-    context: MessagingWorkflowPlannerBaseContext,
-    workflow: {
-      readonly workflow: MessagingCompilerWorkflow;
-      readonly selectedChannels: readonly MessagingChannelId[];
-      readonly configuredChannels: readonly MessagingChannelId[];
-      readonly disabledChannels: readonly MessagingChannelId[];
-    },
-  ): Promise<SandboxMessagingPlan> {
     const compilerContext: ManifestCompilerContext = {
       sandboxName: context.sandboxName,
       agent: context.agent,
       isInteractive: context.isInteractive,
-      workflow: workflow.workflow,
-      selectedChannels: workflow.selectedChannels,
-      configuredChannels: workflow.configuredChannels,
-      disabledChannels: workflow.disabledChannels,
+      workflow: context.workflow,
+      selectedChannels,
+      configuredChannels,
+      disabledChannels,
       supportedChannelIds: context.supportedChannelIds,
       credentialAvailability: context.credentialAvailability,
     };
@@ -176,7 +65,7 @@ export class MessagingWorkflowPlanner {
   private assertSupportedChannels(
     channelIds: readonly MessagingChannelId[],
     context: Pick<
-      MessagingWorkflowPlannerBaseContext,
+      MessagingWorkflowPlannerBuildContext,
       "agent" | "supportedChannelIds"
     >,
   ): void {
@@ -194,7 +83,7 @@ export class MessagingWorkflowPlanner {
 
   private supportedChannelIds(
     context: Pick<
-      MessagingWorkflowPlannerBaseContext,
+      MessagingWorkflowPlannerBuildContext,
       "agent" | "supportedChannelIds"
     >,
   ): MessagingChannelId[] {
@@ -215,21 +104,6 @@ function uniqueChannels(
   channelIds: readonly MessagingChannelId[] | undefined,
 ): MessagingChannelId[] {
   return [...new Set(channelIds ?? [])];
-}
-
-function addChannels(
-  current: readonly MessagingChannelId[] | undefined,
-  additions: readonly MessagingChannelId[],
-): MessagingChannelId[] {
-  return uniqueChannels([...(current ?? []), ...additions]);
-}
-
-function removeChannels(
-  current: readonly MessagingChannelId[] | undefined,
-  removals: readonly MessagingChannelId[],
-): MessagingChannelId[] {
-  const remove = new Set(removals);
-  return uniqueChannels(current).filter((channelId) => !remove.has(channelId));
 }
 
 function onlyConfiguredChannels(

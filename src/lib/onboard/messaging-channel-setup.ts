@@ -6,6 +6,7 @@ import { getCredential, normalizeCredentialValue } from "../credentials/store";
 import {
   type ChannelInputSpec,
   type ChannelManifest,
+  createBuiltInMessagingHookRegistry,
   createBuiltInChannelManifestRegistry,
   getMessagingManifestAvailabilityContext,
   hasMessagingManifestRequiredInputs,
@@ -136,14 +137,16 @@ export async function setupSelectedMessagingChannels(
 
   const agent = toMessagingAgentId(options.agent);
   const sandboxName = resolveMessagingSetupSandboxName(options);
-  const planner = new MessagingWorkflowPlanner(registry);
+  const planner = new MessagingWorkflowPlanner(registry, createBuiltInMessagingHookRegistry());
 
   if (options.interactive === false) {
-    const plan = await planner.planOnboard({
+    const plan = await planner.buildPlan({
       sandboxName,
       agent,
+      workflow: "onboard",
       isInteractive: false,
       selectedChannels,
+      configuredChannels: selectedChannels,
       supportedChannelIds,
       credentialAvailability: buildCredentialAvailability(registry, selectedChannels),
     });
@@ -153,11 +156,13 @@ export async function setupSelectedMessagingChannels(
     return plan;
   }
 
-  const plan = await planner.planOnboard({
+  const plan = await planner.buildPlan({
     sandboxName,
     agent,
+    workflow: "onboard",
     isInteractive: true,
     selectedChannels,
+    configuredChannels: selectedChannels,
     supportedChannelIds,
     credentialAvailability: buildCredentialAvailability(registry, selectedChannels),
   });

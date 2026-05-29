@@ -12,6 +12,7 @@ import { recoverNamedGatewayRuntime } from "../../gateway-runtime-action";
 import {
   type ChannelManifest,
   createBuiltInChannelManifestRegistry,
+  createBuiltInMessagingHookRegistry,
   getMessagingManifestAvailabilityContext,
   MessagingWorkflowPlanner,
   type SandboxMessagingChannelPlan,
@@ -627,7 +628,10 @@ async function planSandboxChannelAdd(
   channelId: string,
   agent: AgentDefinition,
 ): Promise<SandboxMessagingPlan> {
-  const planner = new MessagingWorkflowPlanner(messagingManifestRegistry);
+  const planner = new MessagingWorkflowPlanner(
+    messagingManifestRegistry,
+    createBuiltInMessagingHookRegistry(),
+  );
   const availableChannels = availableManifestChannelsForAgent(agent);
   const supportedChannelIds = availableChannels.map((manifest) => manifest.id);
   const supported = new Set(supportedChannelIds);
@@ -638,17 +642,19 @@ async function planSandboxChannelAdd(
     supported,
   );
   const plannedChannels = [...new Set([...configuredChannels, channelId])];
+  const plannedDisabledChannels = disabledChannels.filter((channel) => channel !== channelId);
 
   hydrateAddChannelEnvFromSession(sandboxName, channelId);
 
   try {
-    return await planner.planAddChannel({
+    return await planner.buildPlan({
       sandboxName,
       agent: toMessagingAgentId(agent),
+      workflow: "add-channel",
       isInteractive: !isNonInteractive(),
-      channelId,
-      configuredChannels,
-      disabledChannels,
+      selectedChannels: [channelId],
+      configuredChannels: plannedChannels,
+      disabledChannels: plannedDisabledChannels,
       supportedChannelIds,
       credentialAvailability: buildCredentialAvailability(plannedChannels),
     });

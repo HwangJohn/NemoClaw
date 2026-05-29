@@ -11,6 +11,7 @@ import type {
   MessagingCredentialApplyResult,
   MessagingOpenShellRunner,
 } from "./types";
+import { filterEnabledPlanEntries } from "./plan-filter";
 
 type MessagingCredentialApplyEntry = MessagingCredentialApplyResult["upserted"][number];
 type MessagingCredentialReuseEntry = MessagingCredentialApplyResult["reused"][number];
@@ -30,7 +31,7 @@ export function applyCredentialsAtOpenShell(
   const reused: MessagingCredentialReuseEntry[] = [];
   const missing: MessagingMissingCredentialEntry[] = [];
 
-  for (const binding of plan.credentialBindings) {
+  for (const binding of filterEnabledPlanEntries(plan, plan.credentialBindings)) {
     const credential = readCredentialEnv(env, binding.providerEnvKey);
     if (!credential) {
       if (providerExistsInGateway(binding.providerName, runOpenshell)) {

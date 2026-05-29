@@ -19,6 +19,14 @@ import {
   type MessagingPolicyApplyContext,
 } from "./types";
 
+const TEST_CREDENTIALS: Readonly<Record<string, string>> = {
+  TELEGRAM_BOT_TOKEN: "123456:test-telegram-token",
+  DISCORD_BOT_TOKEN: "test-discord-token",
+  WECHAT_BOT_TOKEN: "test-wechat-token",
+  SLACK_BOT_TOKEN: "xoxb-test-slack-token",
+  SLACK_APP_TOKEN: "xapp-test-slack-token",
+};
+
 async function withEnv<T>(
   values: Readonly<Record<string, string | undefined>>,
   run: () => Promise<T>,
@@ -51,27 +59,63 @@ async function withEnv<T>(
 }
 
 function planner(): MessagingWorkflowPlanner {
-  return new MessagingWorkflowPlanner(createBuiltInChannelManifestRegistry());
+  return new MessagingWorkflowPlanner(
+    createBuiltInChannelManifestRegistry(),
+    createBuiltInMessagingHookRegistry({
+      common: {
+        getCredential: (key) => TEST_CREDENTIALS[key] ?? null,
+        saveCredential: () => {},
+        prompt: async () => "unused",
+        log: () => {},
+      },
+      telegram: {
+        fetch: async () => ({
+          ok: true,
+          status: 200,
+          async json() {
+            return { ok: true };
+          },
+          async text() {
+            return "";
+          },
+        }),
+      },
+      wechat: {
+        ilinkLogin: {
+          saveCredential: () => {},
+          log: () => {},
+          runLogin: async () => ({
+            kind: "timeout",
+          }),
+        },
+        seedOpenClawAccount: {
+          now: () => "2026-01-01T00:00:00.000Z",
+        },
+      },
+    }),
+  );
 }
 
-async function planOnboard(
+async function buildOnboardPlan(
   env: Readonly<Record<string, string | undefined>>,
   selectedChannels: readonly string[],
   agent: MessagingAgentId = "openclaw",
 ): Promise<SandboxMessagingPlan> {
   return withEnv(env, () =>
-    planner().planOnboard({
+    planner().buildPlan({
       sandboxName: "demo",
       agent,
+      workflow: "onboard",
       isInteractive: false,
       selectedChannels,
+      configuredChannels: selectedChannels,
     }),
   );
 }
 
 describe("MessagingSetupApplier", () => {
   it("stores a serializable SandboxMessagingPlan in env without rejecting repeated aliases", async () => {
-    const plan = await planOnboard({ TELEGRAM_BOT_TOKEN: "123456:telegram-token" }, [
+    const plan = await buildOnboardPlan({ TELEGRAM_BOT_TOKEN: "123456:telegram-token" }, [
       "telegram",
     ]);
     const repeated = { value: "same" };
@@ -107,7 +151,7 @@ describe("MessagingSetupApplier", () => {
   });
 
   it("lists hook requests by phase without executing hook implementations", async () => {
-    const plan = await planOnboard(
+    const plan = await buildOnboardPlan(
       {
         WECHAT_BOT_TOKEN: "wechat-token",
         WECHAT_ACCOUNT_ID: "wechat-account",
@@ -143,7 +187,7 @@ describe("MessagingSetupApplier", () => {
   });
 
   it("upserts OpenShell generic providers from plan credential bindings", async () => {
-    const plan = await planOnboard(
+    const plan = await buildOnboardPlan(
       {
         TELEGRAM_BOT_TOKEN: "123456:telegram-token",
         SLACK_BOT_TOKEN: "xoxb-slack-token",
@@ -217,7 +261,7 @@ describe("MessagingSetupApplier", () => {
   });
 
   it("redacts OpenShell provider failure output", async () => {
-    const plan = await planOnboard({ TELEGRAM_BOT_TOKEN: "tokensecretvalue" }, [
+    const plan = await buildOnboardPlan({ TELEGRAM_BOT_TOKEN: "tokensecretvalue" }, [
       "telegram",
     ]);
     const runOpenshell: MessagingOpenShellRunner = (args) => {
@@ -245,7 +289,7 @@ describe("MessagingSetupApplier", () => {
   });
 
   it("applies agent config render plans into sandbox files through OpenShell", async () => {
-    const plan = await planOnboard({ TELEGRAM_BOT_TOKEN: "123456:telegram-token" }, [
+    const plan = await buildOnboardPlan({ TELEGRAM_BOT_TOKEN: "123456:telegram-token" }, [
       "telegram",
     ]);
     const files: Record<string, string> = {
@@ -314,8 +358,93 @@ describe("MessagingSetupApplier", () => {
     );
   });
 
+  it("excludes disabled channels at the applier boundary", async () => {
+    const plan = await withEnv(
+      {
+        TELEGRAM_BOT_TOKEN: "123456:telegram-token",
+        SLACK_BOT_TOKEN: "xoxb-slack-token",
+        SLACK_APP_TOKEN: "xapp-slack-token",
+      },
+      () =>
+        planner().buildPlan({
+          sandboxName: "demo",
+          agent: "openclaw",
+          workflow: "rebuild",
+          isInteractive: false,
+          configuredChannels: ["telegram", "slack"],
+          disabledChannels: ["telegram"],
+        }),
+    );
+    expect(plan.disabledChannels).toEqual(["telegram"]);
+    expect(plan.credentialBindings.map((binding) => binding.channelId)).toEqual([
+      "telegram",
+      "slack",
+      "slack",
+    ]);
+    expect(plan.networkPolicy.entries.map((entry) => entry.channelId)).toEqual([
+      "telegram",
+      "slack",
+    ]);
+    expect(
+      MessagingSetupApplier.listHookRequests(plan).map(
+        (request) => `${request.channelId}:${request.hookId}`,
+      ),
+    ).toEqual(["slack:slack-token-paste", "slack:slack-config-prompt"]);
+
+    const providerCalls: string[][] = [];
+    const credentialResult = MessagingSetupApplier.applyCredentialsAtOpenShell(plan, {
+      env: {
+        TELEGRAM_BOT_TOKEN: "123456:telegram-token",
+        SLACK_BOT_TOKEN: "xoxb-slack-token",
+        SLACK_APP_TOKEN: "xapp-slack-token",
+      },
+      runOpenshell: (args) => {
+        providerCalls.push([...args]);
+        if (args[0] === "provider" && args[1] === "get") return { status: 1 };
+        return { status: 0 };
+      },
+    });
+    expect(providerCalls.some((args) => args.includes("demo-telegram-bridge"))).toBe(false);
+    expect(credentialResult.providerNames).toEqual(["demo-slack-bridge", "demo-slack-app"]);
+
+    const policyCalls: string[][] = [];
+    const policyResult = MessagingSetupApplier.applyPolicyAtOpenShell(plan, {
+      applyPresets: (sandboxName, presetNames, context) => {
+        policyCalls.push([sandboxName, ...presetNames]);
+        expect(context.entries.map((entry) => entry.channelId)).toEqual(["slack"]);
+        return true;
+      },
+    });
+    expect(policyCalls).toEqual([["demo", "slack"]]);
+    expect(policyResult.appliedPolicyKeys).toEqual(["slack"]);
+
+    const files: Record<string, string> = {
+      "/sandbox/.openclaw/openclaw.json": "{}",
+    };
+    await MessagingSetupApplier.applyAgentConfigAtOpenShell(plan, {
+      runOpenshell: (args, options) => {
+        const target = String(args.at(-1));
+        if (args.includes("cat") && options?.input === undefined) {
+          return { status: files[target] === undefined ? 1 : 0, stdout: files[target] ?? "" };
+        }
+        if (options?.input !== undefined) {
+          files[target] = options.input;
+          return { status: 0 };
+        }
+        return { status: 1 };
+      },
+    });
+    const openclawConfig = JSON.parse(files["/sandbox/.openclaw/openclaw.json"] ?? "{}");
+    expect(openclawConfig.channels.telegram).toBeUndefined();
+    expect(openclawConfig.channels.slack.accounts.default).toMatchObject({
+      botToken: "xoxb-OPENSHELL-RESOLVE-ENV-SLACK_BOT_TOKEN",
+      appToken: "xapp-OPENSHELL-RESOLVE-ENV-SLACK_APP_TOKEN",
+      enabled: true,
+    });
+  });
+
   it("runs post-install hook implementations and writes their build-file outputs", async () => {
-    const plan = await planOnboard(
+    const plan = await buildOnboardPlan(
       {
         WECHAT_BOT_TOKEN: "wechat-token",
         WECHAT_ACCOUNT_ID: "wechat-account",
@@ -408,7 +537,7 @@ describe("MessagingSetupApplier", () => {
   });
 
   it("rejects prototype-polluting build-file merge keys", async () => {
-    const plan = await planOnboard(
+    const plan = await buildOnboardPlan(
       {
         WECHAT_BOT_TOKEN: "wechat-token",
         WECHAT_ACCOUNT_ID: "wechat-account",
@@ -456,7 +585,7 @@ describe("MessagingSetupApplier", () => {
   });
 
   it("rejects prototype-polluting JSON render paths", async () => {
-    const plan = await planOnboard({ TELEGRAM_BOT_TOKEN: "123456:telegram-token" }, [
+    const plan = await buildOnboardPlan({ TELEGRAM_BOT_TOKEN: "123456:telegram-token" }, [
       "telegram",
     ]);
     const unsafePlan = {
@@ -487,7 +616,7 @@ describe("MessagingSetupApplier", () => {
   });
 
   it("rejects render targets outside the selected agent config root", async () => {
-    const plan = await planOnboard({ TELEGRAM_BOT_TOKEN: "123456:telegram-token" }, [
+    const plan = await buildOnboardPlan({ TELEGRAM_BOT_TOKEN: "123456:telegram-token" }, [
       "telegram",
     ]);
     const runOpenshell: MessagingOpenShellRunner = (args, options) => {
@@ -525,7 +654,7 @@ describe("MessagingSetupApplier", () => {
   });
 
   it("rejects unsafe build-file hook output paths and modes", async () => {
-    const plan = await planOnboard(
+    const plan = await buildOnboardPlan(
       {
         WECHAT_BOT_TOKEN: "wechat-token",
         WECHAT_ACCOUNT_ID: "wechat-account",
@@ -586,7 +715,7 @@ describe("MessagingSetupApplier", () => {
   });
 
   it("applies policy presets directly from the serializable plan", async () => {
-    const plan = await planOnboard({ TELEGRAM_BOT_TOKEN: "123456:telegram-token" }, [
+    const plan = await buildOnboardPlan({ TELEGRAM_BOT_TOKEN: "123456:telegram-token" }, [
       "telegram",
     ]);
     const policyCalls: string[][] = [];
@@ -606,7 +735,7 @@ describe("MessagingSetupApplier", () => {
   });
 
   it("passes concrete policy keys for agent-aware preset application", async () => {
-    const plan = await planOnboard(
+    const plan = await buildOnboardPlan(
       {
         DISCORD_BOT_TOKEN: "test-discord-token",
         WECHAT_BOT_TOKEN: "test-wechat-token",

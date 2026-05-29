@@ -100,19 +100,20 @@ const providerCalls = [];
 onboardProviders.upsertMessagingProviders = (defs) => { providerCalls.push(...defs); };
 
 const workflowPlanner = require(${j("messaging/compiler/workflow-planner.js")});
-const originalPlanAddChannel = workflowPlanner.MessagingWorkflowPlanner.prototype.planAddChannel;
-const planAddCalls = [];
-workflowPlanner.MessagingWorkflowPlanner.prototype.planAddChannel = async function(context) {
-  planAddCalls.push({
+const originalBuildPlan = workflowPlanner.MessagingWorkflowPlanner.prototype.buildPlan;
+const buildPlanCalls = [];
+workflowPlanner.MessagingWorkflowPlanner.prototype.buildPlan = async function(context) {
+  if (context.workflow === "add-channel") buildPlanCalls.push({
     sandboxName: context.sandboxName,
     agent: context.agent,
-    channelId: context.channelId,
+    workflow: context.workflow,
+    selectedChannels: context.selectedChannels,
     isInteractive: context.isInteractive,
     configuredChannels: context.configuredChannels,
     disabledChannels: context.disabledChannels,
     supportedChannelIds: context.supportedChannelIds,
   });
-  return originalPlanAddChannel.call(this, context);
+  return originalBuildPlan.call(this, context);
 };
 
 const registry = require(${j("state/registry.js")});
@@ -194,7 +195,7 @@ console.log = (...args) => {
 
 const channelModule = require(${j("actions/sandbox/policy-channel.js")});
 
-module.exports = { channelModule, appliedCalls, removedCalls, callOrder, providerCalls, registryUpdates, sessionUpdates, planAddCalls, getSessionState: () => sessionState };
+module.exports = { channelModule, appliedCalls, removedCalls, callOrder, providerCalls, registryUpdates, sessionUpdates, buildPlanCalls, getSessionState: () => sessionState };
 `;
 }
 
@@ -206,7 +207,7 @@ const ctx = module.exports;
   try {
     await ctx.channelModule.addSandboxChannel("test-sb", { channel: "slack" });
     process.stdout.write("\\n__RESULT__" + JSON.stringify({
-      planAddCalls: ctx.planAddCalls,
+      buildPlanCalls: ctx.buildPlanCalls,
     }) + "\\n");
   } catch (err) {
     process.stdout.write("\\n__RESULT__" + JSON.stringify({ error: err.message, stack: err.stack }) + "\\n");
@@ -220,13 +221,14 @@ const ctx = module.exports;
     const payload = JSON.parse(result.stdout.slice(marker + "__RESULT__".length).trim());
     assert.ok(!payload.error, `unexpected error: ${payload.error}\n${payload.stack || ""}`);
 
-    assert.deepEqual(payload.planAddCalls, [
+    assert.deepEqual(payload.buildPlanCalls, [
       {
         sandboxName: "test-sb",
         agent: "openclaw",
-        channelId: "slack",
+        workflow: "add-channel",
+        selectedChannels: ["slack"],
         isInteractive: false,
-        configuredChannels: [],
+        configuredChannels: ["slack"],
         disabledChannels: [],
         supportedChannelIds: ["telegram", "discord", "wechat", "slack", "whatsapp"],
       },
