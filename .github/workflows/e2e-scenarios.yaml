@@ -61,6 +61,7 @@ jobs:
             [gpu-repo-local-ollama-openclaw]=linux-amd64-gpu-rtxpro6000-latest-1
             [brev-launchable-cloud-openclaw]=ubuntu-latest
             [ubuntu-no-docker-preflight-negative]=ubuntu-latest
+            [ubuntu-rebuild-openclaw]=ubuntu-latest
             [ubuntu-repo-cloud-hermes]=ubuntu-latest
             [ubuntu-repo-cloud-hermes-discord]=ubuntu-latest
             [ubuntu-repo-cloud-hermes-slack]=ubuntu-latest

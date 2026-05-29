@@ -334,6 +334,7 @@ describe("ScenarioRunner appends negative-contract phase", () => {
         environment: fakePhase("environment"),
         onboarding: fakePhase("onboarding"),
         stateValidation: fakePhase("state-validation"),
+        lifecycle: fakePhase("lifecycle"),
         runtime: fakePhase("runtime"),
       });
 
@@ -342,6 +343,7 @@ describe("ScenarioRunner appends negative-contract phase", () => {
         "environment",
         "onboarding",
         "state-validation",
+        "lifecycle",
         "runtime",
       ]);
     } finally {

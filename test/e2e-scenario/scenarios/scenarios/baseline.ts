@@ -8,6 +8,7 @@ import {
   gpuRepoDockerCdi,
   macosRepoDocker,
   ubuntuRepoDocker,
+  ubuntuRepoDockerLifecycle,
   ubuntuRepoNoDocker,
   wslRepoDocker,
 } from "../matrix.ts";
@@ -129,6 +130,23 @@ const canonicalScenarioInputs: CanonicalScenarioInput[] = [
       errorClass: "docker-missing",
       forbiddenSideEffects: ["gateway-started", "sandbox-created"],
     },
+  },
+  {
+    // Rebuild scenario. Onboards an OpenClaw sandbox normally, then
+    // the lifecycle phase seeds a workspace marker, runs
+    // `nemoclaw rebuild --yes`, and publishes the marker contract to
+    // runtime-phase assertions in rebuild_upgrade.sh. Mirrors the
+    // workspace-state-preservation invariant from
+    // test/e2e/test-rebuild-openclaw.sh; the broader version-upgrade
+    // dimension (build OLD-version base image first) belongs to a
+    // future `rebuild-from-old-version` lifecycle profile and is
+    // intentionally out of scope here.
+    id: "ubuntu-rebuild-openclaw",
+    manifestName: "openclaw-nvidia-rebuild",
+    environment: ubuntuRepoDockerLifecycle("cloud-openclaw", "rebuild-current-version"),
+    expectedStateId: "cloud-openclaw-ready",
+    suiteIds: ["smoke", "rebuild", "upgrade"],
+    requiredSecrets: ["NVIDIA_API_KEY"],
   },
   {
     id: "ubuntu-repo-openai-compatible-openclaw",

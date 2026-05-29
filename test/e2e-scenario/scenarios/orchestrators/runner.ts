@@ -7,6 +7,7 @@ import path from "node:path";
 import type { PhaseActionResult, PhaseResult, RunContext, RunPlan, RunPlanPhase } from "../types.ts";
 import { seedContextEnv } from "./context.ts";
 import { EnvironmentOrchestrator } from "./environment.ts";
+import { LifecycleOrchestrator } from "./lifecycle.ts";
 import { evaluateNegativeContract, negativeContractPhaseResult } from "./negative-matcher.ts";
 import { OnboardingOrchestrator } from "./onboarding.ts";
 import { RuntimeOrchestrator } from "./runtime.ts";
@@ -20,6 +21,7 @@ export interface ScenarioRunnerDeps {
   environment?: PhaseRunner;
   onboarding?: PhaseRunner;
   stateValidation?: PhaseRunner;
+  lifecycle?: PhaseRunner;
   runtime?: PhaseRunner;
 }
 
@@ -27,12 +29,14 @@ export class ScenarioRunner {
   private readonly environment: PhaseRunner;
   private readonly onboarding: PhaseRunner;
   private readonly stateValidation: PhaseRunner;
+  private readonly lifecycle: PhaseRunner;
   private readonly runtime: PhaseRunner;
 
   constructor(deps: ScenarioRunnerDeps = {}) {
     this.environment = deps.environment ?? new EnvironmentOrchestrator();
     this.onboarding = deps.onboarding ?? new OnboardingOrchestrator();
     this.stateValidation = deps.stateValidation ?? new StateValidationOrchestrator();
+    this.lifecycle = deps.lifecycle ?? new LifecycleOrchestrator();
     this.runtime = deps.runtime ?? new RuntimeOrchestrator();
   }
 
@@ -91,13 +95,14 @@ export class ScenarioRunner {
     if (name === "environment") return this.environment;
     if (name === "onboarding") return this.onboarding;
     if (name === "state-validation") return this.stateValidation;
+    if (name === "lifecycle") return this.lifecycle;
     if (name === "runtime") return this.runtime;
     throw new Error(`Unsupported phase: ${String(name)}`);
   }
 }
 
 interface BlockingFailure {
-  phase: "environment" | "onboarding" | "state-validation" | "runtime";
+  phase: "environment" | "onboarding" | "state-validation" | "lifecycle" | "runtime";
   action: PhaseActionResult;
 }
 
@@ -133,7 +138,7 @@ function writeNegativeContractArtifact(
 // state-validation, so suites never run against a missing or wedged
 // environment.
 function phaseBlockedBy(
-  phase: "environment" | "onboarding" | "state-validation" | "runtime",
+  phase: "environment" | "onboarding" | "state-validation" | "lifecycle" | "runtime",
   results: PhaseResult[],
 ): BlockingFailure | undefined {
   const firstFailure = firstBlockingActionFailure(results);
@@ -141,6 +146,16 @@ function phaseBlockedBy(
     return undefined;
   }
   if (phase === "state-validation" && firstFailure.phase !== "environment") {
+    // state-validation is the diagnostic layer that proves a negative
+    // scenario's forbidden side effects didn't occur, so an onboarding
+    // failure must NOT block it.
+    return undefined;
+  }
+  if (phase === "lifecycle" && firstFailure.phase === "state-validation") {
+    // state-validation failure does not block the lifecycle phase
+    // either: state-validation results are diagnostic. Lifecycle
+    // workers depend on onboarding having produced a sandbox, but
+    // not on state-validation probes having all passed.
     return undefined;
   }
   return firstFailure;
@@ -156,6 +171,7 @@ function firstBlockingActionFailure(results: PhaseResult[]): BlockingFailure | u
       result.phase !== "environment" &&
       result.phase !== "onboarding" &&
       result.phase !== "state-validation" &&
+      result.phase !== "lifecycle" &&
       result.phase !== "runtime"
     ) {
       continue;

@@ -24,7 +24,13 @@ import type {
 // failed probe is a failed phase action, and the existing runner
 // short-circuit reports runtime as skipped without re-running
 // suite assertions against a missing/wedged environment.
-const PHASES: PhaseName[] = ["environment", "onboarding", "state-validation", "runtime"];
+const PHASES: PhaseName[] = [
+  "environment",
+  "onboarding",
+  "state-validation",
+  "lifecycle",
+  "runtime",
+];
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
 function groupsForPhase(scenario: ScenarioDefinition, phase: PhaseName): AssertionGroup[] {
@@ -90,11 +96,16 @@ function validateManifestCompatibility(scenario: ScenarioDefinition, manifest?: 
 const INSTALL_DISPATCH = "test/e2e-scenario/nemoclaw_scenarios/install/dispatch.sh";
 const ONBOARD_DISPATCH = "test/e2e-scenario/nemoclaw_scenarios/onboard/dispatch.sh";
 const PROBES_DISPATCH = "test/e2e-scenario/nemoclaw_scenarios/probes/dispatch.sh";
+const LIFECYCLE_DISPATCH = "test/e2e-scenario/nemoclaw_scenarios/lifecycle/dispatch.sh";
 
 // Default action timeouts. Install and onboarding can take a while on
 // cold runners (Docker pulls, image builds, sandbox bootstrap).
 const INSTALL_TIMEOUT_SECONDS = 900;
 const ONBOARD_TIMEOUT_SECONDS = 900;
+// Lifecycle actions wrap state-mutation flows like `nemoclaw rebuild`,
+// which can take longer than onboarding when an image rebuild is
+// involved (workspace snapshot + recreate + verify).
+const LIFECYCLE_TIMEOUT_SECONDS = 900;
 // State-validation probes are cheap (`command -v`, single curl,
 // `nemoclaw list`); a tight timeout keeps a wedged probe from
 // consuming runner budget.
@@ -227,9 +238,48 @@ function phaseActions(phase: PhaseName, scenario: ScenarioDefinition): PhaseActi
       evidencePath: `.e2e/actions/state-validation.${probeId}.log`,
     }));
   }
+  if (phase === "lifecycle") {
+    // Lifecycle is the post-onboarding state-mutation phase: rebuild,
+    // upgrade, snapshot+restore, etc. Scenarios opt in by declaring
+    // `environment.lifecycle = <profile-id>`; everything else gets
+    // an empty action list and runs no lifecycle assertions. The
+    // profile id routes through nemoclaw_scenarios/lifecycle/dispatch.sh
+    // to a worker that mutates state and seeds context.env keys
+    // (E2E_REBUILD_MARKER_PATH, E2E_REBUILD_MARKER_EXPECTED, ...) the
+    // runtime-phase assertions in rebuild_upgrade.sh consume.
+    if (!scenario.environment?.lifecycle) {
+      return [];
+    }
+    const lifecycleId = scenario.environment.lifecycle;
+    const secretEnv = LIFECYCLE_PROFILE_SECRET_ENV[lifecycleId] ?? [];
+    return [
+      {
+        id: `lifecycle.profile.${lifecycleId}`,
+        phase: "lifecycle",
+        description: `Run e2e_lifecycle ${lifecycleId} to drive the post-onboard state mutation.`,
+        kind: "shell-fn",
+        scriptRef: LIFECYCLE_DISPATCH,
+        fn: "e2e_lifecycle",
+        arg: lifecycleId,
+        timeoutSeconds: LIFECYCLE_TIMEOUT_SECONDS,
+        evidencePath: `.e2e/actions/lifecycle.profile.${lifecycleId}.log`,
+        secretEnv,
+      },
+    ];
+  }
   // Runtime phase has no actions; suites are assertion groups.
   return [];
 }
+
+// Declared parent-env secrets each lifecycle profile needs. Mirrors
+// ONBOARD_PROFILE_SECRET_ENV: minimal allowlist; widen only when a
+// profile actually invokes a CLI that authenticates upstream.
+const LIFECYCLE_PROFILE_SECRET_ENV: Readonly<Record<string, readonly string[]>> = {
+  // `nemoclaw rebuild` re-reads NVIDIA_API_KEY when the post-rebuild
+  // sandbox is brought back up; keep it in the secret env so behavior
+  // matches a real user invocation.
+  "rebuild-current-version": ["NVIDIA_API_KEY"],
+};
 
 const SUT_BOUNDARIES: SutBoundary[] = [
   { id: "host-cli", client: "HostCliClient" },

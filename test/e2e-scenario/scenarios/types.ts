@@ -1,7 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-export type PhaseName = "environment" | "onboarding" | "state-validation" | "runtime";
+export type PhaseName =
+  | "environment"
+  | "onboarding"
+  | "state-validation"
+  | "lifecycle"
+  | "runtime";
 
 // Synthetic phase appended by the scenario runner when a scenario
 // declares plan.expectedFailure. Distinct from PhaseName so a scenario
@@ -171,6 +176,15 @@ export interface ScenarioEnvironment {
   install: string;
   runtime: string;
   onboarding: string;
+  // Optional lifecycle profile id. When set, the compiler emits a
+  // dedicated `lifecycle` phase action between state-validation and
+  // runtime. The action is implemented by a worker under
+  // nemoclaw_scenarios/lifecycle/, dispatched by
+  // nemoclaw_scenarios/lifecycle/dispatch.sh, and routes by profile
+  // id (e.g. "rebuild-current-version"). Scenarios that don't need a
+  // post-onboard state mutation simply omit this field; their
+  // lifecycle phase emits no actions and runs no assertions.
+  lifecycle?: string;
 }
 
 export interface ScenarioDefinition {

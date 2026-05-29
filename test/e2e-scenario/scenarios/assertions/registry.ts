@@ -325,8 +325,15 @@ function supplementalSuiteIdsForScenario(scenario: ScenarioDefinition): string[]
       "sandbox-lifecycle",
       "sandbox-operations",
       "snapshot",
-      "rebuild",
-      "upgrade",
+      // 'rebuild' and 'upgrade' are intentionally NOT supplemental
+      // here. Those suites assert post-rebuild state (marker survival,
+      // version upgrade, post-rebuild inference) and require a real
+      // `nemoclaw rebuild` to have run first. The dedicated
+      // `ubuntu-rebuild-openclaw` scenario opts into them by declaring
+      // a `rebuild-current-version` lifecycle profile that performs
+      // the rebuild before the runtime phase. Including them on this
+      // scenario produced fake-failures (no rebuild ran, so nothing
+      // could be preserved) and obscured the real coverage gap.
       "diagnostics",
       "docs-validation",
     );

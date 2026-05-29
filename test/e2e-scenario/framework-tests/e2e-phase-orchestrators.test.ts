@@ -113,16 +113,24 @@ describe("phase orchestrators - top-level delegation", () => {
         environment: fakeOrchestrator("environment"),
         onboarding: fakeOrchestrator("onboarding"),
         stateValidation: fakeOrchestrator("state-validation"),
+        lifecycle: fakeOrchestrator("lifecycle"),
         runtime: fakeOrchestrator("runtime"),
       });
 
       const results = await runner.run(ctx, plan);
 
-      expect(calls).toEqual(["environment", "onboarding", "state-validation", "runtime"]);
+      expect(calls).toEqual([
+        "environment",
+        "onboarding",
+        "state-validation",
+        "lifecycle",
+        "runtime",
+      ]);
       expect(results.map((result) => result.phase)).toEqual([
         "environment",
         "onboarding",
         "state-validation",
+        "lifecycle",
         "runtime",
       ]);
     } finally {
@@ -448,6 +456,66 @@ describe("plan compiler emits phase actions for canonical scenarios", () => {
       .actions.find((a) => a.id.startsWith("onboarding.profile."));
     expect(posAction?.arg).toBe("cloud-openclaw");
   });
+
+  it("compiler_emits_lifecycle_phase_action_when_scenario_declares_lifecycle_profile", async () => {
+    const { compileRunPlans } = await import("../scenarios/compiler.ts");
+    // Rebuild scenario declares environment.lifecycle =
+    // 'rebuild-current-version'. The compiler must emit a single
+    // lifecycle phase action that dispatches to the canonical
+    // lifecycle dispatcher; without this, runtime-phase rebuild
+    // assertions run against a sandbox that was never rebuilt.
+    const [plan] = compileRunPlans(["ubuntu-rebuild-openclaw"]);
+    const lifecycle = plan.phases.find((p) => p.name === "lifecycle")!;
+    expect(lifecycle).toBeTruthy();
+    expect(lifecycle.actions).toHaveLength(1);
+    const action = lifecycle.actions[0];
+    expect(action.id).toBe("lifecycle.profile.rebuild-current-version");
+    expect(action.arg).toBe("rebuild-current-version");
+    expect(action.scriptRef).toMatch(/lifecycle\/dispatch\.sh$/);
+    expect(action.fn).toBe("e2e_lifecycle");
+    expect(action.evidencePath).toBe(
+      ".e2e/actions/lifecycle.profile.rebuild-current-version.log",
+    );
+    // Secret env: nemoclaw rebuild re-reads NVIDIA_API_KEY when the
+    // post-rebuild sandbox is brought back up.
+    expect(action.secretEnv).toContain("NVIDIA_API_KEY");
+  });
+
+  it("compiler_emits_no_lifecycle_actions_when_scenario_does_not_declare_lifecycle", async () => {
+    const { compileRunPlans } = await import("../scenarios/compiler.ts");
+    // Default scenarios omit environment.lifecycle. The lifecycle
+    // phase still appears in the plan (deterministic phase order)
+    // but emits zero actions and runs no assertions.
+    const [plan] = compileRunPlans(["ubuntu-repo-cloud-openclaw"]);
+    const lifecycle = plan.phases.find((p) => p.name === "lifecycle")!;
+    expect(lifecycle).toBeTruthy();
+    expect(lifecycle.actions).toHaveLength(0);
+    expect(lifecycle.assertionGroups).toHaveLength(0);
+  });
+
+  it("compiler_drops_rebuild_and_upgrade_supplemental_suites_from_cloud_openclaw", async () => {
+    const { compileRunPlans } = await import("../scenarios/compiler.ts");
+    // The 'rebuild' and 'upgrade' suites used to be supplementally
+    // attached to ubuntu-repo-cloud-openclaw, which produced
+    // fake-failures (no rebuild ran -> nothing could be preserved).
+    // Coverage now lives on ubuntu-rebuild-openclaw, which actually
+    // runs the lifecycle phase. The cloud-openclaw scenario must NOT
+    // include those suites' assertion groups.
+    const [plan] = compileRunPlans(["ubuntu-repo-cloud-openclaw"]);
+    const runtime = plan.phases.find((p) => p.name === "runtime")!;
+    const groupIds = runtime.assertionGroups.map((g) => g.id);
+    expect(groupIds).not.toContain("suite.rebuild");
+    expect(groupIds).not.toContain("suite.upgrade");
+  });
+
+  it("compiler_includes_rebuild_and_upgrade_groups_on_ubuntu_rebuild_openclaw", async () => {
+    const { compileRunPlans } = await import("../scenarios/compiler.ts");
+    const [plan] = compileRunPlans(["ubuntu-rebuild-openclaw"]);
+    const runtime = plan.phases.find((p) => p.name === "runtime")!;
+    const groupIds = runtime.assertionGroups.map((g) => g.id);
+    expect(groupIds).toContain("suite.rebuild");
+    expect(groupIds).toContain("suite.upgrade");
+  });
 });
 
 describe("ScenarioRunner seeds context.env and short-circuits across phases", () => {
@@ -561,11 +629,13 @@ describe("ScenarioRunner seeds context.env and short-circuits across phases", ()
         "environment",
         "onboarding",
         "state-validation",
+        "lifecycle",
         "runtime",
       ]);
       expect(results[1].status).toBe("skipped");
       expect(results[2].status).toBe("skipped");
       expect(results[3].status).toBe("skipped");
+      expect(results[4].status).toBe("skipped");
       expect(results[1].assertions[0].message).toMatch(/blocked by prior failure/);
       expect(results[1].assertions[0].message).toMatch(/environment.install.repo-current/);
     } finally {

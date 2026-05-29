@@ -163,12 +163,17 @@ describe("compiler emits state-validation phase actions from expected-state regi
     ).toThrow(/unknown expected_state/);
   });
 
-  it("phase order is environment -> onboarding -> state-validation -> runtime", () => {
+  it("phase order is environment -> onboarding -> state-validation -> lifecycle -> runtime", () => {
     const [plan] = compileRunPlans(["ubuntu-repo-cloud-openclaw"]);
+    // 'lifecycle' is the post-onboard state-mutation phase. Scenarios
+    // without a `environment.lifecycle` profile (e.g. this one) emit
+    // an empty action list for the phase but the phase still appears
+    // in the plan so phase-order invariants stay deterministic.
     expect(plan.phases.map((p) => p.name)).toEqual([
       "environment",
       "onboarding",
       "state-validation",
+      "lifecycle",
       "runtime",
     ]);
   });
