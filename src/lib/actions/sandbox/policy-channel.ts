@@ -14,6 +14,7 @@ import {
   createBuiltInChannelManifestRegistry,
   createBuiltInMessagingHookRegistry,
   getMessagingManifestAvailabilityContext,
+  MessagingSetupApplier,
   MessagingWorkflowPlanner,
   type SandboxMessagingChannelPlan,
   type SandboxMessagingPlan,
@@ -638,7 +639,7 @@ async function planSandboxChannelAdd(
   hydrateAddChannelEnvFromSession(sandboxName, channelId);
 
   try {
-    return await planner.buildPlan({
+    const plan = await planner.buildPlan({
       sandboxName,
       agent: toMessagingAgentId(agent),
       workflow: "add-channel",
@@ -648,6 +649,8 @@ async function planSandboxChannelAdd(
       supportedChannelIds,
       credentialAvailability: buildCredentialAvailability([channelId]),
     });
+    MessagingSetupApplier.writePlanToEnv(plan);
+    return plan;
   } catch (error) {
     console.error(`  Failed to plan messaging channel '${channelId}'.`);
     console.error(`  ${error instanceof Error ? error.message : String(error)}`);

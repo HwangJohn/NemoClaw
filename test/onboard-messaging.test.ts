@@ -112,18 +112,24 @@ childProcess.spawn = (...args) => {
   return child;
 };
 
-const { createSandbox } = require(${onboardPath});
+const { createSandbox, setupMessagingChannels } = require(${onboardPath});
 
 (async () => {
   process.env.OPENSHELL_GATEWAY = "nemoclaw";
+  process.env.NEMOCLAW_SKIP_TELEGRAM_REACHABILITY = "1";
   process.env.DISCORD_BOT_TOKEN = "test-discord-token-value";
   process.env.SLACK_BOT_TOKEN = "xoxb-test-slack-token-value";
   process.env.SLACK_APP_TOKEN = "xapp-test-slack-app-token-value";
   process.env.TELEGRAM_BOT_TOKEN = "123456:ABC-test-telegram-token";
   process.env.KUBECONFIG = "/tmp/host-kubeconfig";
   process.env.SSH_AUTH_SOCK = "/tmp/host-ssh-agent.sock";
+  await setupMessagingChannels(null, null, "my-assistant");
   const sandboxName = await createSandbox(null, "gpt-5.4");
-  console.log(JSON.stringify({ sandboxName, commands }));
+  console.log(JSON.stringify({
+    sandboxName,
+    commands,
+    messagingPlanEnv: process.env.NEMOCLAW_MESSAGING_PLAN_B64,
+  }));
 })().catch((error) => {
   console.error(error);
   process.exit(1);
@@ -205,6 +211,19 @@ const { createSandbox } = require(${onboardPath});
       assert.doesNotMatch(createCommand.command, /xapp-test-slack-app-token-value/);
       assert.doesNotMatch(createCommand.command, /SLACK_BOT_TOKEN=/);
       assert.doesNotMatch(createCommand.command, /SLACK_APP_TOKEN=/);
+      assert.doesNotMatch(createCommand.command, /NEMOCLAW_MESSAGING_PLAN_B64=/);
+
+      assert.ok(payload.messagingPlanEnv, "expected serialized messaging plan in host process env");
+      const messagingPlan = JSON.parse(
+        Buffer.from(payload.messagingPlanEnv, "base64").toString("utf8"),
+      );
+      assert.equal(messagingPlan.sandboxName, "my-assistant");
+      assert.deepEqual(
+        messagingPlan.channels.map((channel: { channelId: string }) => channel.channelId).sort(),
+        ["discord", "slack", "telegram"].sort(),
+      );
+      assert.doesNotMatch(JSON.stringify(messagingPlan), /test-discord-token-value/);
+      assert.doesNotMatch(JSON.stringify(messagingPlan), /123456:ABC-test-telegram-token/);
 
       // Verify blocked credentials are NOT in the sandbox spawn environment
       assert.ok(createCommand.env, "expected env to be captured from spawn call");

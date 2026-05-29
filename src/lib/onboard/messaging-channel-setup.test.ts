@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getCredential, prompt, saveCredential } from "../credentials/store";
 import { HOST_QR_LOGIN_HANDLERS } from "../host-qr-handlers";
-import { createBuiltInChannelManifestRegistry } from "../messaging";
+import { createBuiltInChannelManifestRegistry, MessagingSetupApplier } from "../messaging";
+import { MESSAGING_SETUP_APPLIER_ENV_KEY } from "../messaging/applier/types";
 import {
   setupMessagingChannels,
   setupSelectedMessagingChannels,
@@ -318,6 +319,7 @@ describe("setupSelectedMessagingChannels", () => {
       }),
     );
     expect(JSON.stringify(plan)).not.toContain("pending-sandbox");
+    expect(MessagingSetupApplier.requirePlanFromEnv()).toEqual(plan);
   });
 });
 
@@ -371,6 +373,17 @@ describe("setupMessagingChannels", () => {
       "  [non-interactive] No complete messaging channel inputs configured. Skipping.",
     ]);
     expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it("clears any stale serialized messaging plan when no channels are selected", async () => {
+    process.env[MESSAGING_SETUP_APPLIER_ENV_KEY] = "stale-plan";
+
+    const result = await setupMessagingChannels(null, null, {
+      isNonInteractive: () => true,
+    });
+
+    expect(result).toEqual([]);
+    expect(process.env[MESSAGING_SETUP_APPLIER_ENV_KEY]).toBeUndefined();
   });
 
   it("skips channels missing required non-secret inputs in non-interactive mode", async () => {

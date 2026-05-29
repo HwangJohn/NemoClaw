@@ -10,6 +10,7 @@ import {
   createBuiltInChannelManifestRegistry,
   getMessagingManifestAvailabilityContext,
   hasMessagingManifestRequiredInputs,
+  MessagingSetupApplier,
   MessagingWorkflowPlanner,
   resolveMessagingManifestSeed,
   type SandboxMessagingPlan,
@@ -69,6 +70,7 @@ export async function setupMessagingChannels(
         sandboxName: deps.sandboxName,
       });
     } else {
+      MessagingSetupApplier.clearPlanEnv();
       note("  [non-interactive] No complete messaging channel inputs configured. Skipping.");
     }
     return Array.from(enabled);
@@ -103,6 +105,7 @@ export async function setupMessagingChannels(
 
   const selected = Array.from(enabled);
   if (selected.length === 0) {
+    MessagingSetupApplier.clearPlanEnv();
     console.log("  Skipping messaging channels.");
     return [];
   }
@@ -133,7 +136,10 @@ export async function setupSelectedMessagingChannels(
   const registry = createBuiltInChannelManifestRegistry();
   const supportedChannelIds = messagingChannels.map((channel) => channel.id);
   const selectedChannels = uniqueSelectedChannels(selected, supportedChannelIds, registry);
-  if (selectedChannels.length === 0) return null;
+  if (selectedChannels.length === 0) {
+    MessagingSetupApplier.clearPlanEnv();
+    return null;
+  }
 
   const agent = toMessagingAgentId(options.agent);
   const sandboxName = resolveMessagingSetupSandboxName(options);
@@ -149,6 +155,7 @@ export async function setupSelectedMessagingChannels(
       supportedChannelIds,
       credentialAvailability: buildCredentialAvailability(registry, selectedChannels),
     });
+    MessagingSetupApplier.writePlanToEnv(plan);
     for (const channel of plan.channels) {
       if (!channel.active) enabled.delete(channel.channelId);
     }
@@ -164,6 +171,7 @@ export async function setupSelectedMessagingChannels(
     supportedChannelIds,
     credentialAvailability: buildCredentialAvailability(registry, selectedChannels),
   });
+  MessagingSetupApplier.writePlanToEnv(plan);
 
   for (const channel of plan.channels) {
     if (!channel.active) {
