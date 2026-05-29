@@ -102,15 +102,18 @@ async function withEnv<T>(
 }
 
 describe("MessagingWorkflowPlanner", () => {
-  it("plans onboard as selected, configured, active channels with enrollment inputs", async () => {
-    const plan = await planner().planOnboard({
+  it("builds onboard plans from selected and configured channels", async () => {
+    const plan = await planner().buildPlan({
       sandboxName: "demo",
       agent: "openclaw",
+      workflow: "onboard",
       isInteractive: true,
       selectedChannels: ["wechat", "telegram"],
+      configuredChannels: ["wechat", "telegram"],
     });
 
     expect(plan.workflow).toBe("onboard");
+    expect(plan.disabledChannels).toEqual([]);
     expect(plan.channels.map((channel) => channel.channelId)).toEqual([
       "telegram",
       "wechat",
@@ -145,17 +148,19 @@ describe("MessagingWorkflowPlanner", () => {
     ]);
   });
 
-  it("plans add-channel as a configured active target and clears stale disabled state", async () => {
-    const plan = await planner().planAddChannel({
+  it("builds add-channel plans from caller-owned channel state", async () => {
+    const plan = await planner().buildPlan({
       sandboxName: "demo",
       agent: "openclaw",
+      workflow: "add-channel",
       isInteractive: true,
-      channelId: "slack",
-      configuredChannels: ["telegram"],
-      disabledChannels: ["telegram", "slack"],
+      selectedChannels: ["slack"],
+      configuredChannels: ["telegram", "slack"],
+      disabledChannels: ["telegram"],
     });
 
     expect(plan.workflow).toBe("add-channel");
+    expect(plan.disabledChannels).toEqual(["telegram"]);
     expect(plan.channels.find((channel) => channel.channelId === "telegram")).toMatchObject({
       configured: true,
       disabled: true,
@@ -168,7 +173,10 @@ describe("MessagingWorkflowPlanner", () => {
       active: true,
       selected: true,
     });
-    expect(plan.networkPolicy.entries.map((entry) => entry.channelId)).toEqual(["slack"]);
+    expect(plan.networkPolicy.entries.map((entry) => entry.channelId)).toEqual([
+      "telegram",
+      "slack",
+    ]);
   });
 
   it("runs add-channel enrollment only for the selected channel", async () => {
@@ -195,12 +203,13 @@ describe("MessagingWorkflowPlanner", () => {
     const plan = await new MessagingWorkflowPlanner(
       createBuiltInChannelManifestRegistry(),
       hooks,
-    ).planAddChannel({
+    ).buildPlan({
       sandboxName: "demo",
       agent: "openclaw",
+      workflow: "add-channel",
       isInteractive: true,
-      channelId: "slack",
-      configuredChannels: ["telegram"],
+      selectedChannels: ["slack"],
+      configuredChannels: ["telegram", "slack"],
     });
 
     expect(plan.channels.find((channel) => channel.channelId === "telegram")).toMatchObject({
@@ -215,16 +224,19 @@ describe("MessagingWorkflowPlanner", () => {
     ).toBe(true);
   });
 
-  it("plans stop-channel by keeping configured state and disabling only that channel", async () => {
-    const plan = await planner().planStopChannel({
+  it("records disabled configured channels for stop-channel plans", async () => {
+    const plan = await planner().buildPlan({
       sandboxName: "demo",
       agent: "openclaw",
+      workflow: "stop-channel",
       isInteractive: false,
-      channelId: "telegram",
+      selectedChannels: ["telegram"],
       configuredChannels: ["telegram", "slack"],
+      disabledChannels: ["telegram"],
     });
 
     expect(plan.workflow).toBe("stop-channel");
+    expect(plan.disabledChannels).toEqual(["telegram"]);
     expect(plan.channels.find((channel) => channel.channelId === "telegram")).toMatchObject({
       configured: true,
       disabled: true,
@@ -237,20 +249,23 @@ describe("MessagingWorkflowPlanner", () => {
       active: true,
       selected: false,
     });
-    expect(plan.networkPolicy.entries.map((entry) => entry.channelId)).toEqual(["slack"]);
+    expect(plan.networkPolicy.entries.map((entry) => entry.channelId)).toEqual([
+      "telegram",
+      "slack",
+    ]);
     expect(
       plan.credentialBindings.some((binding) => binding.channelId === "telegram"),
-    ).toBe(false);
+    ).toBe(true);
   });
 
-  it("plans start-channel by preserving configured state and making the channel active", async () => {
-    const plan = await planner().planStartChannel({
+  it("records re-enabled channels for start-channel plans", async () => {
+    const plan = await planner().buildPlan({
       sandboxName: "demo",
       agent: "openclaw",
+      workflow: "start-channel",
       isInteractive: false,
-      channelId: "telegram",
+      selectedChannels: ["telegram"],
       configuredChannels: ["telegram", "slack"],
-      disabledChannels: ["telegram"],
       credentialAvailability: {
         TELEGRAM_BOT_TOKEN: true,
         SLACK_BOT_TOKEN: true,
@@ -259,6 +274,7 @@ describe("MessagingWorkflowPlanner", () => {
     });
 
     expect(plan.workflow).toBe("start-channel");
+    expect(plan.disabledChannels).toEqual([]);
     expect(plan.channels.find((channel) => channel.channelId === "telegram")).toMatchObject({
       configured: true,
       disabled: false,
@@ -271,17 +287,18 @@ describe("MessagingWorkflowPlanner", () => {
     ]);
   });
 
-  it("plans remove-channel by deleting configured and disabled state", async () => {
-    const plan = await planner().planRemoveChannel({
+  it("builds remove-channel plans from the post-removal configured state", async () => {
+    const plan = await planner().buildPlan({
       sandboxName: "demo",
       agent: "openclaw",
+      workflow: "remove-channel",
       isInteractive: false,
-      channelId: "telegram",
-      configuredChannels: ["telegram", "wechat", "slack"],
-      disabledChannels: ["telegram", "wechat"],
+      configuredChannels: ["wechat", "slack"],
+      disabledChannels: ["wechat"],
     });
 
     expect(plan.workflow).toBe("remove-channel");
+    expect(plan.disabledChannels).toEqual(["wechat"]);
     expect(plan.channels.map((channel) => channel.channelId)).toEqual(["wechat", "slack"]);
     expect(plan.channels.find((channel) => channel.channelId === "telegram")).toBeUndefined();
     expect(plan.channels.find((channel) => channel.channelId === "wechat")).toMatchObject({
@@ -289,19 +306,21 @@ describe("MessagingWorkflowPlanner", () => {
       disabled: true,
       active: false,
     });
-    expect(plan.networkPolicy.entries.map((entry) => entry.channelId)).toEqual(["slack"]);
+    expect(plan.networkPolicy.entries.map((entry) => entry.channelId)).toEqual(["wechat", "slack"]);
   });
 
-  it("plans rebuild from configured and disabled registry snapshots", async () => {
-    const plan = await planner().planRebuild({
+  it("builds rebuild plans from configured and disabled registry snapshots", async () => {
+    const plan = await planner().buildPlan({
       sandboxName: "demo",
       agent: "openclaw",
+      workflow: "rebuild",
       isInteractive: false,
       configuredChannels: ["telegram", "discord", "wechat"],
       disabledChannels: ["discord"],
     });
 
     expect(plan.workflow).toBe("rebuild");
+    expect(plan.disabledChannels).toEqual(["discord"]);
     expect(plan.channels.map((channel) => channel.channelId)).toEqual([
       "telegram",
       "discord",
@@ -315,17 +334,20 @@ describe("MessagingWorkflowPlanner", () => {
     });
     expect(plan.networkPolicy.entries.map((entry) => entry.channelId)).toEqual([
       "telegram",
+      "discord",
       "wechat",
     ]);
   });
 
   it("reports unsupported channels deterministically before compiling", async () => {
     await expect(
-      planner().planOnboard({
+      planner().buildPlan({
         sandboxName: "demo",
         agent: "openclaw",
+        workflow: "onboard",
         isInteractive: false,
         selectedChannels: ["slack", "discord"],
+        configuredChannels: ["slack", "discord"],
         supportedChannelIds: ["telegram"],
       }),
     ).rejects.toThrow("Unsupported messaging channel(s) for openclaw: discord, slack");
@@ -337,11 +359,13 @@ describe("MessagingWorkflowPlanner", () => {
         TELEGRAM_BOT_TOKEN: "123456:raw-telegram-token",
       },
       async () => {
-        const plan = await planner().planAddChannel({
+        const plan = await planner().buildPlan({
           sandboxName: "demo",
           agent: "openclaw",
+          workflow: "add-channel",
           isInteractive: false,
-          channelId: "telegram",
+          selectedChannels: ["telegram"],
+          configuredChannels: ["telegram"],
         });
         const serialized = JSON.stringify(plan);
 

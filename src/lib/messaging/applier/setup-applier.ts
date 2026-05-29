@@ -111,6 +111,7 @@ function assertSandboxMessagingPlan(value: unknown): asserts value is SandboxMes
     typeof value.agent !== "string" ||
     typeof value.workflow !== "string" ||
     !Array.isArray(value.channels) ||
+    !Array.isArray(value.disabledChannels) ||
     !Array.isArray(value.credentialBindings) ||
     !isObject(value.networkPolicy) ||
     !Array.isArray(value.agentRender) ||

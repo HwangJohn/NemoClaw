@@ -36,29 +36,28 @@ export class ManifestCompiler {
 
   async compile(context: ManifestCompilerContext): Promise<SandboxMessagingPlan> {
     const manifests = this.resolveManifests(requestedChannelIds(context), context);
-    const channels = [];
+    const channels: SandboxMessagingChannelPlan[] = [];
     for (const manifest of manifests) {
       channels.push(await this.compileChannel(manifest, context));
     }
     const inputRegistry = new Map(
       channels.map((channel) => [channel.channelId, channel.inputs] as const),
     );
-    const activeChannelIds = new Set(
-      channels.filter((channel) => channel.active).map((channel) => channel.channelId),
-    );
-    const activeManifests = manifests.filter((manifest) => activeChannelIds.has(manifest.id));
-    const credentialBindings = activeManifests.flatMap((manifest) =>
+    const disabledChannels = channels
+      .filter((channel) => channel.disabled)
+      .map((channel) => channel.channelId);
+    const credentialBindings = manifests.flatMap((manifest) =>
       planCredentialBindings(manifest, context, inputRegistry.get(manifest.id) ?? []),
     );
-    const networkPolicy = planNetworkPolicy(activeManifests, context);
-    const agentRender = activeManifests.flatMap((manifest) =>
+    const networkPolicy = planNetworkPolicy(manifests, context);
+    const agentRender = manifests.flatMap((manifest) =>
       planAgentRender(manifest, context),
     );
-    const buildSteps = activeManifests.flatMap((manifest) =>
+    const buildSteps = manifests.flatMap((manifest) =>
       planBuildSteps(manifest, context.agent),
     );
-    const stateUpdates = activeManifests.flatMap((manifest) => planStateUpdates(manifest));
-    const healthChecks = activeManifests.flatMap((manifest) => planHealthChecks(manifest));
+    const stateUpdates = manifests.flatMap((manifest) => planStateUpdates(manifest));
+    const healthChecks = manifests.flatMap((manifest) => planHealthChecks(manifest));
 
     return {
       schemaVersion: 1,
@@ -66,6 +65,7 @@ export class ManifestCompiler {
       agent: context.agent,
       workflow: context.workflow,
       channels,
+      disabledChannels,
       credentialBindings,
       networkPolicy,
       agentRender,
@@ -107,7 +107,8 @@ export class ManifestCompiler {
     const selected = context.selectedChannels.includes(manifest.id);
     const configured = context.configuredChannels?.includes(manifest.id) ?? false;
     const disabled = context.disabledChannels?.includes(manifest.id) ?? false;
-    const requestedActive = !disabled && (selected || configured);
+    const requested = selected || configured;
+    const requestedActive = !disabled && requested;
     const resolvedInputs = await resolveChannelInputs(manifest, context, this.hooks, {
       runEnrollment:
         selected &&
@@ -127,7 +128,7 @@ export class ManifestCompiler {
       configured: configured && !resolvedInputs.skipped,
       disabled: disabled || resolvedInputs.skipped,
       inputs: resolvedInputs.inputs,
-      hooks: active
+      hooks: requested
         ? manifest.hooks
             .filter((hook) => isHookForAgent(hook, context.agent))
             .map((hook) => cloneHookReference(manifest.id, hook))

@@ -217,6 +217,7 @@ const telegramPlan = {
       hooks: [],
     },
   ],
+  disabledChannels: [],
   credentialBindings: [
     {
       channelId: "telegram",

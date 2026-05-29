@@ -2,21 +2,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { SandboxMessagingPlan } from "../manifest";
+import { filterEnabledPlanEntries } from "./plan-filter";
 import type { MessagingPolicyApplyOptions, MessagingPolicyApplyResult } from "./types";
 
 export function applyPolicyAtOpenShell(
   plan: SandboxMessagingPlan,
   options: MessagingPolicyApplyOptions,
 ): MessagingPolicyApplyResult {
-  const activePresets = uniqueStrings(plan.networkPolicy.presets);
+  const activeEntries = filterEnabledPlanEntries(plan, plan.networkPolicy.entries);
+  const activePresets = uniqueStrings(activeEntries.map((entry) => entry.presetName));
   const activePolicyKeys = uniqueStrings(
-    plan.networkPolicy.entries.flatMap((entry) => entry.policyKeys),
+    activeEntries.flatMap((entry) => entry.policyKeys),
   );
   if (
     activePresets.length > 0 &&
     !options.applyPresets(plan.sandboxName, activePresets, {
       agent: plan.agent,
-      entries: plan.networkPolicy.entries,
+      entries: activeEntries,
       policyKeys: activePolicyKeys,
     })
   ) {
