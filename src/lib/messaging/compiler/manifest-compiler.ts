@@ -109,10 +109,10 @@ export class ManifestCompiler {
     manifest: ChannelManifest,
     context: ManifestCompilerContext,
   ): Promise<SandboxMessagingChannelPlan> {
-    const selected = context.selectedChannels.includes(manifest.id);
-    const configured = context.configuredChannels?.includes(manifest.id) ?? false;
+    const configured = context.configuredChannels.includes(manifest.id);
     const disabled = context.disabledChannels?.includes(manifest.id) ?? false;
-    const requested = selected || configured;
+    const selected = configured;
+    const requested = configured;
     const requestedActive = !disabled && requested;
     const resolvedInputs = await resolveChannelInputs(manifest, context, this.hooks, {
       runEnrollment:
@@ -150,7 +150,7 @@ function isHookForAgent(hook: ChannelHookSpec, agent: ManifestCompilerContext["a
 }
 
 function requestedChannelIds(context: ManifestCompilerContext): MessagingChannelId[] {
-  return uniqueChannels([...context.selectedChannels, ...(context.configuredChannels ?? [])]);
+  return uniqueChannels(context.configuredChannels);
 }
 
 function uniqueChannels(channelIds: readonly MessagingChannelId[]): MessagingChannelId[] {

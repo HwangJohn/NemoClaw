@@ -119,7 +119,7 @@ describe("ManifestCompiler", () => {
       agent: "openclaw",
       workflow: "onboard",
       isInteractive: true,
-      selectedChannels: ["slack", "telegram", "wechat", "discord", "whatsapp"],
+      configuredChannels: ["slack", "telegram", "wechat", "discord", "whatsapp"],
       credentialAvailability: {
         TELEGRAM_BOT_TOKEN: true,
         DISCORD_BOT_TOKEN: true,
@@ -245,7 +245,7 @@ describe("ManifestCompiler", () => {
           agent: "hermes",
           workflow: "rebuild",
           isInteractive: false,
-          selectedChannels: ALL_CHANNELS,
+          configuredChannels: ALL_CHANNELS,
           credentialAvailability: {
             TELEGRAM_BOT_TOKEN: true,
             DISCORD_BOT_TOKEN: true,
@@ -296,7 +296,7 @@ describe("ManifestCompiler", () => {
           agent: "hermes",
           workflow: "onboard",
           isInteractive: false,
-          selectedChannels: ["wechat"],
+          configuredChannels: ["wechat"],
           credentialAvailability: {
             WECHAT_BOT_TOKEN: true,
           },
@@ -320,7 +320,7 @@ describe("ManifestCompiler", () => {
       agent: "openclaw",
       workflow: "onboard",
       isInteractive: true,
-      selectedChannels: ["wechat", "telegram"],
+      configuredChannels: ["wechat", "telegram"],
     });
 
     const telegram = plan.channels.find((channel) => channel.channelId === "telegram");
@@ -367,7 +367,6 @@ describe("ManifestCompiler", () => {
       agent: "openclaw",
       workflow: "onboard",
       isInteractive: true,
-      selectedChannels: ["telegram"],
       configuredChannels: ["telegram"],
     });
 
@@ -444,7 +443,7 @@ describe("ManifestCompiler", () => {
           agent: "openclaw",
           workflow: "onboard",
           isInteractive: false,
-          selectedChannels: ["telegram"],
+          configuredChannels: ["telegram"],
           credentialAvailability: {
             TELEGRAM_BOT_TOKEN: true,
           },
@@ -474,7 +473,7 @@ describe("ManifestCompiler", () => {
           agent: "openclaw",
           workflow: "onboard",
           isInteractive: false,
-          selectedChannels: ["telegram"],
+          configuredChannels: ["telegram"],
         });
 
         expect(plan.channels[0]?.inputs.find((input) => input.inputId === "botToken")).toMatchObject({
@@ -496,7 +495,7 @@ describe("ManifestCompiler", () => {
       agent: "openclaw",
       workflow: "onboard",
       isInteractive: false,
-      selectedChannels: ["telegram"],
+      configuredChannels: ["telegram"],
       credentialAvailability: {
         TELEGRAM_BOT_TOKEN: true,
       },
@@ -532,7 +531,6 @@ describe("ManifestCompiler", () => {
       agent: "openclaw",
       workflow: "stop-channel",
       isInteractive: false,
-      selectedChannels: [],
       configuredChannels: ["telegram"],
       disabledChannels: ["telegram"],
     });
@@ -668,7 +666,7 @@ describe("ManifestCompiler", () => {
       agent: "openclaw",
       workflow: "onboard",
       isInteractive: true,
-      selectedChannels: ["matrix"],
+      configuredChannels: ["matrix"],
     });
 
     expect(plan.channels.map((channel) => channel.channelId)).toEqual(["matrix"]);

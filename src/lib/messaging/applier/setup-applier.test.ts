@@ -98,7 +98,7 @@ function planner(): MessagingWorkflowPlanner {
 
 async function buildOnboardPlan(
   env: Readonly<Record<string, string | undefined>>,
-  selectedChannels: readonly string[],
+  configuredChannels: readonly string[],
   agent: MessagingAgentId = "openclaw",
 ): Promise<SandboxMessagingPlan> {
   return withEnv(env, () =>
@@ -107,8 +107,7 @@ async function buildOnboardPlan(
       agent,
       workflow: "onboard",
       isInteractive: false,
-      selectedChannels,
-      configuredChannels: selectedChannels,
+      configuredChannels,
     }),
   );
 }

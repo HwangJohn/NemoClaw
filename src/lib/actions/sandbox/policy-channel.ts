@@ -634,15 +634,6 @@ async function planSandboxChannelAdd(
   );
   const availableChannels = availableManifestChannelsForAgent(agent);
   const supportedChannelIds = availableChannels.map((manifest) => manifest.id);
-  const supported = new Set(supportedChannelIds);
-  const entry = registry.getSandbox(sandboxName);
-  const configuredChannels = normalizeChannelList(entry?.messagingChannels, supported);
-  const disabledChannels = normalizeChannelList(
-    entry?.disabledChannels ?? registry.getDisabledChannels(sandboxName),
-    supported,
-  );
-  const plannedChannels = [...new Set([...configuredChannels, channelId])];
-  const plannedDisabledChannels = disabledChannels.filter((channel) => channel !== channelId);
 
   hydrateAddChannelEnvFromSession(sandboxName, channelId);
 
@@ -652,27 +643,16 @@ async function planSandboxChannelAdd(
       agent: toMessagingAgentId(agent),
       workflow: "add-channel",
       isInteractive: !isNonInteractive(),
-      selectedChannels: [channelId],
-      configuredChannels: plannedChannels,
-      disabledChannels: plannedDisabledChannels,
+      configuredChannels: [channelId],
+      disabledChannels: [],
       supportedChannelIds,
-      credentialAvailability: buildCredentialAvailability(plannedChannels),
+      credentialAvailability: buildCredentialAvailability([channelId]),
     });
   } catch (error) {
     console.error(`  Failed to plan messaging channel '${channelId}'.`);
     console.error(`  ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
   }
-}
-
-function normalizeChannelList(
-  value: readonly string[] | null | undefined,
-  supported: ReadonlySet<string>,
-): string[] {
-  if (!Array.isArray(value)) return [];
-  return [...new Set(value.map((channel) => channel.trim().toLowerCase()))].filter((channel) =>
-    supported.has(channel),
-  );
 }
 
 function buildCredentialAvailability(channelIds: readonly string[]): Record<string, boolean> {
