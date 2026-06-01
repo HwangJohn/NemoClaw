@@ -1315,6 +1315,9 @@ function handleFinalGatewayStartFailure({
   printError(`    openshell gateway remove ${GATEWAY_NAME}`);
   printError(`    # For OpenShell releases that still expose lifecycle commands:`);
   printError(`    openshell gateway destroy -g ${GATEWAY_NAME}`);
+  if (process.platform === "linux") {
+    printError("    sudo pkill -f openshell-gateway  # if a privileged host gateway process remains");
+  }
   printError(
     `    docker volume ls -q --filter "name=openshell-cluster-${GATEWAY_NAME}" | xargs -r docker volume rm`,
   );
