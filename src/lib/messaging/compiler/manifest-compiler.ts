@@ -25,6 +25,7 @@ import type {
   SandboxMessagingInputReference,
   SandboxMessagingPlan,
 } from "../manifest";
+import { resolveMessagingChannelConfigEnvValue } from "../../messaging-channel-config";
 import { planAgentRender } from "./engines/agent-render-engine";
 import { planBuildSteps } from "./engines/build-step-engine";
 import { planCredentialBindings } from "./engines/credential-binding-engine";
@@ -288,6 +289,10 @@ function inputReferenceBase(
 
 function readInputEnvValue(input: ChannelInputSpec): MessagingSerializableValue | undefined {
   if (!input.envKey) return undefined;
+  if (input.kind === "config") {
+    const resolved = resolveMessagingChannelConfigEnvValue(input.envKey, process.env);
+    if (resolved.value) return resolved.value;
+  }
   const value = process.env[input.envKey];
   const normalized = value?.replace(/\r/g, "").trim();
   return normalized && normalized.length > 0 ? normalized : undefined;

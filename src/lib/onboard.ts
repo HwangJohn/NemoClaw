@@ -519,6 +519,7 @@ import {
   resolveQrSelectedChannels,
 } from "./onboard/messaging-state";
 import { getValidatedMessagingToken, getValidatedMessagingTokenByEnvKey } from "./onboard/messaging-token";
+import { handleOllamaProbeFailure } from "./onboard/ollama-probe-failure";
 import { runOllamaStartupOrGate } from "./onboard/ollama-startup";
 import type {
   DockerDriverBinaryOverrides,
@@ -3935,10 +3936,8 @@ async function selectAndValidateOllamaModel(
     }
     const probe = await prepareOllamaModel(selectedModel, installedModels);
     if (!probe.ok) {
-      console.error(`  ${probe.message}`);
-      if (isNonInteractive()) abortNonInteractive(`Ollama model '${selectedModel}' unavailable.`);
-      console.log("  Choose a different Ollama model or select Other.");
-      console.log("");
+      const action = handleOllamaProbeFailure(probe, selectedModel, isNonInteractive);
+      if (action === "back-to-selection") return { outcome: "back-to-selection" };
       continue;
     }
     const allowToolsIncompatible = probe.allowToolsIncompatible === true;

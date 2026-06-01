@@ -8,6 +8,7 @@ import type {
   ChannelManifest,
   MessagingSerializableValue,
 } from "../../manifest";
+import { resolveMessagingChannelConfigEnvValue } from "../../../messaging-channel-config";
 import type {
   MessagingHookHandler,
   MessagingHookInputMap,
@@ -133,8 +134,10 @@ function readExistingConfigValue(
   options: ConfigPromptHookOptions,
 ): string | null {
   const env = options.env ?? process.env;
+  const envValue =
+    resolveMessagingChannelConfigEnvValue(field.envKey, env).value ?? env[field.envKey];
   return (
-    normalizeConfigValue(field, env[field.envKey]) ??
+    normalizeConfigValue(field, envValue) ??
     normalizeConfigValue(field, availableInputs[field.id]) ??
     normalizeConfigValue(field, field.statePath ? availableInputs[field.statePath] : undefined)
   );

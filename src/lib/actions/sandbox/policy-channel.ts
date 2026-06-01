@@ -55,6 +55,7 @@ import {
 import * as registry from "../../state/registry";
 import { executeSandboxCommand, executeSandboxExecCommand } from "./process-recovery";
 import { rebuildSandbox } from "./rebuild";
+import { printTelegramDirectMessageAllowlistWarning } from "./telegram-channel-bridge-verification";
 
 type ChannelMutationOptions = {
   channel?: string;
@@ -547,9 +548,10 @@ function verifyChannelBridgeAfterRebuild(sandboxName: string, channelName: strin
     return;
   }
   let channelEnabled = false;
+  let channelBlock: any = null;
   try {
     const cfg = JSON.parse(configProbe.stdout);
-    const channelBlock = cfg?.channels?.[channelName];
+    channelBlock = cfg?.channels?.[channelName];
     channelEnabled = Boolean(channelBlock?.enabled);
   } catch {
     // Malformed config — fall through to the log probe to capture context.
@@ -615,6 +617,9 @@ function verifyChannelBridgeAfterRebuild(sandboxName: string, channelName: strin
     console.log(
       `  ${G}✓${R} '${channelName}' bridge startup detected in sandbox runtime log.`,
     );
+    if (channelName === "telegram") {
+      printTelegramDirectMessageAllowlistWarning(channelBlock, console.log, `${YW}⚠${R}`);
+    }
     return;
   }
   console.log(
@@ -871,6 +876,12 @@ export async function addSandboxChannel(
     console.log(
       `  ${G}✓${R} Enabled ${canonical} channel. Complete QR pairing from inside the sandbox after rebuild.`,
     );
+    // Show post-pair guidance (e.g. the channels status hint for WhatsApp)
+    // here because the in-sandbox QR branch returns before the shared note
+    // loop the non-QR branches use.
+    for (const line of manifest.enrollmentNotes ?? []) {
+      console.log(`  ${line}`);
+    }
     const rebuilt = await promptAndRebuild(sandboxName, `add '${canonical}'`);
     if (rebuilt) verifyChannelBridgeAfterRebuild(sandboxName, canonical);
     return;

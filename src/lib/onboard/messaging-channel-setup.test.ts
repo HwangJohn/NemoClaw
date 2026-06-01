@@ -130,6 +130,26 @@ describe("setupSelectedMessagingChannels", () => {
     ).toHaveLength(1);
   });
 
+  it("accepts Telegram allowlist aliases during manifest channel setup", async () => {
+    process.env.TELEGRAM_BOT_TOKEN = "123456:ABC-test-token";
+    process.env.TELEGRAM_CHAT_ID = "8388960805";
+    process.env.TELEGRAM_REQUIRE_MENTION = "0";
+    const logs: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((message = "") => {
+      logs.push(String(message));
+    });
+
+    await setupSelectedMessagingChannels(
+      ["telegram"],
+      new Set(["telegram"]),
+      manifests("telegram"),
+    );
+
+    expect(process.env.TELEGRAM_ALLOWED_IDS).toBe("8388960805");
+    expect(prompt).not.toHaveBeenCalledWith("  Telegram User ID (for DM access): ");
+    expect(logs.join("\n")).toContain("telegram — allowed IDs already set: 8388960805");
+  });
+
   it("uses manifest token validation for Slack dual-token enrollment", async () => {
     const logs: string[] = [];
     vi.mocked(prompt).mockResolvedValueOnce("not-a-slack-token");
@@ -300,6 +320,7 @@ describe("setupSelectedMessagingChannels", () => {
       active: true,
     });
     expect(logs.join("\n")).toContain("WhatsApp Web pairs via QR code");
+    expect(logs.join("\n")).toContain("channels status --channel whatsapp");
   });
 
   it("threads the resolved sandbox name into manifest provider bindings", async () => {
