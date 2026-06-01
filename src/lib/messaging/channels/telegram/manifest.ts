@@ -181,7 +181,7 @@ export const telegramManifest = {
       phase: "reachability-check",
       handler: "telegram.getMeReachability",
       inputs: ["botToken"],
-      onFailure: "skip-channel",
+      onFailure: "abort",
     },
   ],
 } as const satisfies ChannelManifest;

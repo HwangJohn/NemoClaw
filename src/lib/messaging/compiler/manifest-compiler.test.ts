@@ -466,7 +466,7 @@ describe("ManifestCompiler", () => {
     expect(JSON.stringify(plan)).not.toContain("123456:raw-telegram-token");
   });
 
-  it("disables a channel when a reachability check opts to skip it", async () => {
+  it("propagates aborting reachability check failures", async () => {
     const hooks = new MessagingHookRegistry([
       {
         id: "common.tokenPaste",
@@ -494,25 +494,15 @@ describe("ManifestCompiler", () => {
         },
       },
     ]);
-    const plan = await new ManifestCompiler(
-      createBuiltInChannelManifestRegistry(),
-      hooks,
-    ).compile({
-      sandboxName: "demo",
-      agent: "openclaw",
-      workflow: "onboard",
-      isInteractive: false,
-      configuredChannels: ["telegram"],
-    });
-
-    expect(plan.channels[0]).toMatchObject({
-      channelId: "telegram",
-      active: false,
-      selected: true,
-      configured: false,
-      disabled: true,
-    });
-    expect(plan.disabledChannels).toEqual(["telegram"]);
+    await expect(
+      new ManifestCompiler(createBuiltInChannelManifestRegistry(), hooks).compile({
+        sandboxName: "demo",
+        agent: "openclaw",
+        workflow: "onboard",
+        isInteractive: false,
+        configuredChannels: ["telegram"],
+      }),
+    ).rejects.toThrow("telegram is unreachable");
   });
 
   it("reads input values from env keys before returning non-interactive plans", async () => {
