@@ -14,6 +14,7 @@ import {
   COMMON_CONFIG_PROMPT_HOOK_HANDLER_ID,
   COMMON_TOKEN_PASTE_HOOK_HANDLER_ID,
 } from "../hooks/common";
+import { TELEGRAM_ALLOWLIST_ALIASES_HOOK_ID } from "./telegram/hooks";
 import type { ChannelInputSpec, ChannelManifest, ChannelRenderSpec } from "../manifest";
 import {
   BUILT_IN_CHANNEL_MANIFESTS,
@@ -82,7 +83,7 @@ function expectReachabilityHook(manifest: ChannelManifest, inputIds: readonly st
     phase: "reachability-check",
     handler: `${manifest.id}.getMeReachability`,
     inputs: inputIds,
-    onFailure: "abort",
+    onFailure: "skip-channel",
   });
 }
 
@@ -224,6 +225,17 @@ describe("built-in channel manifests", () => {
     expect(renderJson(telegramManifest)).toContain("channels.telegram.groups");
     expect(renderJson(telegramManifest)).toContain("telegramConfig.requireMention");
     expectTokenPasteEnrollHook(telegramManifest, ["botToken"]);
+    expect(telegramManifest.hooks).toContainEqual({
+      id: "telegram-allowlist-aliases",
+      phase: "enroll",
+      handler: TELEGRAM_ALLOWLIST_ALIASES_HOOK_ID,
+      outputs: [
+        {
+          id: "allowedIds",
+          kind: "config",
+        },
+      ],
+    });
     expectConfigPromptEnrollHook(telegramManifest, ["requireMention", "allowedIds"]);
     expectReachabilityHook(telegramManifest, ["botToken"]);
   });

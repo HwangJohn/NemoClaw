@@ -25,6 +25,7 @@ import {
   type MessagingChannelConfig,
   mergeMessagingChannelConfigs,
   normalizeMessagingChannelConfigValue,
+  resolveMessagingChannelConfigEnvValue,
   sanitizeMessagingChannelConfig,
 } from "../../messaging-channel-config";
 import { hashCredential } from "../../security/credential-hash";
@@ -779,7 +780,10 @@ function readManifestMessagingConfigFromEnv(manifest: ChannelManifest): Messagin
   const result: MessagingChannelConfig = {};
   for (const input of manifest.inputs) {
     if (input.kind !== "config" || !input.envKey) continue;
-    const normalized = normalizeMessagingChannelConfigValue(input.envKey, process.env[input.envKey]);
+    const resolved = resolveMessagingChannelConfigEnvValue(input.envKey, process.env);
+    const normalized =
+      resolved.value ??
+      normalizeMessagingChannelConfigValue(input.envKey, process.env[input.envKey]);
     if (normalized) result[input.envKey] = normalized;
   }
   return sanitizeMessagingChannelConfig(result);

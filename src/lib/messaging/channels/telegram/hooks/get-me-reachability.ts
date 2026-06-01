@@ -3,6 +3,10 @@
 
 import { normalizeCredentialValue } from "../../../../credentials/store";
 import type { MessagingHookHandler, MessagingHookRegistration } from "../../../hooks/types";
+import {
+  createTelegramAllowlistAliasesHookRegistration,
+  type TelegramAllowlistAliasesHookOptions,
+} from "./allowlist-aliases";
 
 export const TELEGRAM_GET_ME_REACHABILITY_HOOK_ID = "telegram.getMeReachability";
 const DEFAULT_TELEGRAM_REACHABILITY_TIMEOUT_MS = 10_000;
@@ -24,8 +28,7 @@ type TelegramFetch = (
   options?: TelegramFetchOptions,
 ) => Promise<TelegramFetchResponse>;
 
-export interface TelegramGetMeReachabilityHookOptions {
-  readonly env?: NodeJS.ProcessEnv;
+export interface TelegramGetMeReachabilityHookOptions extends TelegramAllowlistAliasesHookOptions {
   readonly fetch?: TelegramFetch;
   readonly apiBaseUrl?: string;
   readonly timeoutMs?: number;
@@ -51,19 +54,29 @@ export function createTelegramGetMeReachabilityHook(
     const isInteractive = context.isInteractive !== false;
     const response = await fetchTelegramGetMe(token, options).catch(() => {
       const message = "Telegram reachability check failed: Bot API request failed.";
-      if (!isInteractive) throw new Error(message);
+      if (!isInteractive) {
+        logTelegramDisabled("api.telegram.org is unreachable", log);
+        throw new Error(message);
+      }
       log(`  ⚠ ${message}`);
       return null;
     });
     if (!response) return {};
     if (!response.ok) {
+      if (isRejectedTokenResponse(response)) {
+        logRejectedToken(log);
+        logTelegramDisabled("the bot token was rejected by Telegram", log);
+        throw new Error("Telegram bot token was rejected.");
+      }
       logTelegramHttpWarning(response, log);
       return {};
     }
 
     const payload = await readTelegramJson(response);
     if (!isObject(payload) || payload.ok !== true) {
-      log("  ⚠ Bot token was rejected by Telegram — verify the token is correct.");
+      logRejectedToken(log);
+      logTelegramDisabled("the bot token was rejected by Telegram", log);
+      throw new Error("Telegram bot token was rejected.");
     }
 
     return {};
@@ -74,6 +87,7 @@ export function createTelegramHookRegistrations(
   options: TelegramGetMeReachabilityHookOptions = {},
 ): readonly MessagingHookRegistration[] {
   return [
+    createTelegramAllowlistAliasesHookRegistration(options),
     {
       id: TELEGRAM_GET_ME_REACHABILITY_HOOK_ID,
       handler: createTelegramGetMeReachabilityHook(options),
@@ -144,14 +158,22 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isRejectedTokenResponse(response: TelegramFetchResponse): boolean {
+  return response.status === 401 || response.status === 404;
+}
+
+function logRejectedToken(log: (message: string) => void): void {
+  log("  ⚠ Bot token was rejected by Telegram — verify the token is correct.");
+}
+
+function logTelegramDisabled(reason: string, log: (message: string) => void): void {
+  log(`  Telegram integration will be disabled for this enrollment run because ${reason}.`);
+}
+
 function logTelegramHttpWarning(
   response: TelegramFetchResponse,
   log: (message: string) => void,
 ): void {
-  if (response.status === 401 || response.status === 404) {
-    log("  ⚠ Bot token was rejected by Telegram — verify the token is correct.");
-    return;
-  }
   log(
     `  ⚠ Telegram API returned HTTP ${response.status}${
       response.statusText ? ` ${response.statusText}` : ""

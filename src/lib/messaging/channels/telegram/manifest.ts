@@ -151,6 +151,17 @@ export const telegramManifest = {
       onFailure: "skip-channel",
     },
     {
+      id: "telegram-allowlist-aliases",
+      phase: "enroll",
+      handler: "telegram.allowlistAliases",
+      outputs: [
+        {
+          id: "allowedIds",
+          kind: "config",
+        },
+      ],
+    },
+    {
       id: "telegram-config-prompt",
       phase: "enroll",
       handler: "common.configPrompt",
@@ -170,7 +181,7 @@ export const telegramManifest = {
       phase: "reachability-check",
       handler: "telegram.getMeReachability",
       inputs: ["botToken"],
-      onFailure: "abort",
+      onFailure: "skip-channel",
     },
   ],
 } as const satisfies ChannelManifest;

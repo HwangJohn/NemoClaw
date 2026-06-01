@@ -227,7 +227,17 @@ async function resolveChannelInputs(
       .filter((entry) => isHookForAgent(entry, context.agent))
       .filter((entry) => entry.phase === "reachability-check")
       .filter((entry) => hasDeclaredHookInputs(hookInputs, entry))) {
-      await runCompilerHook(manifest, hook, hooks, hookInputs, options.isInteractive);
+      const result = await runCompilerHook(
+        manifest,
+        hook,
+        hooks,
+        hookInputs,
+        options.isInteractive,
+      );
+      if (!result) {
+        skipped = true;
+        break;
+      }
     }
   }
 

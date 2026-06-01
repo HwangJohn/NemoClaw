@@ -97,7 +97,7 @@ describe("setupSelectedMessagingChannels", () => {
     );
   });
 
-  it("runs Telegram reachability once during interactive setup", async () => {
+  it("disables Telegram when reachability rejects the token during interactive setup", async () => {
     process.env.TELEGRAM_BOT_TOKEN = "123456:ABC-test-token";
     process.env.TELEGRAM_REQUIRE_MENTION = "1";
     process.env.TELEGRAM_ALLOWED_IDS = "123456789";
@@ -117,14 +117,17 @@ describe("setupSelectedMessagingChannels", () => {
     vi.spyOn(console, "log").mockImplementation((message = "") => {
       logs.push(String(message));
     });
+    const enabled = new Set(["telegram"]);
 
-    await setupSelectedMessagingChannels(
+    const plan = await setupSelectedMessagingChannels(
       ["telegram"],
-      new Set(["telegram"]),
+      enabled,
       manifests("telegram"),
     );
 
     expect(fetchMock).toHaveBeenCalledOnce();
+    expect(enabled.has("telegram")).toBe(false);
+    expect(plan?.channels[0]).toMatchObject({ channelId: "telegram", active: false });
     expect(
       logs.filter((line) => line.includes("Bot token was rejected by Telegram")),
     ).toHaveLength(1);
@@ -132,7 +135,9 @@ describe("setupSelectedMessagingChannels", () => {
 
   it("accepts Telegram allowlist aliases during manifest channel setup", async () => {
     process.env.TELEGRAM_BOT_TOKEN = "123456:ABC-test-token";
-    process.env.TELEGRAM_CHAT_ID = "8388960805";
+    process.env.TELEGRAM_ALLOWED_IDS = "8388960805";
+    process.env.TELEGRAM_AUTHORIZED_CHAT_IDS = "8388960806";
+    process.env.TELEGRAM_CHAT_ID = "8388960807";
     process.env.TELEGRAM_REQUIRE_MENTION = "0";
     const logs: string[] = [];
     vi.spyOn(console, "log").mockImplementation((message = "") => {
@@ -145,9 +150,11 @@ describe("setupSelectedMessagingChannels", () => {
       manifests("telegram"),
     );
 
-    expect(process.env.TELEGRAM_ALLOWED_IDS).toBe("8388960805");
+    expect(process.env.TELEGRAM_ALLOWED_IDS).toBe("8388960805,8388960806,8388960807");
     expect(prompt).not.toHaveBeenCalledWith("  Telegram User ID (for DM access): ");
-    expect(logs.join("\n")).toContain("telegram — allowed IDs already set: 8388960805");
+    expect(logs.join("\n")).toContain(
+      "telegram — allowed IDs already set: 8388960805,8388960806,8388960807",
+    );
   });
 
   it("uses manifest token validation for Slack dual-token enrollment", async () => {
