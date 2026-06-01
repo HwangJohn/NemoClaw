@@ -15,7 +15,7 @@ const TELEGRAM_REACHABILITY_HOOK = {
   phase: "reachability-check",
   handler: TELEGRAM_GET_ME_REACHABILITY_HOOK_ID,
   inputs: ["botToken"],
-  onFailure: "abort",
+  onFailure: "skip-channel",
 } as const satisfies ChannelHookSpec;
 
 describe("Telegram getMe reachability hook implementation", () => {
@@ -58,7 +58,7 @@ describe("Telegram getMe reachability hook implementation", () => {
     expect(urls).toEqual(["https://telegram.test/bot123456:telegram-token/getMe"]);
   });
 
-  it("warns but keeps Telegram configured when Telegram rejects the token", async () => {
+  it("fails so the compiler can skip the channel when Telegram rejects the token", async () => {
     const logs: string[] = [];
     const registry = new MessagingHookRegistry([
       {
@@ -86,18 +86,17 @@ describe("Telegram getMe reachability hook implementation", () => {
           botToken: "bad-token",
         },
       }),
-    ).resolves.toEqual({
-      hookId: "telegram-reachability",
-      handlerId: TELEGRAM_GET_ME_REACHABILITY_HOOK_ID,
-      phase: "reachability-check",
-      outputs: {},
-    });
+    ).rejects.toThrow("Telegram bot token was rejected.");
     expect(logs).toEqual([
       "  ⚠ Bot token was rejected by Telegram — verify the token is correct.",
+      [
+        "  Telegram integration will be disabled for this enrollment run because",
+        "the bot token was rejected by Telegram.",
+      ].join(" "),
     ]);
   });
 
-  it("aborts non-interactive enrollment when Bot API requests fail", async () => {
+  it("fails so the compiler can skip the channel when non-interactive Bot API requests fail", async () => {
     const logs: string[] = [];
     const registry = new MessagingHookRegistry([
       {
@@ -118,14 +117,12 @@ describe("Telegram getMe reachability hook implementation", () => {
           botToken: "123456:telegram-token",
         },
       }),
-    ).rejects.toThrow(
-      "Aborting onboarding in non-interactive mode due to Telegram network reachability failure.",
-    );
+    ).rejects.toThrow("Telegram reachability check failed: Bot API request failed.");
     expect(logs).toEqual([
-      "",
-      "  ⚠ api.telegram.org is not reachable from this host.",
-      "    Telegram integration requires outbound HTTPS access to api.telegram.org.",
-      "    This is commonly blocked by corporate network proxies.",
+      [
+        "  Telegram integration will be disabled for this enrollment run because",
+        "api.telegram.org is unreachable.",
+      ].join(" "),
     ]);
   });
 
@@ -154,16 +151,12 @@ describe("Telegram getMe reachability hook implementation", () => {
       outputs: {},
     });
     expect(logs).toEqual([
-      "",
-      "  ⚠ api.telegram.org is not reachable from this host.",
-      "    Telegram integration requires outbound HTTPS access to api.telegram.org.",
-      "    This is commonly blocked by corporate network proxies.",
+      "  ⚠ Telegram reachability check failed: Bot API request failed.",
     ]);
   });
 
   it("honors the explicit skip env without calling Telegram", async () => {
     const urls: string[] = [];
-    const logs: string[] = [];
     const registry = new MessagingHookRegistry([
       {
         id: TELEGRAM_GET_ME_REACHABILITY_HOOK_ID,
@@ -171,7 +164,6 @@ describe("Telegram getMe reachability hook implementation", () => {
           env: {
             NEMOCLAW_SKIP_TELEGRAM_REACHABILITY: "1",
           },
-          log: (message) => logs.push(message),
           fetch: async (url) => {
             urls.push(url);
             throw new Error("fetch should not run");
@@ -192,6 +184,5 @@ describe("Telegram getMe reachability hook implementation", () => {
       outputs: {},
     });
     expect(urls).toEqual([]);
-    expect(logs).toEqual(["  [non-interactive] Skipping Telegram reachability probe by request."]);
   });
 });

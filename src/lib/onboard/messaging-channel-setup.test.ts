@@ -97,7 +97,7 @@ describe("setupSelectedMessagingChannels", () => {
     );
   });
 
-  it("keeps Telegram configured when reachability rejects the token during interactive setup", async () => {
+  it("disables Telegram when reachability rejects the token during interactive setup", async () => {
     process.env.TELEGRAM_BOT_TOKEN = "123456:ABC-test-token";
     process.env.TELEGRAM_REQUIRE_MENTION = "1";
     process.env.TELEGRAM_ALLOWED_IDS = "123456789";
@@ -126,8 +126,8 @@ describe("setupSelectedMessagingChannels", () => {
     );
 
     expect(fetchMock).toHaveBeenCalledOnce();
-    expect(enabled.has("telegram")).toBe(true);
-    expect(plan?.channels[0]).toMatchObject({ channelId: "telegram", active: true });
+    expect(enabled.has("telegram")).toBe(false);
+    expect(plan?.channels[0]).toMatchObject({ channelId: "telegram", active: false });
     expect(
       logs.filter((line) => line.includes("Bot token was rejected by Telegram")),
     ).toHaveLength(1);

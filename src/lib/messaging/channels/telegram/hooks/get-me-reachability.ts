@@ -40,9 +40,7 @@ export function createTelegramGetMeReachabilityHook(
 ): MessagingHookHandler {
   return async (context) => {
     const env = options.env ?? process.env;
-    const log = options.log ?? console.log;
     if (env.NEMOCLAW_SKIP_TELEGRAM_REACHABILITY === "1") {
-      log("  [non-interactive] Skipping Telegram reachability probe by request.");
       return {};
     }
 
@@ -52,21 +50,23 @@ export function createTelegramGetMeReachabilityHook(
       throw new Error("Telegram reachability check requires botToken.");
     }
 
+    const log = options.log ?? console.log;
     const isInteractive = context.isInteractive !== false;
     const response = await fetchTelegramGetMe(token, options).catch(() => {
-      logTelegramNetworkFailure(log);
+      const message = "Telegram reachability check failed: Bot API request failed.";
       if (!isInteractive) {
-        throw new Error(
-          "Aborting onboarding in non-interactive mode due to Telegram network reachability failure.",
-        );
+        logTelegramDisabled("api.telegram.org is unreachable", log);
+        throw new Error(message);
       }
+      log(`  ⚠ ${message}`);
       return null;
     });
     if (!response) return {};
     if (!response.ok) {
       if (isRejectedTokenResponse(response)) {
         logRejectedToken(log);
-        return {};
+        logTelegramDisabled("the bot token was rejected by Telegram", log);
+        throw new Error("Telegram bot token was rejected.");
       }
       logTelegramHttpWarning(response, log);
       return {};
@@ -75,7 +75,8 @@ export function createTelegramGetMeReachabilityHook(
     const payload = await readTelegramJson(response);
     if (!isObject(payload) || payload.ok !== true) {
       logRejectedToken(log);
-      return {};
+      logTelegramDisabled("the bot token was rejected by Telegram", log);
+      throw new Error("Telegram bot token was rejected.");
     }
 
     return {};
@@ -165,11 +166,8 @@ function logRejectedToken(log: (message: string) => void): void {
   log("  ⚠ Bot token was rejected by Telegram — verify the token is correct.");
 }
 
-function logTelegramNetworkFailure(log: (message: string) => void): void {
-  log("");
-  log("  ⚠ api.telegram.org is not reachable from this host.");
-  log("    Telegram integration requires outbound HTTPS access to api.telegram.org.");
-  log("    This is commonly blocked by corporate network proxies.");
+function logTelegramDisabled(reason: string, log: (message: string) => void): void {
+  log(`  Telegram integration will be disabled for this enrollment run because ${reason}.`);
 }
 
 function logTelegramHttpWarning(
