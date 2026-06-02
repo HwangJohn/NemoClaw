@@ -48,12 +48,20 @@ resolve_repo_root() {
   printf "%s\n" "$base"
 }
 DEFAULT_NEMOCLAW_VERSION="0.1.0"
+DEFAULT_INSTALL_REF="lkg"
 TOTAL_STEPS=3
+
+is_mutable_install_ref() {
+  case "${1:-}" in
+    latest | lkg | refs/tags/latest | refs/tags/lkg) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 resolve_installer_version() {
   local repo_root
   repo_root="$(resolve_repo_root)"
-  if [[ -n "${NEMOCLAW_INSTALL_REF:-}" && "${NEMOCLAW_INSTALL_REF}" != "latest" ]]; then
+  if [[ -n "${NEMOCLAW_INSTALL_REF:-}" ]] && ! is_mutable_install_ref "${NEMOCLAW_INSTALL_REF}"; then
     printf "%s" "${NEMOCLAW_INSTALL_REF#v}"
     return
   fi
@@ -110,16 +118,16 @@ agent_display_name() {
 }
 
 # Resolve which Git ref to install from.
-# Priority: NEMOCLAW_INSTALL_TAG env var > "latest" tag.
+# Priority: NEMOCLAW_INSTALL_TAG env var > lkg tag.
 resolve_release_tag() {
   if [[ -n "${NEMOCLAW_INSTALL_REF:-}" ]]; then
     printf "%s" "${NEMOCLAW_INSTALL_REF}"
     return
   fi
   # Allow explicit override (for CI, pinning, or testing).
-  # Otherwise default to the "latest" tag, which we maintain to point at
-  # the commit we want everybody to install.
-  printf "%s" "${NEMOCLAW_INSTALL_TAG:-latest}"
+  # Otherwise default to the "lkg" tag, which we maintain to point at
+  # the last-known-good commit we want everybody to install.
+  printf "%s" "${NEMOCLAW_INSTALL_TAG:-$DEFAULT_INSTALL_REF}"
 }
 
 clone_nemoclaw_ref() {
@@ -546,7 +554,7 @@ usage() {
   printf "    NEMOCLAW_OPENSHELL_UPGRADE_PREPARED=1\n"
   printf "                                  Continue after manually backing up and retiring old gateway\n"
   printf "    NEMOCLAW_RECREATE_SANDBOX=1   Recreate an existing sandbox\n"
-  printf "    NEMOCLAW_INSTALL_TAG         Git ref to install (default: latest release)\n"
+  printf "    NEMOCLAW_INSTALL_TAG         Git ref to install (default: lkg)\n"
   printf "    NEMOCLAW_PROVIDER             build | openai | anthropic | anthropicCompatible\n"
   printf "                                  | gemini | ollama | custom | nim-local | vllm | routed\n"
   printf "                                  | hermes-provider\n"
@@ -1407,7 +1415,7 @@ install_nemoclaw() {
       info "Installer payload is not a persistent source checkout — installing from GitHub…"
     fi
     info "Installing ${_CLI_DISPLAY} from GitHub…"
-    # Resolve the latest release tag so we never install raw main.
+    # Resolve the maintained install tag so we never install raw main.
     local release_ref
     release_ref="$(resolve_release_tag)"
     info "Resolved install ref: ${release_ref}"

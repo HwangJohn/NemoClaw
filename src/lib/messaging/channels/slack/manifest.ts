@@ -135,7 +135,7 @@ export const slackManifest = {
     {
       id: "slack-token-paste",
       phase: "enroll",
-      handler: "common.tokenPaste",
+      handler: "slack.tokenPaste",
       outputs: [
         {
           id: "botToken",

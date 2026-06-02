@@ -14,6 +14,7 @@ import {
   COMMON_CONFIG_PROMPT_HOOK_HANDLER_ID,
   COMMON_TOKEN_PASTE_HOOK_HANDLER_ID,
 } from "../hooks/common";
+import { SLACK_TOKEN_PASTE_HOOK_HANDLER_ID } from "./slack/hooks";
 import { TELEGRAM_ALLOWLIST_ALIASES_HOOK_ID } from "./telegram/hooks";
 import type { ChannelInputSpec, ChannelManifest, ChannelRenderSpec } from "../manifest";
 import {
@@ -53,6 +54,20 @@ function expectTokenPasteEnrollHook(manifest: ChannelManifest, outputIds: readon
     id: `${manifest.id}-token-paste`,
     phase: "enroll",
     handler: COMMON_TOKEN_PASTE_HOOK_HANDLER_ID,
+    outputs: outputIds.map((id) => ({
+      id,
+      kind: "secret",
+      required: true,
+    })),
+    onFailure: "skip-channel",
+  });
+}
+
+function expectSlackTokenPasteEnrollHook(outputIds: readonly string[]): void {
+  expect(slackManifest.hooks).toContainEqual({
+    id: "slack-token-paste",
+    phase: "enroll",
+    handler: SLACK_TOKEN_PASTE_HOOK_HANDLER_ID,
     outputs: outputIds.map((id) => ({
       id,
       kind: "secret",
@@ -127,6 +142,7 @@ describe("built-in channel manifests", () => {
       "src/lib/messaging/channels/wechat/hooks/index.ts",
       "src/lib/messaging/channels/wechat/hooks/seed-openclaw-account.ts",
       "src/lib/messaging/channels/slack/manifest.ts",
+      "src/lib/messaging/channels/slack/hooks/token-paste.ts",
       "src/lib/messaging/channels/whatsapp/manifest.ts",
       "src/lib/messaging/hooks/common/config-prompt.ts",
       "src/lib/messaging/hooks/common/token-paste.ts",
@@ -347,7 +363,7 @@ describe("built-in channel manifests", () => {
     expect(hermesLines).toContain("SLACK_ALLOWED_USERS=U0123456789");
     expect(renderJson(slackManifest)).toContain("channels.slack.accounts.default");
     expect(renderJson(slackManifest)).toContain("allowedIds.slack.channels");
-    expectTokenPasteEnrollHook(slackManifest, ["botToken", "appToken"]);
+    expectSlackTokenPasteEnrollHook(["botToken", "appToken"]);
     expectConfigPromptEnrollHook(slackManifest, ["allowedUsers", "allowedChannels"]);
     expect(slackManifest.state).toEqual({
       persist: {

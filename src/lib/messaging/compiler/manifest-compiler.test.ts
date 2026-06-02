@@ -38,6 +38,16 @@ function compiler(): ManifestCompiler {
         prompt: async () => "",
         log: () => {},
       },
+      slack: {
+        tokenPaste: {
+          env: {},
+          getCredential: (key) => TEST_CREDENTIALS[key] ?? null,
+          saveCredential: () => {},
+          prompt: async () => "",
+          log: () => {},
+          validateCredentials: () => ({ ok: true }),
+        },
+      },
       telegram: {
         fetch: async () => ({
           ok: true,

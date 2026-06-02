@@ -68,6 +68,15 @@ function planner(): MessagingWorkflowPlanner {
         prompt: async () => "unused",
         log: () => {},
       },
+      slack: {
+        tokenPaste: {
+          getCredential: (key) => TEST_CREDENTIALS[key] ?? null,
+          saveCredential: () => {},
+          prompt: async () => "unused",
+          log: () => {},
+          validateCredentials: () => ({ ok: true }),
+        },
+      },
       telegram: {
         fetch: async () => ({
           ok: true,

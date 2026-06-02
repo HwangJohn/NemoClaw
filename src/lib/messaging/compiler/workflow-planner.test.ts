@@ -32,6 +32,16 @@ function planner(): MessagingWorkflowPlanner {
         prompt: async () => "unused",
         log: () => {},
       },
+      slack: {
+        tokenPaste: {
+          env: {},
+          getCredential: (key) => TEST_CREDENTIALS[key] ?? null,
+          saveCredential: () => {},
+          prompt: async () => "unused",
+          log: () => {},
+          validateCredentials: () => ({ ok: true }),
+        },
+      },
       telegram: {
         fetch: async () => ({
           ok: true,
@@ -186,6 +196,21 @@ describe("MessagingWorkflowPlanner", () => {
           if (context.channelId === "telegram") {
             throw new Error("existing channels should not re-enroll");
           }
+          const outputs: Record<string, { kind: "secret"; value: string }> = {};
+          for (const output of context.outputDeclarations ?? []) {
+            if (output.kind === "secret") {
+              outputs[output.id] = {
+                kind: "secret",
+                value: `test-${context.channelId}-${output.id}`,
+              };
+            }
+          }
+          return { outputs };
+        },
+      },
+      {
+        id: "slack.tokenPaste",
+        handler: (context) => {
           const outputs: Record<string, { kind: "secret"; value: string }> = {};
           for (const output of context.outputDeclarations ?? []) {
             if (output.kind === "secret") {

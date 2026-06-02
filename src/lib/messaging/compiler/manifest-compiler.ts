@@ -6,11 +6,7 @@ import type {
   MessagingHookOutputMap,
   MessagingHookRunResult,
 } from "../hooks";
-import {
-  COMMON_TOKEN_PASTE_HOOK_HANDLER_ID,
-  MessagingHookRegistry,
-  runMessagingHook,
-} from "../hooks";
+import { MessagingHookRegistry, runMessagingHook } from "../hooks";
 import type {
   ChannelHookOutputSpec,
   ChannelHookSpec,
@@ -363,7 +359,7 @@ function shouldRunEnrollmentHook(
   hook: ChannelHookSpec,
   inputs: readonly SandboxMessagingInputReference[],
 ): boolean {
-  if (hook.handler === COMMON_TOKEN_PASTE_HOOK_HANDLER_ID) return true;
+  if (hook.handler.endsWith(".tokenPaste")) return true;
 
   const outputs = hook.outputs ?? [];
   if (outputs.length === 0) return true;

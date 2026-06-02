@@ -2,6 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  createSlackHookRegistrations,
+  type SlackHookOptions,
+} from "../channels/slack/hooks";
+import {
   createTelegramHookRegistrations,
   type TelegramGetMeReachabilityHookOptions,
 } from "../channels/telegram/hooks";
@@ -15,6 +19,7 @@ import type { MessagingHookRegistration } from "./types";
 
 export interface BuiltInMessagingHookOptions {
   readonly common?: CommonHookOptions;
+  readonly slack?: SlackHookOptions;
   readonly telegram?: TelegramGetMeReachabilityHookOptions;
   readonly wechat?: WechatHookOptions;
 }
@@ -24,6 +29,7 @@ export function createBuiltInMessagingHookRegistrations(
 ): readonly MessagingHookRegistration[] {
   return [
     ...createCommonHookRegistrations(options.common),
+    ...createSlackHookRegistrations(options.slack),
     ...createTelegramHookRegistrations(options.telegram),
     ...createWechatHookRegistrations(options.wechat),
   ];

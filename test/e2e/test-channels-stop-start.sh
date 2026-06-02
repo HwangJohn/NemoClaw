@@ -375,6 +375,12 @@ is_fake_telegram_token() {
     *) return 1 ;;
   esac
 }
+is_fake_slack_token() {
+  case "${1:-}" in
+    xoxb-fake-* | xoxb-test-* | xapp-fake-* | xapp-test-*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 export_fake_channel_env() {
   local suffix="$1"
@@ -434,6 +440,13 @@ install_for_active_agent() {
       export NEMOCLAW_SKIP_TELEGRAM_REACHABILITY=1
       info "api.telegram.org unreachable from host; setting NEMOCLAW_SKIP_TELEGRAM_REACHABILITY=1"
     fi
+  fi
+  if [ -z "${NEMOCLAW_SKIP_SLACK_AUTH_VALIDATION:-}" ] \
+    && { is_fake_slack_token "$SLACK_BOT_TOKEN" || is_fake_slack_token "$SLACK_APP_TOKEN"; }; then
+    # This E2E normally uses fake Slack tokens to exercise channel lifecycle
+    # plumbing, not the live Slack API.
+    export NEMOCLAW_SKIP_SLACK_AUTH_VALIDATION=1
+    info "Skipping onboarding Slack auth validation for fake-token E2E"
   fi
 
   info "Running install.sh --non-interactive for ${ACTIVE_AGENT} (${ACTIVE_SANDBOX})..."
