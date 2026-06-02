@@ -795,6 +795,42 @@ spin() {
 
 command_exists() { command -v "$1" &>/dev/null; }
 
+npm_with_retry() {
+  local attempts="${NEMOCLAW_NPM_RETRY_ATTEMPTS:-3}"
+  local delay="${NEMOCLAW_NPM_RETRY_DELAY_SECONDS:-5}"
+  local max_delay="${NEMOCLAW_NPM_RETRY_MAX_DELAY_SECONDS:-30}"
+  local attempt status
+
+  [[ "$attempts" =~ ^[0-9]+$ ]] || attempts=3
+  [[ "$delay" =~ ^[0-9]+$ ]] || delay=5
+  [[ "$max_delay" =~ ^[0-9]+$ ]] || max_delay=30
+  ((attempts < 1)) && attempts=1
+  ((max_delay < 1)) && max_delay=1
+
+  export NPM_CONFIG_FETCH_RETRIES="${NPM_CONFIG_FETCH_RETRIES:-5}"
+  export NPM_CONFIG_FETCH_RETRY_MINTIMEOUT="${NPM_CONFIG_FETCH_RETRY_MINTIMEOUT:-20000}"
+  export NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT="${NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT:-120000}"
+  export NPM_CONFIG_FETCH_TIMEOUT="${NPM_CONFIG_FETCH_TIMEOUT:-300000}"
+
+  attempt=1
+  while true; do
+    if npm "$@"; then
+      return 0
+    else
+      status=$?
+    fi
+    if ((attempt >= attempts)); then
+      return "$status"
+    fi
+    printf '[npm-retry] command failed with exit %s; retrying in %ss (%s/%s): npm %s\n' \
+      "$status" "$delay" "$attempt" "$attempts" "$*" >&2
+    sleep "$delay"
+    attempt=$((attempt + 1))
+    delay=$((delay * 2))
+    ((delay > max_delay)) && delay="$max_delay"
+  done
+}
+
 MIN_NODE_VERSION="22.16.0"
 MIN_NPM_MAJOR=10
 
@@ -1394,9 +1430,9 @@ install_nemoclaw() {
       spin "Preparing OpenClaw package" bash -c "$(declare -f info warn resolve_openclaw_version pre_extract_openclaw); pre_extract_openclaw \"\$1\"" _ "$NEMOCLAW_SOURCE_ROOT" \
         || warn "Pre-extraction failed — npm install may fail if openclaw tarball is broken"
     fi
-    spin "Installing ${_CLI_DISPLAY} dependencies" bash -c "cd \"$NEMOCLAW_SOURCE_ROOT\" && npm install --ignore-scripts"
+    spin "Installing ${_CLI_DISPLAY} dependencies" bash -c "$(declare -f npm_with_retry); cd \"\$1\" && npm_with_retry install --ignore-scripts" _ "$NEMOCLAW_SOURCE_ROOT"
     spin "Building ${_CLI_DISPLAY} CLI modules" bash -c "cd \"$NEMOCLAW_SOURCE_ROOT\" && npm run --if-present build:cli"
-    spin "Building ${_CLI_DISPLAY} plugin" bash -c "cd \"$NEMOCLAW_SOURCE_ROOT\"/nemoclaw && npm install --ignore-scripts && npm run build"
+    spin "Building ${_CLI_DISPLAY} plugin" bash -c "$(declare -f npm_with_retry); cd \"\$1\" && npm_with_retry install --ignore-scripts && npm run build" _ "$NEMOCLAW_SOURCE_ROOT/nemoclaw"
     spin "Linking ${_CLI_DISPLAY} CLI" bash -c "cd \"$NEMOCLAW_SOURCE_ROOT\" && npm link"
 
     # Bootstrap OpenShell when the source checkout is being used as a fresh
@@ -1437,9 +1473,9 @@ install_nemoclaw() {
       spin "Preparing OpenClaw package" bash -c "$(declare -f info warn resolve_openclaw_version pre_extract_openclaw); pre_extract_openclaw \"\$1\"" _ "$nemoclaw_src" \
         || warn "Pre-extraction failed — npm install may fail if openclaw tarball is broken"
     fi
-    spin "Installing ${_CLI_DISPLAY} dependencies" bash -c "cd \"$nemoclaw_src\" && npm install --ignore-scripts"
+    spin "Installing ${_CLI_DISPLAY} dependencies" bash -c "$(declare -f npm_with_retry); cd \"\$1\" && npm_with_retry install --ignore-scripts" _ "$nemoclaw_src"
     spin "Building ${_CLI_DISPLAY} CLI modules" bash -c "cd \"$nemoclaw_src\" && npm run --if-present build:cli"
-    spin "Building ${_CLI_DISPLAY} plugin" bash -c "cd \"$nemoclaw_src\"/nemoclaw && npm install --ignore-scripts && npm run build"
+    spin "Building ${_CLI_DISPLAY} plugin" bash -c "$(declare -f npm_with_retry); cd \"\$1\" && npm_with_retry install --ignore-scripts && npm run build" _ "$nemoclaw_src/nemoclaw"
     spin "Linking ${_CLI_DISPLAY} CLI" bash -c "cd \"$nemoclaw_src\" && npm link"
 
     # Install/upgrade the OpenShell CLI on the GitHub-clone path (curl|bash).

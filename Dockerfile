@@ -20,16 +20,19 @@ ENV NPM_CONFIG_AUDIT=false \
     NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=20000 \
     NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000 \
     NPM_CONFIG_FETCH_TIMEOUT=300000
+COPY scripts/npm-retry.sh /usr/local/bin/nemoclaw-npm-retry
+RUN chmod 755 /usr/local/bin/nemoclaw-npm-retry
 COPY nemoclaw/package.json nemoclaw/package-lock.json nemoclaw/tsconfig.json /opt/nemoclaw/
 COPY nemoclaw/src/ /opt/nemoclaw/src/
 WORKDIR /opt/nemoclaw
-RUN npm ci && npm run build
+RUN nemoclaw-npm-retry npm ci && npm run build
 
 # Stage 2: Runtime image — pull cached base from GHCR
 # hadolint ignore=DL3006
 FROM ${BASE_IMAGE}
 ARG OPENCLAW_VERSION=2026.5.22
 ARG OPENCLAW_2026_5_22_INTEGRITY=sha512-m+zgBELGbCHjWB1IWF5WSWNPr480cMKOMff2OF72c8A0AMD4hC/9+qwYtzjYmGkETcffnB711JymlVsQnh2Tow==
+COPY --from=builder /usr/local/bin/nemoclaw-npm-retry /usr/local/bin/nemoclaw-npm-retry
 
 # Harden: remove unnecessary build tools and network probes from base image (#830)
 # Protect runtime tools before autoremove — the GHCR base may predate the
@@ -84,7 +87,7 @@ ENV NPM_CONFIG_AUDIT=false \
     NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=20000 \
     NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000 \
     NPM_CONFIG_FETCH_TIMEOUT=300000
-RUN npm ci --omit=dev
+RUN nemoclaw-npm-retry npm ci --omit=dev
 COPY scripts/patch-openclaw-tool-catalog.js /usr/local/lib/nemoclaw/patch-openclaw-tool-catalog.js
 COPY scripts/patch-openclaw-chat-send.js /usr/local/lib/nemoclaw/patch-openclaw-chat-send.js
 RUN chmod 755 /usr/local/lib/nemoclaw/patch-openclaw-tool-catalog.js \
@@ -112,7 +115,7 @@ RUN set -eu; \
     EXPECTED_INTEGRITY=""; \
     if [ "$OPENCLAW_VERSION" = "2026.5.22" ]; then EXPECTED_INTEGRITY="$OPENCLAW_2026_5_22_INTEGRITY"; fi; \
     if [ -n "$EXPECTED_INTEGRITY" ]; then \
-        REGISTRY_INTEGRITY=$(npm view "openclaw@${OPENCLAW_VERSION}" dist.integrity); \
+        REGISTRY_INTEGRITY=$(nemoclaw-npm-retry npm view "openclaw@${OPENCLAW_VERSION}" dist.integrity); \
         if [ "$REGISTRY_INTEGRITY" != "$EXPECTED_INTEGRITY" ]; then \
             echo "ERROR: OpenClaw ${OPENCLAW_VERSION} npm integrity mismatch" >&2; \
             echo "Expected: ${EXPECTED_INTEGRITY}" >&2; \
@@ -130,7 +133,7 @@ RUN set -eu; \
         # at the shell level first gives npm a clean slate and avoids the
         # rmdir failure inside npm's own install path.
         rm -rf /usr/local/lib/node_modules/openclaw /usr/local/bin/openclaw; \
-        npm install -g --no-audit --no-fund --no-progress "openclaw@${OPENCLAW_VERSION}"; \
+        nemoclaw-npm-retry npm install -g --no-audit --no-fund --no-progress "openclaw@${OPENCLAW_VERSION}"; \
     fi; \
     # Pre-install the codex-acp package so the embedded ACPx runtime can
     # call the local binary instead of `npx @zed-industries/codex-acp`.
@@ -139,7 +142,7 @@ RUN set -eu; \
     # versioned npx package specs even when the package is globally installed.
     # Installing the binary at build time and configuring ACPx to use it
     # directly keeps TC-SBX-02 off the runtime npm path.
-    npm install -g --no-audit --no-fund --no-progress \
+    nemoclaw-npm-retry npm install -g --no-audit --no-fund --no-progress \
         '@zed-industries/codex-acp@0.11.1'; \
     command -v codex-acp >/dev/null
 

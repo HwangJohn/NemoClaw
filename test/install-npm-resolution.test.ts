@@ -71,6 +71,82 @@ function isLinuxRoot(): boolean {
 }
 
 describe("installer npm resolution", () => {
+  it("retries npm commands after a transient failure", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-npm-retry-"));
+    const fakeBin = path.join(tmp, "bin");
+    const npmLog = path.join(tmp, "npm.log");
+    const npmCount = path.join(tmp, "npm-count");
+    fs.mkdirSync(fakeBin);
+
+    writeExecutable(
+      path.join(fakeBin, "npm"),
+      `#!/usr/bin/env bash
+set -euo pipefail
+count=0
+if [ -f "$NPM_COUNT_PATH" ]; then count="$(cat "$NPM_COUNT_PATH")"; fi
+count=$((count + 1))
+printf '%s' "$count" > "$NPM_COUNT_PATH"
+printf '%s\\n' "$*" >> "$NPM_LOG_PATH"
+if [ "$count" -eq 1 ]; then exit 152; fi
+exit 0
+`,
+    );
+    writeExecutable(
+      path.join(fakeBin, "sleep"),
+      `#!/usr/bin/env bash
+printf 'sleep %s\\n' "$*" >> "$NPM_LOG_PATH"
+exit 0
+`,
+    );
+
+    const result = runInstallerFunction("npm_with_retry install --ignore-scripts", fakeBin, {
+      HOME: tmp,
+      NEMOCLAW_NPM_RETRY_ATTEMPTS: "2",
+      NEMOCLAW_NPM_RETRY_DELAY_SECONDS: "0",
+      NPM_COUNT_PATH: npmCount,
+      NPM_LOG_PATH: npmLog,
+    });
+
+    expect(result.status).toBe(0);
+    expect(fs.readFileSync(npmLog, "utf-8")).toBe(
+      ["install --ignore-scripts", "sleep 0", "install --ignore-scripts", ""].join("\n"),
+    );
+  });
+
+  it("returns the final npm status when retries are exhausted", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-npm-retry-exhausted-"));
+    const fakeBin = path.join(tmp, "bin");
+    const npmLog = path.join(tmp, "npm.log");
+    fs.mkdirSync(fakeBin);
+
+    writeExecutable(
+      path.join(fakeBin, "npm"),
+      `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$NPM_LOG_PATH"
+exit 152
+`,
+    );
+    writeExecutable(
+      path.join(fakeBin, "sleep"),
+      `#!/usr/bin/env bash
+printf 'sleep %s\\n' "$*" >> "$NPM_LOG_PATH"
+exit 0
+`,
+    );
+
+    const result = runInstallerFunction("npm_with_retry install --ignore-scripts", fakeBin, {
+      HOME: tmp,
+      NEMOCLAW_NPM_RETRY_ATTEMPTS: "2",
+      NEMOCLAW_NPM_RETRY_DELAY_SECONDS: "0",
+      NPM_LOG_PATH: npmLog,
+    });
+
+    expect(result.status).toBe(152);
+    expect(fs.readFileSync(npmLog, "utf-8")).toBe(
+      ["install --ignore-scripts", "sleep 0", "install --ignore-scripts", ""].join("\n"),
+    );
+  });
+
   it("prefers the active npm on PATH over a hostile nvm environment", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-install-path-npm-"));
     const fakeBin = path.join(tmp, "bin");
