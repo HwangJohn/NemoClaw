@@ -135,7 +135,7 @@ export const slackManifest = {
     {
       id: "slack-token-paste",
       phase: "enroll",
-      handler: "slack.tokenPaste",
+      handler: "common.tokenPaste",
       outputs: [
         {
           id: "botToken",
@@ -164,6 +164,13 @@ export const slackManifest = {
           kind: "config",
         },
       ],
+    },
+    {
+      id: "slack-credential-validation",
+      phase: "reachability-check",
+      handler: "slack.validateCredentials",
+      inputs: ["botToken", "appToken"],
+      onFailure: "skip-channel",
     },
   ],
 } as const satisfies ChannelManifest;

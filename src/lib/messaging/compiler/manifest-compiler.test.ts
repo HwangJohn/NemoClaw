@@ -39,11 +39,7 @@ function compiler(): ManifestCompiler {
         log: () => {},
       },
       slack: {
-        tokenPaste: {
-          env: {},
-          getCredential: (key) => TEST_CREDENTIALS[key] ?? null,
-          saveCredential: () => {},
-          prompt: async () => "",
+        validateCredentials: {
           log: () => {},
           validateCredentials: () => ({ ok: true }),
         },

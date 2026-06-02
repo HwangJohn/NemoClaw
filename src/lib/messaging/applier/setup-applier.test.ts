@@ -69,10 +69,7 @@ function planner(): MessagingWorkflowPlanner {
         log: () => {},
       },
       slack: {
-        tokenPaste: {
-          getCredential: (key) => TEST_CREDENTIALS[key] ?? null,
-          saveCredential: () => {},
-          prompt: async () => "unused",
+        validateCredentials: {
           log: () => {},
           validateCredentials: () => ({ ok: true }),
         },
@@ -397,7 +394,11 @@ describe("MessagingSetupApplier", () => {
       MessagingSetupApplier.listHookRequests(plan).map(
         (request) => `${request.channelId}:${request.hookId}`,
       ),
-    ).toEqual(["slack:slack-token-paste", "slack:slack-config-prompt"]);
+    ).toEqual([
+      "slack:slack-token-paste",
+      "slack:slack-config-prompt",
+      "slack:slack-credential-validation",
+    ]);
 
     const providerCalls: string[][] = [];
     const credentialResult = MessagingSetupApplier.applyCredentialsAtOpenShell(plan, {

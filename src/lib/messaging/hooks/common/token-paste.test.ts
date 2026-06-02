@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { discordManifest, telegramManifest } from "../../channels";
+import { discordManifest, slackManifest, telegramManifest } from "../../channels";
 import { runMessagingHook } from "../hook-runner";
 import { MessagingHookRegistry } from "../registry";
 import {
@@ -21,6 +21,7 @@ describe("common token-paste hook implementation", () => {
     ]);
     expect(telegramManifest.hooks[0]?.handler).toBe(COMMON_TOKEN_PASTE_HOOK_HANDLER_ID);
     expect(discordManifest.hooks[0]?.handler).toBe(COMMON_TOKEN_PASTE_HOOK_HANDLER_ID);
+    expect(slackManifest.hooks[0]?.handler).toBe(COMMON_TOKEN_PASTE_HOOK_HANDLER_ID);
   });
 
   it("requires an injected prompt when no env or credential value is available", async () => {
@@ -68,6 +69,47 @@ describe("common token-paste hook implementation", () => {
         botToken: {
           kind: "secret",
           value: "123456:test-telegram-token",
+        },
+      },
+    });
+  });
+
+  it("collects Slack bot and app tokens through the shared token-paste hook", async () => {
+    const registry = new MessagingHookRegistry([
+      {
+        id: COMMON_TOKEN_PASTE_HOOK_HANDLER_ID,
+        handler: createTokenPasteHook({
+          env: {},
+          getCredential: (key) =>
+            key === "SLACK_BOT_TOKEN"
+              ? "xoxb-test-slack-token"
+              : key === "SLACK_APP_TOKEN"
+                ? "xapp-test-slack-token"
+                : null,
+          saveCredential: () => {},
+          log: () => {},
+        }),
+      },
+    ]);
+    const hook = slackManifest.hooks[0];
+
+    if (!hook) throw new Error("missing Slack token-paste hook");
+
+    await expect(
+      runMessagingHook(hook, registry, {
+        channelId: "slack",
+      }),
+    ).resolves.toMatchObject({
+      handlerId: COMMON_TOKEN_PASTE_HOOK_HANDLER_ID,
+      phase: "enroll",
+      outputs: {
+        botToken: {
+          kind: "secret",
+          value: "xoxb-test-slack-token",
+        },
+        appToken: {
+          kind: "secret",
+          value: "xapp-test-slack-token",
         },
       },
     });

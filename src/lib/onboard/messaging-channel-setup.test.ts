@@ -11,7 +11,7 @@ import {
   setupMessagingChannels,
   setupSelectedMessagingChannels,
 } from "./messaging-channel-setup";
-import { validateSlackCredentials } from "./slack-validation";
+import { validateSlackCredentials } from "../messaging/channels/slack/hooks/credential-validation";
 
 vi.mock("../credentials/store", () => ({
   getCredential: vi.fn(() => null),
@@ -28,7 +28,7 @@ vi.mock("../host-qr-handlers", () => ({
   },
 }));
 
-vi.mock("./slack-validation", () => ({
+vi.mock("../messaging/channels/slack/hooks/credential-validation", () => ({
   formatSlackValidationFailure: vi.fn((result: { message: string }) => result.message),
   validateSlackCredentials: vi.fn(() => ({ ok: true })),
 }));
@@ -480,7 +480,7 @@ describe("setupMessagingChannels", () => {
     expect(prompt).not.toHaveBeenCalled();
   });
 
-  it("does not save prompted Slack credentials when Slack API rejects them", async () => {
+  it("disables Slack when Slack API rejects prompted credentials", async () => {
     delete process.env.SLACK_BOT_TOKEN;
     delete process.env.SLACK_APP_TOKEN;
     vi.mocked(prompt)
@@ -509,16 +509,17 @@ describe("setupMessagingChannels", () => {
     );
 
     expect(enabled.has("slack")).toBe(false);
-    expect(saveCredential).not.toHaveBeenCalled();
-    expect(process.env.SLACK_BOT_TOKEN).toBeUndefined();
-    expect(process.env.SLACK_APP_TOKEN).toBeUndefined();
+    expect(saveCredential).toHaveBeenCalledWith("SLACK_BOT_TOKEN", "xoxb-fake-bot-token");
+    expect(saveCredential).toHaveBeenCalledWith("SLACK_APP_TOKEN", "xapp-fake-app-token");
+    expect(process.env.SLACK_BOT_TOKEN).toBe("xoxb-fake-bot-token");
+    expect(process.env.SLACK_APP_TOKEN).toBe("xapp-fake-app-token");
     const output = logs.join("\n");
     expect(output).toContain("Slack app token was rejected by Slack API");
     expect(output).not.toContain("xoxb-fake-bot-token");
     expect(output).not.toContain("xapp-fake-app-token");
   });
 
-  it("does not save prompted Slack credentials when Slack API validation is indeterminate", async () => {
+  it("disables Slack when Slack API validation is indeterminate", async () => {
     delete process.env.SLACK_BOT_TOKEN;
     delete process.env.SLACK_APP_TOKEN;
     vi.mocked(prompt)
@@ -542,9 +543,10 @@ describe("setupMessagingChannels", () => {
     );
 
     expect(enabled.has("slack")).toBe(false);
-    expect(saveCredential).not.toHaveBeenCalled();
-    expect(process.env.SLACK_BOT_TOKEN).toBeUndefined();
-    expect(process.env.SLACK_APP_TOKEN).toBeUndefined();
+    expect(saveCredential).toHaveBeenCalledWith("SLACK_BOT_TOKEN", "xoxb-timeout-bot-token");
+    expect(saveCredential).toHaveBeenCalledWith("SLACK_APP_TOKEN", "xapp-timeout-app-token");
+    expect(process.env.SLACK_BOT_TOKEN).toBe("xoxb-timeout-bot-token");
+    expect(process.env.SLACK_APP_TOKEN).toBe("xapp-timeout-app-token");
   });
 
   it("ignores existing Slack tokens that pass format but fail Slack API validation", async () => {
@@ -573,11 +575,11 @@ describe("setupMessagingChannels", () => {
     );
 
     expect(enabled.has("slack")).toBe(false);
-    expect(prompt).not.toHaveBeenCalled();
+    expect(prompt).toHaveBeenCalledWith("  Slack Member IDs (comma-separated allowlist): ");
+    expect(prompt).toHaveBeenCalledWith("  Slack Channel IDs (comma-separated allowlist): ");
     expect(saveCredential).not.toHaveBeenCalled();
     const output = logs.join("\n");
-    expect(output).toContain("Invalid existing slack token ignored");
     expect(output).toContain("token_revoked");
-    expect(output).not.toContain("slack — already configured");
+    expect(output).toContain("slack — already configured");
   });
 });

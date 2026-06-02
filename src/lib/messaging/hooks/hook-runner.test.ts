@@ -35,7 +35,7 @@ describe("MessagingHookRegistry", () => {
     expect(registry.listIds()).toEqual([
       "common.tokenPaste",
       "common.configPrompt",
-      "slack.tokenPaste",
+      "slack.validateCredentials",
       "telegram.allowlistAliases",
       "telegram.getMeReachability",
       "wechat.ilinkLogin",

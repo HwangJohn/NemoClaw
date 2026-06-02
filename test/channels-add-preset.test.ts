@@ -1079,7 +1079,7 @@ process.exit = (code) => {
     );
   });
 
-  it("validates Slack credentials before persisting tokens or registering providers", () => {
+  it("validates Slack credentials before registering providers", () => {
     const script = `${buildPreamble()}
 const ctx = module.exports;
 (async () => {
@@ -1124,6 +1124,11 @@ const ctx = module.exports;
       payload.callOrder.indexOf("slackProbe:app") <
         payload.callOrder.indexOf("saveCredential:SLACK_BOT_TOKEN"),
       `Slack validation must complete before token persistence; got ${JSON.stringify(payload.callOrder)}`,
+    );
+    assert.ok(
+      payload.callOrder.indexOf("slackProbe:app") <
+        payload.callOrder.indexOf("upsertMessagingProviders"),
+      `Slack validation must complete before provider registration; got ${JSON.stringify(payload.callOrder)}`,
     );
     assert.ok(
       payload.callOrder.indexOf("saveCredential:SLACK_APP_TOKEN") <
@@ -1184,7 +1189,7 @@ global.__slackBotProbe = {
     );
   });
 
-  it("aborts Slack channel add on rejected Slack API validation before persistence or registration", () => {
+  it("aborts Slack channel add on rejected Slack API validation before provider registration", () => {
     const script = `${buildPreamble()}
 const ctx = module.exports;
 global.__slackBotProbe = {
@@ -1244,7 +1249,7 @@ process.exit = (code) => {
     );
   });
 
-  it("aborts Slack channel add on indeterminate Slack API validation before persistence or registration", () => {
+  it("aborts Slack channel add on indeterminate Slack API validation before provider registration", () => {
     const script = `${buildPreamble()}
 const ctx = module.exports;
 global.__slackBotProbe = {

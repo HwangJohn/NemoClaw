@@ -2,33 +2,32 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { MessagingHookRegistration } from "../../../hooks/types";
-import { createDefaultSlackTokenPasteOptions } from "./token-paste-runtime";
 import {
-  createSlackTokenPasteHookRegistration,
-  type SlackTokenPasteHookOptions,
-} from "./token-paste";
+  createSlackValidateCredentialsHookRegistration,
+  type SlackValidateCredentialsHookOptions,
+} from "./validate-credentials";
 
-export * from "./token-paste";
+export * from "./credential-validation";
+export * from "./validate-credentials";
 
 export interface SlackHookOptions {
-  readonly tokenPaste?: SlackTokenPasteHookOptions;
+  readonly validateCredentials?: SlackValidateCredentialsHookOptions;
 }
 
 export function createSlackHookRegistrations(
   options: SlackHookOptions = {},
 ): readonly MessagingHookRegistration[] {
   return [
-    createSlackTokenPasteHookRegistration({
-      ...createDefaultSlackTokenPasteOptions(),
-      ...withoutUndefinedValues(options.tokenPaste),
-    }),
+    createSlackValidateCredentialsHookRegistration(
+      withoutUndefinedValues(options.validateCredentials),
+    ),
   ] as const;
 }
 
 function withoutUndefinedValues(
-  options: SlackTokenPasteHookOptions | undefined,
-): SlackTokenPasteHookOptions {
+  options: SlackValidateCredentialsHookOptions | undefined,
+): SlackValidateCredentialsHookOptions {
   return Object.fromEntries(
     Object.entries(options ?? {}).filter(([, value]) => value !== undefined),
-  ) as SlackTokenPasteHookOptions;
+  ) as SlackValidateCredentialsHookOptions;
 }

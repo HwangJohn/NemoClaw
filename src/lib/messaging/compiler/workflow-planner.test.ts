@@ -33,11 +33,7 @@ function planner(): MessagingWorkflowPlanner {
         log: () => {},
       },
       slack: {
-        tokenPaste: {
-          env: {},
-          getCredential: (key) => TEST_CREDENTIALS[key] ?? null,
-          saveCredential: () => {},
-          prompt: async () => "unused",
+        validateCredentials: {
           log: () => {},
           validateCredentials: () => ({ ok: true }),
         },
@@ -209,23 +205,12 @@ describe("MessagingWorkflowPlanner", () => {
         },
       },
       {
-        id: "slack.tokenPaste",
-        handler: (context) => {
-          const outputs: Record<string, { kind: "secret"; value: string }> = {};
-          for (const output of context.outputDeclarations ?? []) {
-            if (output.kind === "secret") {
-              outputs[output.id] = {
-                kind: "secret",
-                value: `test-${context.channelId}-${output.id}`,
-              };
-            }
-          }
-          return { outputs };
-        },
-      },
-      {
         id: "common.configPrompt",
         handler: () => ({ outputs: {} }),
+      },
+      {
+        id: "slack.validateCredentials",
+        handler: () => ({}),
       },
     ]);
     const plan = await new MessagingWorkflowPlanner(
