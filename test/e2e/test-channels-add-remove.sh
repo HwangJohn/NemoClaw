@@ -171,19 +171,19 @@ const fail = (message) => {
   console.error(message);
   process.exit(1);
 };
-if (!fs.existsSync(registryPath)) fail(`registry file not found: ${registryPath}`);
+if (!fs.existsSync(registryPath)) fail("registry file not found: " + registryPath);
 const registry = JSON.parse(fs.readFileSync(registryPath, "utf8"));
 const entry = registry.sandboxes?.[sandboxName];
-if (!entry) fail(`sandbox ${sandboxName} missing from registry`);
+if (!entry) fail("sandbox " + sandboxName + " missing from registry");
 const config = entry.messagingChannelConfig;
 if (!config || typeof config !== "object" || Array.isArray(config)) {
   fail("messagingChannelConfig missing or not an object");
 }
 if (config.TELEGRAM_ALLOWED_IDS !== allowedIds) {
-  fail(`TELEGRAM_ALLOWED_IDS expected ${allowedIds}, got ${JSON.stringify(config.TELEGRAM_ALLOWED_IDS)}`);
+  fail("TELEGRAM_ALLOWED_IDS expected " + allowedIds + ", got " + JSON.stringify(config.TELEGRAM_ALLOWED_IDS));
 }
 if (config.TELEGRAM_REQUIRE_MENTION !== requireMention) {
-  fail(`TELEGRAM_REQUIRE_MENTION expected ${requireMention}, got ${JSON.stringify(config.TELEGRAM_REQUIRE_MENTION)}`);
+  fail("TELEGRAM_REQUIRE_MENTION expected " + requireMention + ", got " + JSON.stringify(config.TELEGRAM_REQUIRE_MENTION));
 }
 ' "$REGISTRY" "$SANDBOX_NAME" "$TELEGRAM_ALLOWED_IDS_VALUE" "$TELEGRAM_REQUIRE_MENTION_VALUE" 2>&1)"; then
     pass "host registry messagingChannelConfig persists telegram config ${context}"
@@ -203,18 +203,18 @@ const fail = (message) => {
   console.error(message);
   process.exit(1);
 };
-if (!fs.existsSync(registryPath)) fail(`registry file not found: ${registryPath}`);
+if (!fs.existsSync(registryPath)) fail("registry file not found: " + registryPath);
 const registry = JSON.parse(fs.readFileSync(registryPath, "utf8"));
 const entry = registry.sandboxes?.[sandboxName];
-if (!entry) fail(`sandbox ${sandboxName} missing from registry`);
+if (!entry) fail("sandbox " + sandboxName + " missing from registry");
 const state = entry.messaging;
 if (!state || state.schemaVersion !== 1) fail("messaging state missing or schemaVersion != 1");
 const plan = state.plan;
 if (!plan || plan.schemaVersion !== 1) fail("messaging.plan missing or schemaVersion != 1");
 if (plan.sandboxName !== sandboxName) {
-  fail(`messaging.plan.sandboxName expected ${sandboxName}, got ${JSON.stringify(plan.sandboxName)}`);
+  fail("messaging.plan.sandboxName expected " + sandboxName + ", got " + JSON.stringify(plan.sandboxName));
 }
-if (plan.agent !== "openclaw") fail(`messaging.plan.agent expected openclaw, got ${JSON.stringify(plan.agent)}`);
+if (plan.agent !== "openclaw") fail("messaging.plan.agent expected openclaw, got " + JSON.stringify(plan.agent));
 const channels = Array.isArray(plan.channels) ? plan.channels : [];
 const channel = channels.find((item) => item?.channelId === "telegram");
 const disabledChannels = Array.isArray(plan.disabledChannels) ? plan.disabledChannels : [];
@@ -224,7 +224,7 @@ const networkPresets = Array.isArray(plan.networkPolicy?.presets) ? plan.network
 const agentRender = Array.isArray(plan.agentRender) ? plan.agentRender : [];
 if (expected === "active") {
   if (!channel) fail("telegram channel missing from messaging.plan.channels");
-  if (channel.active !== true) fail(`telegram plan active expected true, got ${JSON.stringify(channel.active)}`);
+  if (channel.active !== true) fail("telegram plan active expected true, got " + JSON.stringify(channel.active));
   if (channel.disabled === true) fail("telegram plan disabled unexpectedly true");
   if (!networkPresets.includes("telegram")) fail("telegram missing from messaging.plan.networkPolicy.presets");
   if (!networkEntries.some((entry) => entry?.channelId === "telegram")) {
@@ -251,7 +251,7 @@ if (expected === "active") {
     fail("telegram agent render entry still present in messaging.plan");
   }
 } else {
-  fail(`unknown expected plan state: ${expected}`);
+  fail("unknown expected plan state: " + expected);
 }
 ' "$REGISTRY" "$SANDBOX_NAME" "$expected" 2>&1)"; then
     pass "host registry messaging.plan has telegram ${expected} ${context}"
