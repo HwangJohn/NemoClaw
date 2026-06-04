@@ -32,6 +32,12 @@ function planner(): MessagingWorkflowPlanner {
         prompt: async () => "unused",
         log: () => {},
       },
+      slack: {
+        validateCredentials: {
+          log: () => {},
+          validateCredentials: () => ({ ok: true }),
+        },
+      },
       telegram: {
         fetch: async () => ({
           ok: true,
@@ -189,9 +195,15 @@ describe("MessagingWorkflowPlanner", () => {
           const outputs: Record<string, { kind: "secret"; value: string }> = {};
           for (const output of context.outputDeclarations ?? []) {
             if (output.kind === "secret") {
+              const value =
+                context.channelId === "slack" && output.id === "botToken"
+                  ? "xoxb-test-slack-bot-token"
+                  : context.channelId === "slack" && output.id === "appToken"
+                    ? "xapp-test-slack-app-token"
+                    : `test-${context.channelId}-${output.id}`;
               outputs[output.id] = {
                 kind: "secret",
-                value: `test-${context.channelId}-${output.id}`,
+                value,
               };
             }
           }
@@ -201,6 +213,10 @@ describe("MessagingWorkflowPlanner", () => {
       {
         id: "common.configPrompt",
         handler: () => ({ outputs: {} }),
+      },
+      {
+        id: "slack.validateCredentials",
+        handler: () => ({}),
       },
     ]);
     const plan = await new MessagingWorkflowPlanner(
@@ -238,6 +254,10 @@ describe("MessagingWorkflowPlanner", () => {
       {
         id: "common.configPrompt",
         handler: () => ({ outputs: {} }),
+      },
+      {
+        id: "slack.validateCredentials",
+        handler: () => ({}),
       },
     ]);
 
@@ -429,9 +449,15 @@ describe("MessagingWorkflowPlanner", () => {
           const outputs: Record<string, { kind: "secret"; value: string }> = {};
           for (const output of context.outputDeclarations ?? []) {
             if (output.kind === "secret") {
+              const value =
+                context.channelId === "slack" && output.id === "botToken"
+                  ? "xoxb-test-slack-bot-token"
+                  : context.channelId === "slack" && output.id === "appToken"
+                    ? "xapp-test-slack-app-token"
+                    : `test-${context.channelId}-${output.id}`;
               outputs[output.id] = {
                 kind: "secret",
-                value: `test-${context.channelId}-${output.id}`,
+                value,
               };
             }
           }
@@ -441,6 +467,10 @@ describe("MessagingWorkflowPlanner", () => {
       {
         id: "common.configPrompt",
         handler: () => ({ outputs: {} }),
+      },
+      {
+        id: "slack.validateCredentials",
+        handler: () => ({}),
       },
     ]);
 

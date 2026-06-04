@@ -6,11 +6,7 @@ import type {
   MessagingHookOutputMap,
   MessagingHookRunResult,
 } from "../hooks";
-import {
-  COMMON_TOKEN_PASTE_HOOK_HANDLER_ID,
-  MessagingHookRegistry,
-  runMessagingHook,
-} from "../hooks";
+import { MessagingHookRegistry, runMessagingHook } from "../hooks";
 import type {
   ChannelHookOutputSpec,
   ChannelHookSpec,
@@ -25,6 +21,7 @@ import type {
   SandboxMessagingInputReference,
   SandboxMessagingPlan,
 } from "../manifest";
+import { resolveMessagingChannelConfigEnvValue } from "../../messaging-channel-config";
 import { planAgentRender } from "./engines/agent-render-engine";
 import { planBuildSteps } from "./engines/build-step-engine";
 import { planCredentialBindings } from "./engines/credential-binding-engine";
@@ -226,7 +223,17 @@ async function resolveChannelInputs(
       .filter((entry) => isHookForAgent(entry, context.agent))
       .filter((entry) => entry.phase === "reachability-check")
       .filter((entry) => hasDeclaredHookInputs(hookInputs, entry))) {
-      await runCompilerHook(manifest, hook, hooks, hookInputs, options.isInteractive);
+      const result = await runCompilerHook(
+        manifest,
+        hook,
+        hooks,
+        hookInputs,
+        options.isInteractive,
+      );
+      if (!result) {
+        skipped = true;
+        break;
+      }
     }
   }
 
@@ -288,6 +295,10 @@ function inputReferenceBase(
 
 function readInputEnvValue(input: ChannelInputSpec): MessagingSerializableValue | undefined {
   if (!input.envKey) return undefined;
+  if (input.kind === "config") {
+    const resolved = resolveMessagingChannelConfigEnvValue(input.envKey, process.env);
+    if (resolved.value) return resolved.value;
+  }
   const value = process.env[input.envKey];
   const normalized = value?.replace(/\r/g, "").trim();
   return normalized && normalized.length > 0 ? normalized : undefined;
@@ -348,7 +359,7 @@ function shouldRunEnrollmentHook(
   hook: ChannelHookSpec,
   inputs: readonly SandboxMessagingInputReference[],
 ): boolean {
-  if (hook.handler === COMMON_TOKEN_PASTE_HOOK_HANDLER_ID) return true;
+  if (hook.handler.endsWith(".tokenPaste")) return true;
 
   const outputs = hook.outputs ?? [];
   if (outputs.length === 0) return true;

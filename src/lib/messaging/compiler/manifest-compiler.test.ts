@@ -38,6 +38,12 @@ function compiler(): ManifestCompiler {
         prompt: async () => "",
         log: () => {},
       },
+      slack: {
+        validateCredentials: {
+          log: () => {},
+          validateCredentials: () => ({ ok: true }),
+        },
+      },
       telegram: {
         fetch: async () => ({
           ok: true,
@@ -380,6 +386,7 @@ describe("ManifestCompiler", () => {
     expect(plan.disabledChannels).toEqual(["telegram"]);
     expect(plan.channels[0]?.hooks.map((hook) => hook.id)).toEqual([
       "telegram-token-paste",
+      "telegram-allowlist-aliases",
       "telegram-config-prompt",
       "telegram-get-me-reachability",
     ]);
@@ -426,6 +433,10 @@ describe("ManifestCompiler", () => {
         handler: () => ({}),
       },
       {
+        id: "telegram.allowlistAliases",
+        handler: () => ({}),
+      },
+      {
         id: "telegram.getMeReachability",
         handler: (context) => {
           hookCalls.push(`reachability:${String(context.inputs?.botToken)}`);
@@ -459,6 +470,55 @@ describe("ManifestCompiler", () => {
       "reachability:123456:raw-telegram-token",
     ]);
     expect(JSON.stringify(plan)).not.toContain("123456:raw-telegram-token");
+  });
+
+  it("disables a channel when a reachability check opts to skip it", async () => {
+    const hooks = new MessagingHookRegistry([
+      {
+        id: "common.tokenPaste",
+        handler: () => ({
+          outputs: {
+            botToken: {
+              kind: "secret",
+              value: "123456:raw-telegram-token",
+            },
+          },
+        }),
+      },
+      {
+        id: "common.configPrompt",
+        handler: () => ({}),
+      },
+      {
+        id: "telegram.allowlistAliases",
+        handler: () => ({}),
+      },
+      {
+        id: "telegram.getMeReachability",
+        handler: () => {
+          throw new Error("telegram is unreachable");
+        },
+      },
+    ]);
+    const plan = await new ManifestCompiler(
+      createBuiltInChannelManifestRegistry(),
+      hooks,
+    ).compile({
+      sandboxName: "demo",
+      agent: "openclaw",
+      workflow: "onboard",
+      isInteractive: false,
+      configuredChannels: ["telegram"],
+    });
+
+    expect(plan.channels[0]).toMatchObject({
+      channelId: "telegram",
+      active: false,
+      selected: true,
+      configured: false,
+      disabled: true,
+    });
+    expect(plan.disabledChannels).toEqual(["telegram"]);
   });
 
   it("reads input values from env keys before returning non-interactive plans", async () => {
@@ -563,6 +623,7 @@ describe("ManifestCompiler", () => {
     expect(plan.healthChecks.map((entry) => entry.channelId)).toEqual(["telegram"]);
     expect(plan.channels[0]?.hooks.map((hook) => hook.id)).toEqual([
       "telegram-token-paste",
+      "telegram-allowlist-aliases",
       "telegram-config-prompt",
       "telegram-get-me-reachability",
     ]);

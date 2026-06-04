@@ -917,6 +917,14 @@ New Telegram bots default to privacy mode enabled, which prevents group messages
 In @BotFather, run `/setprivacy`, choose the bot, and choose **Disable**.
 Then remove the bot from the affected group and add it back; Telegram applies the privacy-mode change to group delivery only after the bot rejoins.
 
+For Telegram direct messages, make sure the rebuilt sandbox has a DM allowlist.
+Set `TELEGRAM_ALLOWED_IDS` before rebuild; `TELEGRAM_AUTHORIZED_CHAT_IDS` and `TELEGRAM_CHAT_ID` are accepted as compatibility aliases.
+Keep the aliases until QA automation and public repro templates have stopped exporting them for at least one full release.
+Bot API `sendMessage` sends from the bot to a chat, so it only proves outbound Telegram API access.
+To prove inbound agent routing, send a message from the Telegram client as an allowed user and then watch the gateway log for the agent turn and outbound reply.
+For a reproducible live check that also exercises an alias, run `test/e2e/test-messaging-providers.sh` with `TELEGRAM_BOT_TOKEN_REAL`, either `TELEGRAM_AUTHORIZED_CHAT_IDS` or `TELEGRAM_CHAT_ID`, and `NEMOCLAW_TELEGRAM_INBOUND_REPLY_E2E=1`; when prompted, send a fresh direct message from that Telegram client.
+The check waits for `[telegram] [default] inbound update received` and `[telegram] [default] outbound sendMessage attempted` in `/tmp/gateway.log`.
+
 To diagnose, open a shell in the sandbox and inspect the gateway log:
 
 ```console
@@ -1235,6 +1243,11 @@ $ openshell sandbox delete <sandbox-name>
 Fix the NVIDIA Container Toolkit or CDI configuration reported in the diagnostics, clean up the failed sandbox, then rerun onboarding.
 If you do not need GPU access inside the sandbox, rerun with `--no-sandbox-gpu`.
 Set `NEMOCLAW_DOCKER_GPU_PATCH=0` only when you need to bypass this compatibility path during troubleshooting.
+
+If onboarding reports `OpenShell supervisor did not reconnect to the GPU-enabled container.` even though the diagnostic bundle shows the patched container is running and healthy, the supervisor-reconnect wait is treating a transient Error phase (reported while the OpenShell host re-registers the new container) as fatal.
+The reconnect wait debounces consecutive Error-phase polls before fast-failing, defaulting to five consecutive polls of about 10 seconds in total.
+Increase the debounce window with `NEMOCLAW_DOCKER_GPU_SUPERVISOR_RECONNECT_ERROR_DEBOUNCE` if your host needs more time to re-register the patched container, for example slow WSL2 + Docker Desktop setups.
+Set it to a higher integer such as `15` (about 30 seconds) and rerun onboarding; the value is clamped to a minimum of `1`.
 
 ### `pip install` fails with a system-packages error
 

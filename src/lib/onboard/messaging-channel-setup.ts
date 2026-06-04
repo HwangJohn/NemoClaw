@@ -16,6 +16,7 @@ import {
   type SandboxMessagingPlan,
   toMessagingAgentId,
 } from "../messaging";
+import { resolveMessagingChannelConfigEnvValue } from "../messaging-channel-config";
 
 export interface SetupSelectedMessagingChannelsOptions {
   readonly agent?: { readonly name?: string } | null;
@@ -36,6 +37,8 @@ const getMessagingToken = (envKey: string): string | null =>
 const getMessagingInputValue = (input: ChannelInputSpec): string | null => {
   if (!input.envKey) return null;
   if (input.kind === "secret") return getMessagingToken(input.envKey);
+  const resolved = resolveMessagingChannelConfigEnvValue(input.envKey, process.env);
+  if (resolved.value) return resolved.value;
   return normalizeCredentialValue(process.env[input.envKey]) || null;
 };
 
@@ -309,6 +312,9 @@ function printInSandboxQrStatus(manifest: ChannelManifest): void {
   console.log(
     `  ✓ ${manifest.id} enabled — complete QR pairing from inside the sandbox after rebuild.`,
   );
+  for (const line of manifest.enrollmentNotes ?? []) {
+    console.log(`  ${line}`);
+  }
 }
 
 function resolveMessagingSetupSandboxName(options: SetupSelectedMessagingChannelsOptions): string {

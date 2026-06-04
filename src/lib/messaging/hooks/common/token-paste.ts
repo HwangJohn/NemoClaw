@@ -39,6 +39,12 @@ export function createTokenPasteHook(options: TokenPasteHookOptions = {}): Messa
   return async (context) => {
     const outputs: Record<string, MessagingHookOutputMap[string]> = {};
     const manifest = createBuiltInChannelManifestRegistry().get(context.channelId);
+    const resolvedFields: Array<{
+      readonly output: ChannelHookOutputSpec;
+      readonly field: TokenPasteField;
+      readonly token: string;
+      readonly source: "existing" | "prompted";
+    }> = [];
 
     for (const output of context.outputDeclarations ?? []) {
       if (output.kind !== "secret") continue;
@@ -55,12 +61,22 @@ export function createTokenPasteHook(options: TokenPasteHookOptions = {}): Messa
         options,
         context.isInteractive !== false,
       );
+      resolvedFields.push({
+        output,
+        field,
+        token: resolved.token,
+        source: resolved.source,
+      });
       outputs[output.id] = {
         kind: "secret",
         value: resolved.token,
       };
-      logTokenStatus(context.channelId, output, resolved.source, options);
-      if (isPrimarySecretOutput(manifest, output)) {
+    }
+
+    for (const resolved of resolvedFields) {
+      persistTokenValue(resolved.field, resolved.token, resolved.source, options);
+      logTokenStatus(context.channelId, resolved.output, resolved.source, options);
+      if (isPrimarySecretOutput(manifest, resolved.output)) {
         logEnrollmentNotes(manifest, options);
       }
     }
@@ -87,7 +103,6 @@ async function resolveTokenValue(
 ): Promise<{ readonly token: string; readonly source: "existing" | "prompted" }> {
   const env = options.env ?? process.env;
   const readCredential = options.getCredential ?? (() => null);
-  const writeCredential = options.saveCredential ?? (() => {});
   const prompt = options.prompt ?? missingPhaseOnePrompt;
   const log = options.log ?? ((message: string) => console.log(message));
 
@@ -134,9 +149,21 @@ async function resolveTokenValue(
     );
   }
 
-  writeCredential(field.envKey, token);
-  env[field.envKey] = token;
   return { token, source };
+}
+
+function persistTokenValue(
+  field: TokenPasteField,
+  token: string,
+  source: "existing" | "prompted",
+  options: TokenPasteHookOptions,
+): void {
+  const env = options.env ?? process.env;
+  env[field.envKey] = token;
+  if (source === "prompted") {
+    const writeCredential = options.saveCredential ?? (() => {});
+    writeCredential(field.envKey, token);
+  }
 }
 
 async function missingPhaseOnePrompt(): Promise<string> {

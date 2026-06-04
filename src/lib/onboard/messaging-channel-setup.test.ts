@@ -11,6 +11,7 @@ import {
   setupMessagingChannels,
   setupSelectedMessagingChannels,
 } from "./messaging-channel-setup";
+import { validateSlackCredentials } from "../messaging/channels/slack/hooks/credential-validation";
 
 vi.mock("../credentials/store", () => ({
   getCredential: vi.fn(() => null),
@@ -25,6 +26,11 @@ vi.mock("../host-qr-handlers", () => ({
   HOST_QR_LOGIN_HANDLERS: {
     wechat: vi.fn(),
   },
+}));
+
+vi.mock("../messaging/channels/slack/hooks/credential-validation", () => ({
+  formatSlackValidationFailure: vi.fn((result: { message: string }) => result.message),
+  validateSlackCredentials: vi.fn(() => ({ ok: true })),
 }));
 
 const ORIGINAL_ENV = { ...process.env };
@@ -61,6 +67,7 @@ describe("setupSelectedMessagingChannels", () => {
     vi.mocked(getCredential).mockReturnValue(null);
     vi.mocked(prompt).mockResolvedValue("");
     stubTelegramReachability();
+    vi.mocked(validateSlackCredentials).mockReturnValue({ ok: true });
   });
 
   afterEach(() => {
@@ -97,7 +104,7 @@ describe("setupSelectedMessagingChannels", () => {
     );
   });
 
-  it("runs Telegram reachability once during interactive setup", async () => {
+  it("disables Telegram when reachability rejects the token during interactive setup", async () => {
     process.env.TELEGRAM_BOT_TOKEN = "123456:ABC-test-token";
     process.env.TELEGRAM_REQUIRE_MENTION = "1";
     process.env.TELEGRAM_ALLOWED_IDS = "123456789";
@@ -117,6 +124,32 @@ describe("setupSelectedMessagingChannels", () => {
     vi.spyOn(console, "log").mockImplementation((message = "") => {
       logs.push(String(message));
     });
+    const enabled = new Set(["telegram"]);
+
+    const plan = await setupSelectedMessagingChannels(
+      ["telegram"],
+      enabled,
+      manifests("telegram"),
+    );
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(enabled.has("telegram")).toBe(false);
+    expect(plan?.channels[0]).toMatchObject({ channelId: "telegram", active: false });
+    expect(
+      logs.filter((line) => line.includes("Bot token was rejected by Telegram")),
+    ).toHaveLength(1);
+  });
+
+  it("accepts Telegram allowlist aliases during manifest channel setup", async () => {
+    process.env.TELEGRAM_BOT_TOKEN = "123456:ABC-test-token";
+    process.env.TELEGRAM_ALLOWED_IDS = "8388960805";
+    process.env.TELEGRAM_AUTHORIZED_CHAT_IDS = "8388960806";
+    process.env.TELEGRAM_CHAT_ID = "8388960807";
+    process.env.TELEGRAM_REQUIRE_MENTION = "0";
+    const logs: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((message = "") => {
+      logs.push(String(message));
+    });
 
     await setupSelectedMessagingChannels(
       ["telegram"],
@@ -124,10 +157,11 @@ describe("setupSelectedMessagingChannels", () => {
       manifests("telegram"),
     );
 
-    expect(fetchMock).toHaveBeenCalledOnce();
-    expect(
-      logs.filter((line) => line.includes("Bot token was rejected by Telegram")),
-    ).toHaveLength(1);
+    expect(process.env.TELEGRAM_ALLOWED_IDS).toBe("8388960805,8388960806,8388960807");
+    expect(prompt).not.toHaveBeenCalledWith("  Telegram User ID (for DM access): ");
+    expect(logs.join("\n")).toContain(
+      "telegram — allowed IDs already set: 8388960805,8388960806,8388960807",
+    );
   });
 
   it("uses manifest token validation for Slack dual-token enrollment", async () => {
@@ -183,11 +217,12 @@ describe("setupSelectedMessagingChannels", () => {
       "SLACK_BOT_TOKEN",
       "xoxb-recovered-token",
     );
-    expect(saveCredential).toHaveBeenCalledWith(
+    expect(saveCredential).not.toHaveBeenCalledWith(
       "SLACK_APP_TOKEN",
       "xapp-existing-token",
     );
     expect(process.env.SLACK_BOT_TOKEN).toBe("xoxb-recovered-token");
+    expect(process.env.SLACK_APP_TOKEN).toBe("xapp-existing-token");
     expect(logs.join("\n")).toContain("Invalid existing slack token ignored");
     expect(logs.join("\n")).not.toContain("Skipped slack (invalid token format)");
   });
@@ -300,6 +335,7 @@ describe("setupSelectedMessagingChannels", () => {
       active: true,
     });
     expect(logs.join("\n")).toContain("WhatsApp Web pairs via QR code");
+    expect(logs.join("\n")).toContain("channels status --channel whatsapp");
   });
 
   it("threads the resolved sandbox name into manifest provider bindings", async () => {
@@ -329,6 +365,7 @@ describe("setupMessagingChannels", () => {
     vi.clearAllMocks();
     vi.mocked(getCredential).mockReturnValue(null);
     vi.mocked(prompt).mockResolvedValue("");
+    vi.mocked(validateSlackCredentials).mockReturnValue({ ok: true });
     stubTelegramReachability();
   });
 
@@ -441,5 +478,108 @@ describe("setupMessagingChannels", () => {
     expect(logs.join("\n")).toContain("Slack bot tokens start with 'xoxb-'");
     expect(logs.join("\n")).toContain("Skipped slack (invalid token format)");
     expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it("disables Slack when Slack API rejects prompted credentials", async () => {
+    delete process.env.SLACK_BOT_TOKEN;
+    delete process.env.SLACK_APP_TOKEN;
+    vi.mocked(prompt)
+      .mockResolvedValueOnce("xoxb-fake-bot-token")
+      .mockResolvedValueOnce("xapp-fake-app-token");
+    vi.mocked(validateSlackCredentials).mockReturnValueOnce({
+      ok: false,
+      kind: "rejected",
+      tokenKind: "app",
+      credential: "app",
+      error: "invalid_auth",
+      httpStatus: 200,
+      curlStatus: 0,
+      message: "Slack app token was rejected by Slack API: invalid_auth.",
+    });
+    const enabled = new Set(["slack"]);
+    const logs: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((message = "") => {
+      logs.push(String(message));
+    });
+
+    await setupSelectedMessagingChannels(
+      ["slack"],
+      enabled,
+      manifests("slack"),
+    );
+
+    expect(enabled.has("slack")).toBe(false);
+    expect(saveCredential).toHaveBeenCalledWith("SLACK_BOT_TOKEN", "xoxb-fake-bot-token");
+    expect(saveCredential).toHaveBeenCalledWith("SLACK_APP_TOKEN", "xapp-fake-app-token");
+    expect(process.env.SLACK_BOT_TOKEN).toBe("xoxb-fake-bot-token");
+    expect(process.env.SLACK_APP_TOKEN).toBe("xapp-fake-app-token");
+    const output = logs.join("\n");
+    expect(output).toContain("Slack app token was rejected by Slack API");
+    expect(output).not.toContain("xoxb-fake-bot-token");
+    expect(output).not.toContain("xapp-fake-app-token");
+  });
+
+  it("disables Slack when Slack API validation is indeterminate", async () => {
+    delete process.env.SLACK_BOT_TOKEN;
+    delete process.env.SLACK_APP_TOKEN;
+    vi.mocked(prompt)
+      .mockResolvedValueOnce("xoxb-timeout-bot-token")
+      .mockResolvedValueOnce("xapp-timeout-app-token");
+    vi.mocked(validateSlackCredentials).mockReturnValueOnce({
+      ok: false,
+      kind: "indeterminate",
+      tokenKind: "bot",
+      credential: "bot",
+      httpStatus: 0,
+      curlStatus: 28,
+      message: "Slack bot token could not be validated because Slack API was unreachable.",
+    });
+    const enabled = new Set(["slack"]);
+
+    await setupSelectedMessagingChannels(
+      ["slack"],
+      enabled,
+      manifests("slack"),
+    );
+
+    expect(enabled.has("slack")).toBe(false);
+    expect(saveCredential).toHaveBeenCalledWith("SLACK_BOT_TOKEN", "xoxb-timeout-bot-token");
+    expect(saveCredential).toHaveBeenCalledWith("SLACK_APP_TOKEN", "xapp-timeout-app-token");
+    expect(process.env.SLACK_BOT_TOKEN).toBe("xoxb-timeout-bot-token");
+    expect(process.env.SLACK_APP_TOKEN).toBe("xapp-timeout-app-token");
+  });
+
+  it("ignores existing Slack tokens that pass format but fail Slack API validation", async () => {
+    process.env.SLACK_BOT_TOKEN = "xoxb-existing-invalid";
+    process.env.SLACK_APP_TOKEN = "xapp-existing-valid";
+    vi.mocked(validateSlackCredentials).mockReturnValueOnce({
+      ok: false,
+      kind: "rejected",
+      tokenKind: "bot",
+      credential: "bot",
+      error: "token_revoked",
+      httpStatus: 200,
+      curlStatus: 0,
+      message: "Slack bot token was rejected by Slack API: token_revoked.",
+    });
+    const enabled = new Set(["slack"]);
+    const logs: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((message = "") => {
+      logs.push(String(message));
+    });
+
+    await setupSelectedMessagingChannels(
+      ["slack"],
+      enabled,
+      manifests("slack"),
+    );
+
+    expect(enabled.has("slack")).toBe(false);
+    expect(prompt).toHaveBeenCalledWith("  Slack Member IDs (comma-separated allowlist): ");
+    expect(prompt).toHaveBeenCalledWith("  Slack Channel IDs (comma-separated allowlist): ");
+    expect(saveCredential).not.toHaveBeenCalled();
+    const output = logs.join("\n");
+    expect(output).toContain("token_revoked");
+    expect(output).toContain("slack — already configured");
   });
 });

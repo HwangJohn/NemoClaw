@@ -86,6 +86,22 @@ SANDBOX_NAME="${NEMOCLAW_SANDBOX_NAME:-e2e-channels-add-remove}"
 INSTALL_LOG="/tmp/nemoclaw-e2e-install.log"
 TELEGRAM_TOKEN="${TELEGRAM_BOT_TOKEN:-test-fake-telegram-token-add-remove-e2e}"
 
+is_fake_telegram_token() {
+  case "${1:-}" in
+    *fake*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+maybe_skip_telegram_reachability_for_fake_token() {
+  if [ -z "${NEMOCLAW_SKIP_TELEGRAM_REACHABILITY:-}" ] && is_fake_telegram_token "$TELEGRAM_TOKEN"; then
+    # This E2E normally uses a fake token to exercise add/remove plumbing, not
+    # the live Telegram API. Remove once the test has a hermetic fake Telegram API.
+    export NEMOCLAW_SKIP_TELEGRAM_REACHABILITY=1
+    info "Skipping Telegram reachability probe for fake-token E2E"
+  fi
+}
+
 # shellcheck source=test/e2e/lib/sandbox-teardown.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/sandbox-teardown.sh"
 register_sandbox_for_teardown "$SANDBOX_NAME"
@@ -322,6 +338,7 @@ section "Phase 3: channels add telegram + rebuild"
 # Now provide the token — this mirrors the real user flow: after onboard,
 # the operator decides to add a channel and exports the token first.
 export TELEGRAM_BOT_TOKEN="$TELEGRAM_TOKEN"
+maybe_skip_telegram_reachability_for_fake_token
 
 if nemoclaw "$SANDBOX_NAME" channels add telegram >/tmp/nc-add.log 2>&1; then
   add_rc=0

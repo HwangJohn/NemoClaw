@@ -14,6 +14,8 @@ import {
   COMMON_CONFIG_PROMPT_HOOK_HANDLER_ID,
   COMMON_TOKEN_PASTE_HOOK_HANDLER_ID,
 } from "../hooks/common";
+import { SLACK_VALIDATE_CREDENTIALS_HOOK_HANDLER_ID } from "./slack/hooks";
+import { TELEGRAM_ALLOWLIST_ALIASES_HOOK_ID } from "./telegram/hooks";
 import type { ChannelInputSpec, ChannelManifest, ChannelRenderSpec } from "../manifest";
 import {
   BUILT_IN_CHANNEL_MANIFESTS,
@@ -82,7 +84,17 @@ function expectReachabilityHook(manifest: ChannelManifest, inputIds: readonly st
     phase: "reachability-check",
     handler: `${manifest.id}.getMeReachability`,
     inputs: inputIds,
-    onFailure: "abort",
+    onFailure: "skip-channel",
+  });
+}
+
+function expectSlackCredentialValidationHook(inputIds: readonly string[]): void {
+  expect(slackManifest.hooks).toContainEqual({
+    id: "slack-credential-validation",
+    phase: "reachability-check",
+    handler: SLACK_VALIDATE_CREDENTIALS_HOOK_HANDLER_ID,
+    inputs: inputIds,
+    onFailure: "skip-channel",
   });
 }
 
@@ -126,6 +138,7 @@ describe("built-in channel manifests", () => {
       "src/lib/messaging/channels/wechat/hooks/index.ts",
       "src/lib/messaging/channels/wechat/hooks/seed-openclaw-account.ts",
       "src/lib/messaging/channels/slack/manifest.ts",
+      "src/lib/messaging/channels/slack/hooks/validate-credentials.ts",
       "src/lib/messaging/channels/whatsapp/manifest.ts",
       "src/lib/messaging/hooks/common/config-prompt.ts",
       "src/lib/messaging/hooks/common/token-paste.ts",
@@ -224,6 +237,17 @@ describe("built-in channel manifests", () => {
     expect(renderJson(telegramManifest)).toContain("channels.telegram.groups");
     expect(renderJson(telegramManifest)).toContain("telegramConfig.requireMention");
     expectTokenPasteEnrollHook(telegramManifest, ["botToken"]);
+    expect(telegramManifest.hooks).toContainEqual({
+      id: "telegram-allowlist-aliases",
+      phase: "enroll",
+      handler: TELEGRAM_ALLOWLIST_ALIASES_HOOK_ID,
+      outputs: [
+        {
+          id: "allowedIds",
+          kind: "config",
+        },
+      ],
+    });
     expectConfigPromptEnrollHook(telegramManifest, ["requireMention", "allowedIds"]);
     expectReachabilityHook(telegramManifest, ["botToken"]);
   });
@@ -337,6 +361,7 @@ describe("built-in channel manifests", () => {
     expect(renderJson(slackManifest)).toContain("allowedIds.slack.channels");
     expectTokenPasteEnrollHook(slackManifest, ["botToken", "appToken"]);
     expectConfigPromptEnrollHook(slackManifest, ["allowedUsers", "allowedChannels"]);
+    expectSlackCredentialValidationHook(["botToken", "appToken"]);
     expect(slackManifest.state).toEqual({
       persist: {
         allowedIds: ["allowedUsers"],

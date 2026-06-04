@@ -165,5 +165,12 @@ export const slackManifest = {
         },
       ],
     },
+    {
+      id: "slack-credential-validation",
+      phase: "reachability-check",
+      handler: "slack.validateCredentials",
+      inputs: ["botToken", "appToken"],
+      onFailure: "skip-channel",
+    },
   ],
 } as const satisfies ChannelManifest;

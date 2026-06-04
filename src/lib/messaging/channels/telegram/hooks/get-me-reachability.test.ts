@@ -15,7 +15,7 @@ const TELEGRAM_REACHABILITY_HOOK = {
   phase: "reachability-check",
   handler: TELEGRAM_GET_ME_REACHABILITY_HOOK_ID,
   inputs: ["botToken"],
-  onFailure: "abort",
+  onFailure: "skip-channel",
 } as const satisfies ChannelHookSpec;
 
 describe("Telegram getMe reachability hook implementation", () => {
@@ -58,7 +58,7 @@ describe("Telegram getMe reachability hook implementation", () => {
     expect(urls).toEqual(["https://telegram.test/bot123456:telegram-token/getMe"]);
   });
 
-  it("warns and continues when Telegram rejects the token", async () => {
+  it("fails so the compiler can skip the channel when Telegram rejects the token", async () => {
     const logs: string[] = [];
     const registry = new MessagingHookRegistry([
       {
@@ -86,20 +86,23 @@ describe("Telegram getMe reachability hook implementation", () => {
           botToken: "bad-token",
         },
       }),
-    ).resolves.toMatchObject({
-      hookId: "telegram-reachability",
-      outputs: {},
-    });
+    ).rejects.toThrow("Telegram bot token was rejected.");
     expect(logs).toEqual([
       "  ⚠ Bot token was rejected by Telegram — verify the token is correct.",
+      [
+        "  Telegram integration will be disabled for this enrollment run because",
+        "the bot token was rejected by Telegram.",
+      ].join(" "),
     ]);
   });
 
-  it("fails closed when the Bot API request fails in non-interactive mode", async () => {
+  it("fails so the compiler can skip the channel when non-interactive Bot API requests fail", async () => {
+    const logs: string[] = [];
     const registry = new MessagingHookRegistry([
       {
         id: TELEGRAM_GET_ME_REACHABILITY_HOOK_ID,
         handler: createTelegramGetMeReachabilityHook({
+          log: (message) => logs.push(message),
           fetch: async () => {
             throw new Error("network unavailable");
           },
@@ -115,6 +118,12 @@ describe("Telegram getMe reachability hook implementation", () => {
         },
       }),
     ).rejects.toThrow("Telegram reachability check failed: Bot API request failed.");
+    expect(logs).toEqual([
+      [
+        "  Telegram integration will be disabled for this enrollment run because",
+        "api.telegram.org is unreachable.",
+      ].join(" "),
+    ]);
   });
 
   it("bounds hung Bot API requests with a timeout", async () => {
