@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Session, SessionUpdates } from "../../../state/onboard-session";
+import { getEnabledChannelIdsFromPlan } from "../../messaging-plan-session";
 import { advanceTo, type OnboardStateTransitionResult } from "../result";
 
 // Inlined to avoid pulling sandbox-agent's transitive runner.ts deps into
@@ -184,7 +185,7 @@ export async function handlePoliciesState<Agent, WebSearchConfig>({
         ? recordedPolicyPresetsForSupport
         : null,
       messagingPolicyPresets,
-      messagingChannelIds: latestSession?.messagingPlan?.channels.map((c) => c.channelId) ?? null,
+      messagingChannelIds: getEnabledChannelIdsFromPlan(latestSession?.messagingPlan),
       webSearchConfig,
       provider,
       // selectOnboardAgent returns null for the default OpenClaw path (no

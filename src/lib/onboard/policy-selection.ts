@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { WebSearchConfig } from "../inference/web-search";
-import { ALL_MESSAGING_POLICY_PRESET_NAMES } from "../messaging/applier/policy-presets";
+import {
+  ALL_MESSAGING_POLICY_PRESET_NAMES,
+  filterActiveMessagingPresets,
+  hasDisabledMessagingPreset,
+} from "../messaging/applier/policy-presets";
 import {
   filterSetupPolicyPresetNamesForAgent,
   filterSetupPolicyPresetsForAgent,
@@ -284,15 +288,16 @@ export function preparePolicyPresetResumeSelection(
   // messaging-policy set but is absent from the compiled plan's active presets.
   // When present, the resume skip is bypassed so the policy step can remove them.
   const planMessagingPresets = new Set(options.messagingPolicyPresets ?? []);
-  const disabledMessagingPolicyPresetApplied = appliedPolicyPresetsForSupport.some(
-    (preset) =>
-      ALL_MESSAGING_POLICY_PRESET_NAMES.has(preset) && !planMessagingPresets.has(preset),
+  const disabledMessagingPolicyPresetApplied = hasDisabledMessagingPreset(
+    appliedPolicyPresetsForSupport,
+    planMessagingPresets,
   );
 
   // Merge any applied non-stale presets (minus the stale messaging ones) so the
   // policy sync step can diff them out cleanly.
-  const appliedToPreserve = appliedPolicyPresetsForSupport.filter(
-    (name) => !ALL_MESSAGING_POLICY_PRESET_NAMES.has(name) || planMessagingPresets.has(name),
+  const appliedToPreserve = filterActiveMessagingPresets(
+    appliedPolicyPresetsForSupport,
+    planMessagingPresets,
   );
   for (const preset of appliedToPreserve) {
     if (!policyPresets.includes(preset)) policyPresets.push(preset);
@@ -375,10 +380,9 @@ async function setupPoliciesWithSelectionInner(
   // messaging presets (active in gateway but absent from the plan) are excluded
   // so the sync step removes them.
   const planMessagingPresets = new Set(messagingPolicyPresets ?? []);
-  const appliedForPreservation = applied.filter(
-    (name) =>
-      !isStaleBuiltinBrave(name) &&
-      (!ALL_MESSAGING_POLICY_PRESET_NAMES.has(name) || planMessagingPresets.has(name)),
+  const appliedForPreservation = filterActiveMessagingPresets(
+    applied.filter((name) => !isStaleBuiltinBrave(name)),
+    planMessagingPresets,
   );
   const filterSupportedPresetNames = (presetNames: string[]) =>
     filterSetupPolicyPresetNamesForAgent(presetNames, agent).filter(

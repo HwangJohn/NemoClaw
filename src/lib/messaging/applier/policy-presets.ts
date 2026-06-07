@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 const REQUIRED_POLICY_PRESETS_BY_MESSAGING_CHANNEL: Record<string, readonly string[]> = {
+  discord: ["discord"],
   slack: ["slack"],
+  telegram: ["telegram"],
+  wechat: ["wechat"],
+  whatsapp: ["whatsapp"],
 };
 
 /** All preset names that any messaging channel can require. */
@@ -35,8 +39,8 @@ function requiredMessagingChannelPolicyPresets(channels: string[] | null | undef
 /**
  * Removes from selectedPresets any preset exclusively required by a disabled
  * channel. Used when restoring presets from backup manifests where no compiled
- * plan is available. For plan-aware paths, disabled channels are already
- * excluded from plan.networkPolicy.presets.
+ * plan is available. For plan-aware paths, use getPolicyPresetsFromPlan which
+ * derives presets from enabled plan entries only.
  */
 export function pruneDisabledMessagingPolicyPresets(
   selectedPresets: string[],
@@ -46,5 +50,33 @@ export function pruneDisabledMessagingPolicyPresets(
   if (disabledRequiredPresets.size === 0) return selectedPresets;
   return selectedPresets.filter(
     (preset) => !disabledRequiredPresets.has(preset.trim().toLowerCase()),
+  );
+}
+
+/**
+ * Returns true if any preset in the list is a messaging policy preset that is
+ * absent from the active plan preset set. Used to detect stale messaging
+ * presets still applied in the gateway after a channel stop/disable.
+ */
+export function hasDisabledMessagingPreset(
+  presets: readonly string[],
+  activePlanPresets: ReadonlySet<string>,
+): boolean {
+  return presets.some(
+    (preset) => ALL_MESSAGING_POLICY_PRESET_NAMES.has(preset) && !activePlanPresets.has(preset),
+  );
+}
+
+/**
+ * Filters a preset list to retain only non-messaging presets and messaging
+ * presets that appear in the active plan preset set. Used to exclude stale
+ * gateway presets from the resume/preservation set.
+ */
+export function filterActiveMessagingPresets(
+  presets: readonly string[],
+  activePlanPresets: ReadonlySet<string>,
+): string[] {
+  return presets.filter(
+    (name) => !ALL_MESSAGING_POLICY_PRESET_NAMES.has(name) || activePlanPresets.has(name),
   );
 }

@@ -3,6 +3,7 @@
 
 import type { MessagingChannelConfig } from "../messaging-channel-config";
 import type { SandboxMessagingPlan } from "../messaging/manifest";
+import { enabledPlanChannelIds, filterEnabledPlanEntries } from "../messaging/applier/plan-filter";
 
 export function parseSandboxMessagingPlan(value: unknown): SandboxMessagingPlan | null {
   if (
@@ -12,9 +13,19 @@ export function parseSandboxMessagingPlan(value: unknown): SandboxMessagingPlan 
     typeof value.agent !== "string" ||
     typeof value.workflow !== "string" ||
     !Array.isArray(value.channels) ||
+    !value.channels.every(
+      (c) => isObject(c) && typeof c.channelId === "string",
+    ) ||
     !Array.isArray(value.disabledChannels) ||
+    !value.disabledChannels.every((id) => typeof id === "string") ||
     !Array.isArray(value.credentialBindings) ||
     !isObject(value.networkPolicy) ||
+    !Array.isArray(value.networkPolicy.presets) ||
+    !value.networkPolicy.presets.every((p) => typeof p === "string") ||
+    !Array.isArray(value.networkPolicy.entries) ||
+    !value.networkPolicy.entries.every(
+      (e) => isObject(e) && typeof e.channelId === "string" && typeof e.presetName === "string",
+    ) ||
     !Array.isArray(value.agentRender) ||
     !Array.isArray(value.buildSteps) ||
     !Array.isArray(value.stateUpdates) ||
@@ -35,6 +46,15 @@ export function getChannelsFromPlan(plan: SandboxMessagingPlan | null | undefine
   return plan.channels.map((c) => c.channelId);
 }
 
+/** Derive only enabled channel IDs from a plan (excludes disabled channels). */
+export function getEnabledChannelIdsFromPlan(
+  plan: SandboxMessagingPlan | null | undefined,
+): string[] | null {
+  if (!plan) return null;
+  const ids = [...enabledPlanChannelIds(plan)];
+  return ids.length > 0 ? ids : null;
+}
+
 /** Derive the equivalent of session.disabledChannels from a plan. */
 export function getDisabledChannelsFromPlan(
   plan: SandboxMessagingPlan | null | undefined,
@@ -45,7 +65,17 @@ export function getDisabledChannelsFromPlan(
 
 /** Derive the messaging network policy presets for active channels from a plan. */
 export function getPolicyPresetsFromPlan(plan: SandboxMessagingPlan | null | undefined): string[] {
-  return plan?.networkPolicy.presets ? [...plan.networkPolicy.presets] : [];
+  if (!plan) return [];
+  const activeEntries = filterEnabledPlanEntries(plan, plan.networkPolicy.entries);
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const entry of activeEntries) {
+    if (entry.presetName && !seen.has(entry.presetName)) {
+      seen.add(entry.presetName);
+      result.push(entry.presetName);
+    }
+  }
+  return result;
 }
 
 
