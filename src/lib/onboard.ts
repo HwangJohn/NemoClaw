@@ -5796,8 +5796,6 @@ async function setupPoliciesWithSelection(
   sandboxName: string,
   options: SetupPolicySelectionOptions = {},
 ) {
-  const sessionPlan = onboardSession.loadSession()?.messagingPlan;
-  const messagingChannelIds = sessionPlan?.channels.map((c) => c.channelId) ?? null;
   const selectedTier = await setupPoliciesWithSelectionImpl(
     {
       policies,
@@ -5815,7 +5813,7 @@ async function setupPoliciesWithSelection(
       env: process.env,
     },
     sandboxName,
-    { messagingChannelIds, ...options },
+    options,
   );
   return selectedTier;
 }

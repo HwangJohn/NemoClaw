@@ -69,6 +69,7 @@ export interface PoliciesStateOptions<Agent, WebSearchConfig> {
       options: {
         selectedPresets: string[] | null;
         messagingPolicyPresets: string[];
+        messagingChannelIds: string[] | null;
         webSearchConfig: WebSearchConfig | null;
         provider: string;
         agent?: string | null;
@@ -183,6 +184,7 @@ export async function handlePoliciesState<Agent, WebSearchConfig>({
         ? recordedPolicyPresetsForSupport
         : null,
       messagingPolicyPresets,
+      messagingChannelIds: latestSession?.messagingPlan?.channels.map((c) => c.channelId) ?? null,
       webSearchConfig,
       provider,
       // selectOnboardAgent returns null for the default OpenClaw path (no
