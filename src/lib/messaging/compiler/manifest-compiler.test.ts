@@ -268,6 +268,12 @@ describe("ManifestCompiler", () => {
       policyKeys: ["wechat_bridge"],
       source: "manifest",
     });
+    expect(plan.networkPolicy.entries.find((entry) => entry.channelId === "telegram")).toEqual({
+      channelId: "telegram",
+      presetName: "telegram",
+      policyKeys: ["telegram"],
+      source: "agent-alias",
+    });
     expect(plan.agentRender.map((render) => `${render.channelId}:${render.target}`)).toEqual([
       "telegram:~/.hermes/.env",
       "telegram:~/.hermes/config.yaml",

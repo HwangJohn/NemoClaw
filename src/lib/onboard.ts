@@ -508,7 +508,10 @@ import {
   setupHermesToolGateways,
   stringSetsEqual,
 } from "./onboard/hermes-managed-tools";
-import { getPolicyPresetsFromPlan } from "./onboard/messaging-plan-session";
+import {
+  getEnabledChannelIdsFromPlan,
+  getPolicyPresetsFromPlan,
+} from "./onboard/messaging-plan-session";
 import {
   filterEnabledChannelsByAgent,
   resolveQrSelectedChannels,
@@ -3347,14 +3350,16 @@ async function createSandbox(
     dockerGpuSandboxCreate.resolveDockerGpuSandboxCreatePlan(effectiveSandboxGpuConfig, {
       dockerDriverGateway: isLinuxDockerDriverGatewayEnabled(),
     });
+  const activeMessagingPlan = messagingPlan ?? readMessagingPlanFromEnv();
+  const planEnabledMessagingChannels = getEnabledChannelIdsFromPlan(activeMessagingPlan);
   const initialSandboxPolicy = prepareInitialSandboxCreatePolicy(
     basePolicyPath,
-    activeMessagingChannels,
+    planEnabledMessagingChannels ?? activeMessagingChannels,
     {
       directGpu: effectiveSandboxGpuConfig.sandboxGpuEnabled,
       dockerGpuPatch: useDockerGpuPatch,
       additionalPresets: hermesToolGateways,
-      messagingPolicyPresets: getPolicyPresetsFromPlan(messagingPlan ?? readMessagingPlanFromEnv()),
+      messagingPolicyPresets: getPolicyPresetsFromPlan(activeMessagingPlan),
     },
   );
   if (initialSandboxPolicy.cleanup) {
@@ -6542,13 +6547,14 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
       model,
       endpointUrl,
       credentialEnv,
-      messagingPolicyPresets: getPolicyPresetsFromPlan(onboardSession.loadSession()?.messagingPlan),
+      selectedMessagingChannels,
       webSearchConfig,
       webSearchSupported,
       hermesToolGateways,
       agent,
       deps: {
         loadSession: onboardSession.loadSession,
+        getActiveSandbox: (name) => registry.getSandbox(name),
         verifyCompatibleEndpointSandboxSmoke: (options) =>
           verifyCompatibleEndpointSandboxSmoke({
             ...options,

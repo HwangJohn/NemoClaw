@@ -5,6 +5,10 @@ import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
 
+import {
+  messagingPolicyKeysByChannel,
+  requiredMessagingChannelPolicyPresets,
+} from "../messaging/applier/policy-presets";
 import * as policies from "../policy";
 import { requiredOpenclawOtelPolicyPresets } from "./openclaw-otel-policy-presets";
 import { cleanupTempDir, secureTempFile } from "./temp-files";
@@ -13,13 +17,6 @@ export type InitialSandboxPolicy = {
   policyPath: string;
   appliedPresets: string[];
   cleanup?: () => boolean;
-};
-
-const HERMES_MESSAGING_POLICY_KEYS: Record<string, string[]> = {
-  discord: ["discord"],
-  slack: ["slack"],
-  telegram: ["telegram"],
-  wechat: ["wechat_bridge"],
 };
 
 const PROC_PATH = "/proc";
@@ -181,7 +178,7 @@ function filterHermesInactiveMessagingPolicies(
 
   const active = new Set(activeMessagingChannels);
   let changed = false;
-  for (const [channel, policyKeys] of Object.entries(HERMES_MESSAGING_POLICY_KEYS)) {
+  for (const [channel, policyKeys] of Object.entries(messagingPolicyKeysByChannel("hermes"))) {
     if (active.has(channel)) continue;
     for (const key of policyKeys) {
       if (Object.prototype.hasOwnProperty.call(parsed.network_policies, key)) {
@@ -210,7 +207,7 @@ export function prepareInitialSandboxCreatePolicy(
     dockerGpuPatch?: boolean;
     additionalPresets?: string[];
     agentName?: string | null;
-    messagingPolicyPresets?: string[];
+    messagingPolicyPresets?: string[] | null;
   } = {},
 ): InitialSandboxPolicy {
   const directGpuPolicy = options.directGpu
@@ -226,7 +223,7 @@ export function prepareInitialSandboxCreatePolicy(
       : undefined;
   const requestedCreateTimePresets = [
     ...new Set([
-      ...(options.messagingPolicyPresets ?? []),
+      ...(options.messagingPolicyPresets ?? requiredMessagingChannelPolicyPresets(activeMessagingChannels)),
       ...requiredOpenclawOtelPolicyPresets(options.agentName ?? "openclaw"),
       ...(options.additionalPresets || []),
     ]),

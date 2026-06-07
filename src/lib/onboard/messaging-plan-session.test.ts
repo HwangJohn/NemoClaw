@@ -50,14 +50,14 @@ function makePlan(
 }
 
 describe("getPolicyPresetsFromPlan", () => {
-  it("returns empty array for null/undefined", () => {
-    expect(getPolicyPresetsFromPlan(null)).toEqual([]);
-    expect(getPolicyPresetsFromPlan(undefined)).toEqual([]);
+  it("returns null for null/undefined plans", () => {
+    expect(getPolicyPresetsFromPlan(null)).toBeNull();
+    expect(getPolicyPresetsFromPlan(undefined)).toBeNull();
   });
 
   it("returns presets for all active channels", () => {
     const plan = makePlan(["slack", "telegram"]);
-    expect(getPolicyPresetsFromPlan(plan).sort()).toEqual(["slack", "telegram"]);
+    expect(getPolicyPresetsFromPlan(plan)?.sort()).toEqual(["slack", "telegram"]);
   });
 
   it("excludes presets for disabled channels", () => {
@@ -163,7 +163,7 @@ describe("getEnabledChannelIdsFromPlan", () => {
     expect(getEnabledChannelIdsFromPlan(plan)).toEqual(["slack"]);
   });
 
-  it("returns null when all channels are disabled", () => {
+  it("returns empty array when a plan has no enabled channels", () => {
     const plan = makePlan(["telegram"], {
       channels: [
         {
@@ -180,7 +180,7 @@ describe("getEnabledChannelIdsFromPlan", () => {
       ],
       disabledChannels: ["telegram"],
     });
-    expect(getEnabledChannelIdsFromPlan(plan)).toBeNull();
+    expect(getEnabledChannelIdsFromPlan(plan)).toEqual([]);
   });
 });
 

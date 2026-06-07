@@ -163,10 +163,14 @@ network_policies:
     expect(getNetworkPolicyNames("network_policies: [unterminated")).toBeNull();
   });
 
-  it("keeps the base policy when no channel needs a create-time preset", () => {
+  it("keeps the base policy when the compiled plan has no active messaging preset", () => {
     const basePolicyPath = tmpPolicy("version: 1\nnetwork_policies:\n  base: {}\n");
 
-    expect(prepareInitialSandboxCreatePolicy(basePolicyPath, ["telegram"])).toEqual({
+    expect(
+      prepareInitialSandboxCreatePolicy(basePolicyPath, ["telegram"], {
+        messagingPolicyPresets: [],
+      }),
+    ).toEqual({
       policyPath: basePolicyPath,
       appliedPresets: [],
     });

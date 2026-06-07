@@ -42,7 +42,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 /** Derive the equivalent of session.messagingChannels from a plan. */
 export function getChannelsFromPlan(plan: SandboxMessagingPlan | null | undefined): string[] | null {
-  if (!plan || plan.channels.length === 0) return null;
+  if (!plan) return null;
   return plan.channels.map((c) => c.channelId);
 }
 
@@ -52,7 +52,7 @@ export function getEnabledChannelIdsFromPlan(
 ): string[] | null {
   if (!plan) return null;
   const ids = [...enabledPlanChannelIds(plan)];
-  return ids.length > 0 ? ids : null;
+  return ids;
 }
 
 /** Derive the equivalent of session.disabledChannels from a plan. */
@@ -60,12 +60,12 @@ export function getDisabledChannelsFromPlan(
   plan: SandboxMessagingPlan | null | undefined,
 ): string[] | null {
   if (!plan) return null;
-  return plan.disabledChannels.length > 0 ? [...plan.disabledChannels] : null;
+  return [...plan.disabledChannels];
 }
 
 /** Derive the messaging network policy presets for active channels from a plan. */
-export function getPolicyPresetsFromPlan(plan: SandboxMessagingPlan | null | undefined): string[] {
-  if (!plan) return [];
+export function getPolicyPresetsFromPlan(plan: SandboxMessagingPlan | null | undefined): string[] | null {
+  if (!plan) return null;
   const activeEntries = filterEnabledPlanEntries(plan, plan.networkPolicy.entries);
   const seen = new Set<string>();
   const result: string[] = [];

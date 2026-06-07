@@ -794,18 +794,16 @@ exit 1
 
   describe("applyPreset disclosure logging", () => {
     it("logs egress endpoints before applying", () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-policy-log-"));
+      const previousHome = process.env.HOME;
+      process.env.HOME = tmpDir;
+      const resolveSpy = vi
+        .spyOn(resolveOpenshellModule, "resolveOpenshell")
+        .mockReturnValue("/bin/true");
       const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-      const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
-        throw new Error("exit");
-      });
 
       try {
-        try {
-          policies.applyPreset("test-sandbox", "npm");
-        } catch {
-          /* applyPreset may throw if sandbox not running — we only care about the log */
-        }
+        try { policies.applyPreset("test-sandbox", "npm"); } catch { /* log assertion only */ }
         const messages = logSpy.mock.calls.map((call) =>
           typeof call[0] === "string" ? call[0] : undefined,
         );
@@ -814,8 +812,10 @@ exit 1
         ).toBe(true);
       } finally {
         logSpy.mockRestore();
-        errSpy.mockRestore();
-        exitSpy.mockRestore();
+        resolveSpy.mockRestore();
+        if (previousHome === undefined) delete process.env.HOME;
+        else process.env.HOME = previousHome;
+        fs.rmSync(tmpDir, { recursive: true, force: true });
       }
     });
 

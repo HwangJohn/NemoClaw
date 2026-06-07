@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Session, SessionUpdates } from "../../../state/onboard-session";
-import { getEnabledChannelIdsFromPlan } from "../../messaging-plan-session";
+import {
+  type ActiveSandboxPolicyState,
+  resolveMessagingPolicyState,
+} from "../../messaging-policy-state";
 import { advanceTo, type OnboardStateTransitionResult } from "../result";
 
 // Inlined to avoid pulling sandbox-agent's transitive runner.ts deps into
@@ -31,13 +34,14 @@ export interface PoliciesStateOptions<Agent, WebSearchConfig> {
   model: string;
   endpointUrl: string | null;
   credentialEnv: string | null;
-  messagingPolicyPresets: string[];
+  selectedMessagingChannels: string[];
   webSearchConfig: WebSearchConfig | null;
   webSearchSupported: boolean;
   hermesToolGateways: string[];
   agent: Agent;
   deps: {
     loadSession(): Session | null;
+    getActiveSandbox(sandboxName: string): ActiveSandboxPolicyState | null | undefined;
     verifyCompatibleEndpointSandboxSmoke(options: {
       sandboxName: string;
       provider: string;
@@ -52,6 +56,8 @@ export interface PoliciesStateOptions<Agent, WebSearchConfig> {
       options: {
         recordedPolicyPresets: string[] | null;
         messagingPolicyPresets?: string[] | null;
+        messagingChannelIds?: string[] | null;
+        disabledChannels?: string[] | null;
         hermesToolGateways: string[];
         agent?: string | null;
         webSearchConfig: WebSearchConfig | null;
@@ -69,8 +75,9 @@ export interface PoliciesStateOptions<Agent, WebSearchConfig> {
       sandboxName: string,
       options: {
         selectedPresets: string[] | null;
-        messagingPolicyPresets: string[];
+        messagingPolicyPresets: string[] | null;
         messagingChannelIds: string[] | null;
+        disabledChannels?: string[] | null;
         webSearchConfig: WebSearchConfig | null;
         provider: string;
         agent?: string | null;
@@ -105,7 +112,7 @@ export async function handlePoliciesState<Agent, WebSearchConfig>({
   model,
   endpointUrl,
   credentialEnv,
-  messagingPolicyPresets,
+  selectedMessagingChannels,
   webSearchConfig,
   webSearchSupported,
   hermesToolGateways,
@@ -116,6 +123,17 @@ export async function handlePoliciesState<Agent, WebSearchConfig>({
   const recordedPolicyPresets = Array.isArray(latestSession?.policyPresets)
     ? latestSession.policyPresets
     : null;
+  const recordedMessagingChannels = Array.isArray(latestSession?.messagingChannels)
+    ? latestSession.messagingChannels
+    : [];
+  const activeSandbox = deps.getActiveSandbox(sandboxName);
+  const messagingPolicyState = resolveMessagingPolicyState({
+    plan: latestSession?.messagingPlan,
+    selectedChannels: selectedMessagingChannels,
+    recordedChannels: recordedMessagingChannels,
+    activeSandbox,
+    sessionDisabledChannels: latestSession?.disabledChannels,
+  });
 
   deps.verifyCompatibleEndpointSandboxSmoke({
     sandboxName,
@@ -123,15 +141,15 @@ export async function handlePoliciesState<Agent, WebSearchConfig>({
     model,
     endpointUrl,
     credentialEnv,
-    // The smoke check only needs to know whether messaging channels are active;
-    // treat all plan presets as active-channel signals for the provider guard.
-    messagingChannels: messagingPolicyPresets,
+    messagingChannels: messagingPolicyState.messagingChannelIds,
     agent,
   });
 
   const policyResumeSelection = deps.preparePolicyPresetResumeSelection(sandboxName, {
     recordedPolicyPresets,
-    messagingPolicyPresets,
+    messagingPolicyPresets: messagingPolicyState.messagingPolicyPresets,
+    messagingChannelIds: messagingPolicyState.messagingChannelIds,
+    disabledChannels: messagingPolicyState.disabledChannels,
     hermesToolGateways,
     agent: normalizeAgentName((agent as { name?: string } | null)?.name),
     webSearchConfig,
@@ -184,8 +202,9 @@ export async function handlePoliciesState<Agent, WebSearchConfig>({
       selectedPresets: Array.isArray(recordedPolicyPresets)
         ? recordedPolicyPresetsForSupport
         : null,
-      messagingPolicyPresets,
-      messagingChannelIds: getEnabledChannelIdsFromPlan(latestSession?.messagingPlan),
+      messagingPolicyPresets: messagingPolicyState.messagingPolicyPresets,
+      messagingChannelIds: messagingPolicyState.messagingChannelIds,
+      disabledChannels: messagingPolicyState.disabledChannels,
       webSearchConfig,
       provider,
       // selectOnboardAgent returns null for the default OpenClaw path (no

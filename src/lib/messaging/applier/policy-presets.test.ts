@@ -3,12 +3,31 @@
 
 import { describe, expect, it } from "vitest";
 
+import { createChannelManifestRegistry, type ChannelManifest } from "../manifest";
 import {
   ALL_MESSAGING_POLICY_PRESET_NAMES,
   filterActiveMessagingPresets,
   hasDisabledMessagingPreset,
+  messagingPolicyKeysByChannel,
   pruneDisabledMessagingPolicyPresets,
+  requiredMessagingChannelPolicyPresets,
 } from "./policy-presets";
+
+function manifest(id: string, policyPresets: ChannelManifest["policyPresets"]): ChannelManifest {
+  return {
+    schemaVersion: 1,
+    id,
+    displayName: id,
+    supportedAgents: ["openclaw", "hermes"],
+    auth: { mode: "token-paste" },
+    inputs: [],
+    credentials: [],
+    policyPresets,
+    render: [],
+    state: {},
+    hooks: [],
+  };
+}
 
 describe("pruneDisabledMessagingPolicyPresets", () => {
   it("removes policy presets for disabled messaging channels", () => {
@@ -42,6 +61,35 @@ describe("pruneDisabledMessagingPolicyPresets", () => {
 
   it("returns the original list unchanged when no channels are disabled", () => {
     expect(pruneDisabledMessagingPolicyPresets(["npm", "slack"], null)).toEqual(["npm", "slack"]);
+  });
+});
+
+describe("requiredMessagingChannelPolicyPresets", () => {
+  it("derives fallback channel presets from manifests", () => {
+    const registry = createChannelManifestRegistry([
+      manifest("matrix", [{ name: "matrix-policy", policyKeys: ["matrix_bridge"] }]),
+    ]);
+
+    expect(requiredMessagingChannelPolicyPresets(["matrix"], registry)).toEqual(["matrix-policy"]);
+    expect(pruneDisabledMessagingPolicyPresets(["npm", "matrix-policy"], ["matrix"], registry)).toEqual([
+      "npm",
+    ]);
+  });
+
+  it("derives agent policy keys from manifest aliases", () => {
+    const registry = createChannelManifestRegistry([
+      manifest("matrix", [
+        {
+          name: "matrix-policy",
+          policyKeys: ["matrix_default"],
+          agentPolicyKeys: { hermes: ["matrix_hermes"] },
+        },
+      ]),
+    ]);
+
+    expect(messagingPolicyKeysByChannel("hermes", registry)).toEqual({
+      matrix: ["matrix_hermes"],
+    });
   });
 });
 

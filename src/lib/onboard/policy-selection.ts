@@ -3,11 +3,6 @@
 
 import type { WebSearchConfig } from "../inference/web-search";
 import {
-  ALL_MESSAGING_POLICY_PRESET_NAMES,
-  filterActiveMessagingPresets,
-  hasDisabledMessagingPreset,
-} from "../messaging/applier/policy-presets";
-import {
   filterSetupPolicyPresetNamesForAgent,
   filterSetupPolicyPresetsForAgent,
   setupPolicyPresetAppliesToAgent,
@@ -17,6 +12,12 @@ import {
   HERMES_TOOL_GATEWAY_PRESET_NAMES,
   mergeRequiredHermesToolGatewayPolicyPresets,
 } from "./hermes-managed-tools";
+import {
+  filterMessagingPolicyPresetsForSelection,
+  hasMessagingPolicyPresetNeedingReconcile,
+  mergeRequiredMessagingPolicyPresets,
+  requiredMessagingPolicyPresets,
+} from "./messaging-policy-state";
 import {
   isOpenclawAgent,
   mergeRequiredOpenclawOtelPolicyPresets,
@@ -47,6 +48,7 @@ export type SetupPresetSuggestionOptions = {
   messagingPolicyPresets?: string[] | null;
   /** Channel IDs whose names map to known policy presets (e.g. "telegram", "discord"). */
   messagingChannelIds?: string[] | null;
+  disabledChannels?: string[] | null;
   webSearchConfig?: WebSearchConfig | null;
   provider?: string | null;
   agent?: string | null;
@@ -63,6 +65,7 @@ export type SetupPolicySelectionOptions = {
   messagingPolicyPresets?: string[] | null;
   /** Channel IDs whose names map to known policy presets (e.g. "telegram", "discord"). */
   messagingChannelIds?: string[] | null;
+  disabledChannels?: string[] | null;
   provider?: string | null;
   agent?: string | null;
   knownPresetNames?: string[];
@@ -105,6 +108,7 @@ export function mergeRequiredSetupPolicyPresets(
   policyPresets: string[],
   options: {
     messagingPolicyPresets?: string[] | null;
+    messagingChannelIds?: string[] | null;
     hermesToolGateways?: string[] | null;
     agent?: string | null;
     knownPresetNames?: string[] | Set<string> | null;
@@ -112,42 +116,24 @@ export function mergeRequiredSetupPolicyPresets(
   } = {},
 ): string[] {
   const agentFilteredPresets = filterSetupPolicyPresetNamesForAgent(policyPresets, options.agent);
-  const known = options.knownPresetNames
-    ? options.knownPresetNames instanceof Set
-      ? options.knownPresetNames
-      : new Set(options.knownPresetNames)
-    : null;
-
-  const withMessaging = mergePresetList(
+  const withMessaging = mergeRequiredMessagingPolicyPresets(
     mergeRequiredHermesToolGatewayPolicyPresets(
       agentFilteredPresets,
       options.hermesToolGateways,
       options.knownPresetNames,
     ),
-    options.messagingPolicyPresets ?? [],
-    known,
+    {
+      messagingPolicyPresets: options.messagingPolicyPresets,
+      messagingChannelIds: options.messagingChannelIds,
+      knownPresetNames: options.knownPresetNames,
+    },
   );
-
   const mergedPresets = mergeRequiredOpenclawOtelPolicyPresets(withMessaging, {
     agent: options.agent,
     knownPresetNames: options.knownPresetNames,
     env: options.env,
   });
   return filterSetupPolicyPresetNamesForAgent(mergedPresets, options.agent);
-}
-
-function mergePresetList(
-  base: string[],
-  additions: string[],
-  known: Set<string> | null,
-): string[] {
-  const merged = [...base];
-  for (const preset of additions) {
-    if (known && !known.has(preset)) continue;
-    if (merged.includes(preset)) continue;
-    merged.push(preset);
-  }
-  return merged;
 }
 
 export function isStaleBuiltinBravePolicyPreset(
@@ -202,35 +188,21 @@ export function computeSetupPresetSuggestions(
   if (tierName === "open" && typeof agent === "string" && agent.trim().toLowerCase() === "hermes") {
     for (const preset of allHermesToolGatewayPolicyPresets()) add(preset);
   }
-  for (const preset of messagingPolicyPresets ?? []) {
+  for (const preset of requiredMessagingPolicyPresets({
+    messagingPolicyPresets,
+    messagingChannelIds: options.messagingChannelIds,
+  })) {
     add(preset);
-  }
-  // Channel IDs that map directly to same-named policy presets (e.g. "telegram", "discord").
-  for (const channelId of options.messagingChannelIds ?? []) {
-    add(channelId);
   }
   if (Array.isArray(options.hermesToolGateways)) {
     for (const preset of options.hermesToolGateways) {
       if (HERMES_TOOL_GATEWAY_PRESET_NAMES.has(preset)) add(preset);
     }
   }
-  // When messaging state is explicitly provided, remove messaging presets not
-  // in the active set (e.g. disabled-channel presets that appear in open tiers).
-  if (messagingPolicyPresets !== null) {
-    const activeMessagingPresets = new Set([
-      ...messagingPolicyPresets,
-      ...(options.messagingChannelIds ?? []),
-    ]);
-    for (let i = suggestions.length - 1; i >= 0; i--) {
-      if (
-        ALL_MESSAGING_POLICY_PRESET_NAMES.has(suggestions[i]) &&
-        !activeMessagingPresets.has(suggestions[i])
-      ) {
-        suggestions.splice(i, 1);
-      }
-    }
-  }
-  return suggestions;
+  return filterMessagingPolicyPresetsForSelection(suggestions, {
+    messagingPolicyPresets,
+    disabledChannels: options.disabledChannels,
+  });
 }
 
 export function preparePolicyPresetResumeSelection(
@@ -239,6 +211,8 @@ export function preparePolicyPresetResumeSelection(
   options: {
     recordedPolicyPresets: string[] | null;
     messagingPolicyPresets?: string[] | null;
+    messagingChannelIds?: string[] | null;
+    disabledChannels?: string[] | null;
     hermesToolGateways?: string[] | null;
     agent?: string | null;
     webSearchConfig?: WebSearchConfig | null;
@@ -271,7 +245,14 @@ export function preparePolicyPresetResumeSelection(
       webSearchConfig: options.webSearchConfig,
       customPresetNames: customPolicyPresetNames,
     });
-  let policyPresets = clampedRecordedPolicyPresets.filter((name) => !isStaleBuiltinBrave(name));
+  const messagingSelection = {
+    messagingPolicyPresets: options.messagingPolicyPresets,
+    disabledChannels: options.disabledChannels,
+  };
+  let policyPresets = filterMessagingPolicyPresetsForSelection(
+    clampedRecordedPolicyPresets.filter((name) => !isStaleBuiltinBrave(name)),
+    messagingSelection,
+  );
   const recordedPolicyPresetsNeedReconcile =
     Array.isArray(options.recordedPolicyPresets) &&
     policyPresets.length !== options.recordedPolicyPresets.length;
@@ -284,20 +265,14 @@ export function preparePolicyPresetResumeSelection(
     )
     .filter((name) => !isStaleBuiltinBrave(name));
 
-  // Detect stale messaging presets: any applied preset that belongs to the
-  // messaging-policy set but is absent from the compiled plan's active presets.
-  // When present, the resume skip is bypassed so the policy step can remove them.
-  const planMessagingPresets = new Set(options.messagingPolicyPresets ?? []);
-  const disabledMessagingPolicyPresetApplied = hasDisabledMessagingPreset(
+  const disabledMessagingPolicyPresetApplied = hasMessagingPolicyPresetNeedingReconcile(
     appliedPolicyPresetsForSupport,
-    planMessagingPresets,
+    messagingSelection,
   );
 
-  // Merge any applied non-stale presets (minus the stale messaging ones) so the
-  // policy sync step can diff them out cleanly.
-  const appliedToPreserve = filterActiveMessagingPresets(
+  const appliedToPreserve = filterMessagingPolicyPresetsForSelection(
     appliedPolicyPresetsForSupport,
-    planMessagingPresets,
+    messagingSelection,
   );
   for (const preset of appliedToPreserve) {
     if (!policyPresets.includes(preset)) policyPresets.push(preset);
@@ -306,6 +281,7 @@ export function preparePolicyPresetResumeSelection(
   if (Array.isArray(options.recordedPolicyPresets)) {
     policyPresets = mergeRequiredSetupPolicyPresets(policyPresets, {
       messagingPolicyPresets: options.messagingPolicyPresets,
+      messagingChannelIds: options.messagingChannelIds,
       hermesToolGateways: options.hermesToolGateways,
       agent: options.agent,
       knownPresetNames: selectablePolicyPresets.map((preset) => preset.name),
@@ -344,6 +320,7 @@ async function setupPoliciesWithSelectionInner(
   const messagingChannelIds = Array.isArray(options.messagingChannelIds)
     ? options.messagingChannelIds
     : null;
+  const disabledChannels = Array.isArray(options.disabledChannels) ? options.disabledChannels : null;
   const provider = options.provider || null;
   const agent = options.agent || null;
   const hermesToolGateways = Array.isArray(options.hermesToolGateways)
@@ -376,13 +353,12 @@ async function setupPoliciesWithSelectionInner(
   );
   const isStaleBuiltinBrave = (name: string) =>
     isStaleBuiltinBravePolicyPreset(name, { webSearchConfig, customPresetNames });
-  // Preserve applied presets that are not stale messaging presets. Stale
-  // messaging presets (active in gateway but absent from the plan) are excluded
-  // so the sync step removes them.
-  const planMessagingPresets = new Set(messagingPolicyPresets ?? []);
-  const appliedForPreservation = filterActiveMessagingPresets(
+  const messagingSelection = { messagingPolicyPresets, disabledChannels };
+  const filterMessagingSelection = (presetNames: readonly string[]) =>
+    filterMessagingPolicyPresetsForSelection(presetNames, messagingSelection);
+  const appliedForPreservation = filterMessagingPolicyPresetsForSelection(
     applied.filter((name) => !isStaleBuiltinBrave(name)),
-    planMessagingPresets,
+    messagingSelection,
   );
   const filterSupportedPresetNames = (presetNames: string[]) =>
     filterSetupPolicyPresetNamesForAgent(presetNames, agent).filter(
@@ -403,11 +379,13 @@ async function setupPoliciesWithSelectionInner(
     const knownSelectablePresets = new Set(selectablePresets.map((preset) => preset.name));
     chosen = mergeRequiredSetupPolicyPresets(chosen, {
       messagingPolicyPresets,
+      messagingChannelIds,
       hermesToolGateways,
       agent,
       knownPresetNames: knownSelectablePresets,
       env: deps.env,
     });
+    chosen = filterMessagingSelection(chosen);
   }
 
   if (selectedPresets !== null) {
@@ -427,6 +405,7 @@ async function setupPoliciesWithSelectionInner(
   const suggestions = computeSetupPresetSuggestions(deps, tierName, {
     messagingPolicyPresets,
     messagingChannelIds,
+    disabledChannels,
     webSearchConfig,
     provider,
     agent,
@@ -472,11 +451,13 @@ async function setupPoliciesWithSelectionInner(
 
     chosen = mergeRequiredSetupPolicyPresets(chosen, {
       messagingPolicyPresets,
+      messagingChannelIds,
       hermesToolGateways,
       agent,
       knownPresetNames: knownPresets,
       env: deps.env,
     });
+    chosen = filterMessagingSelection(chosen);
 
     const invalidPresets = chosen.filter((name) => !knownPresets.has(name));
     if (invalidPresets.length > 0) {
@@ -517,15 +498,15 @@ async function setupPoliciesWithSelectionInner(
     ...suggestions.filter((name) => knownNames.has(name) && !applied.includes(name)),
   ];
   const resolvedPresets = await deps.selectTierPresetsAndAccess(tierName, allPresets, extraSelected);
-  const interactiveChoice = mergeRequiredSetupPolicyPresets(
-    resolvedPresets.map((preset) => preset.name),
-    {
+  const interactiveChoice = filterMessagingSelection(
+    mergeRequiredSetupPolicyPresets(resolvedPresets.map((preset) => preset.name), {
       messagingPolicyPresets,
+      messagingChannelIds,
       hermesToolGateways,
       agent,
       knownPresetNames: knownNames,
       env: deps.env,
-    },
+    }),
   );
 
   if (onSelection) onSelection(interactiveChoice);
