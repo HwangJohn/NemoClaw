@@ -2750,6 +2750,7 @@ async function createSandbox(
   sandboxGpuConfig: SandboxGpuConfig | null = null,
   resourceProfile: import("./resources-cmd").ResourceProfile | null = null,
   hermesToolGateways: string[] = [],
+  messagingPlan: import("./messaging/manifest").SandboxMessagingPlan | null = null,
 ) {
   step(6, 8, "Creating sandbox");
 
@@ -3379,7 +3380,7 @@ async function createSandbox(
       directGpu: effectiveSandboxGpuConfig.sandboxGpuEnabled,
       dockerGpuPatch: useDockerGpuPatch,
       additionalPresets: hermesToolGateways,
-      messagingPolicyPresets: getPolicyPresetsFromPlan(onboardSession.loadSession()?.messagingPlan),
+      messagingPolicyPresets: getPolicyPresetsFromPlan(messagingPlan ?? readMessagingPlanFromEnv()),
     },
   );
   if (initialSandboxPolicy.cleanup) {
@@ -5820,6 +5821,8 @@ async function setupPoliciesWithSelection(
   sandboxName: string,
   options: SetupPolicySelectionOptions = {},
 ) {
+  const sessionPlan = onboardSession.loadSession()?.messagingPlan;
+  const messagingChannelIds = sessionPlan?.channels.map((c) => c.channelId) ?? null;
   const selectedTier = await setupPoliciesWithSelectionImpl(
     {
       policies,
@@ -5837,7 +5840,7 @@ async function setupPoliciesWithSelection(
       env: process.env,
     },
     sandboxName,
-    options,
+    { messagingChannelIds, ...options },
   );
   return selectedTier;
 }

@@ -11,7 +11,8 @@ const {
   computeSetupPresetSuggestions: (
     tierName: string,
     options: {
-      enabledChannels?: string[] | null;
+      messagingPolicyPresets?: string[] | null;
+      messagingChannelIds?: string[] | null;
       knownPresetNames: string[];
       provider?: string | null;
       agent?: string | null;
@@ -170,14 +171,14 @@ describe("onboard policy preset suggestions", () => {
   it("adds openclaw-pricing to tier suggestions when agent is openclaw", () => {
     const knownWithPricing = [...known, "openclaw-pricing"];
     const openclawSuggestions = computeSetupPresetSuggestions("balanced", {
-      enabledChannels: [],
+      messagingPolicyPresets: [],
       knownPresetNames: knownWithPricing,
       agent: "openclaw",
     });
     expect(openclawSuggestions).toContain("openclaw-pricing");
 
     const hermesSuggestions = computeSetupPresetSuggestions("balanced", {
-      enabledChannels: [],
+      messagingPolicyPresets: [],
       knownPresetNames: knownWithPricing,
       agent: "hermes",
     });
@@ -185,20 +186,20 @@ describe("onboard policy preset suggestions", () => {
 
     // Default/blank agents are OpenClaw in the lower-level helpers too.
     const nullAgentSuggestions = computeSetupPresetSuggestions("balanced", {
-      enabledChannels: [],
+      messagingPolicyPresets: [],
       knownPresetNames: knownWithPricing,
       agent: null,
     });
     expect(nullAgentSuggestions).toContain("openclaw-pricing");
 
     const omittedAgentSuggestions = computeSetupPresetSuggestions("balanced", {
-      enabledChannels: [],
+      messagingPolicyPresets: [],
       knownPresetNames: knownWithPricing,
     });
     expect(omittedAgentSuggestions).toContain("openclaw-pricing");
 
     const blankAgentSuggestions = computeSetupPresetSuggestions("balanced", {
-      enabledChannels: [],
+      messagingPolicyPresets: [],
       knownPresetNames: knownWithPricing,
       agent: " ",
     });
@@ -208,7 +209,7 @@ describe("onboard policy preset suggestions", () => {
   it("adds local OTEL policy to tier suggestions only when OpenClaw OTEL is enabled", () => {
     const knownWithOtel = [...known, "openclaw-pricing", "openclaw-diagnostics-otel-local"];
     const openclawSuggestions = computeSetupPresetSuggestions("balanced", {
-      enabledChannels: [],
+      messagingPolicyPresets: [],
       knownPresetNames: knownWithOtel,
       agent: "openclaw",
       env: { NEMOCLAW_OPENCLAW_OTEL: "1" },
@@ -216,7 +217,7 @@ describe("onboard policy preset suggestions", () => {
     expect(openclawSuggestions).toContain("openclaw-diagnostics-otel-local");
 
     const remoteSuggestions = computeSetupPresetSuggestions("balanced", {
-      enabledChannels: [],
+      messagingPolicyPresets: [],
       knownPresetNames: knownWithOtel,
       agent: "openclaw",
       env: {
@@ -227,7 +228,7 @@ describe("onboard policy preset suggestions", () => {
     expect(remoteSuggestions).not.toContain("openclaw-diagnostics-otel-local");
 
     const disabledSuggestions = computeSetupPresetSuggestions("balanced", {
-      enabledChannels: [],
+      messagingPolicyPresets: [],
       knownPresetNames: knownWithOtel,
       agent: "openclaw",
       env: { NEMOCLAW_OPENCLAW_OTEL: "0" },
@@ -237,7 +238,7 @@ describe("onboard policy preset suggestions", () => {
 
   it("returns balanced tier defaults without messaging presets when no channels enabled", () => {
     const suggestions = computeSetupPresetSuggestions("balanced", {
-      enabledChannels: [],
+      messagingPolicyPresets: [],
       knownPresetNames: known,
     });
     expect(suggestions).toEqual(["npm", "pypi", "huggingface", "brew", "weather"]);
@@ -245,7 +246,7 @@ describe("onboard policy preset suggestions", () => {
 
   it("adds Brave to balanced tier defaults only when web search is configured", () => {
     const suggestions = computeSetupPresetSuggestions("balanced", {
-      enabledChannels: [],
+      messagingPolicyPresets: [],
       knownPresetNames: known,
       webSearchConfig: { fetchEnabled: true },
       webSearchSupported: true,
@@ -255,7 +256,7 @@ describe("onboard policy preset suggestions", () => {
 
   it("filters tier defaults to known presets for agent-specific onboarding", () => {
     const suggestions = computeSetupPresetSuggestions("balanced", {
-      enabledChannels: [],
+      messagingPolicyPresets: [],
       knownPresetNames: known.filter((name) => name !== "brave"),
     });
     expect(suggestions).toEqual(["npm", "pypi", "huggingface", "brew", "weather"]);
@@ -275,7 +276,7 @@ describe("onboard policy preset suggestions", () => {
 
   it("drops Brave tier defaults when web search is unsupported", () => {
     const suggestions = computeSetupPresetSuggestions("balanced", {
-      enabledChannels: [],
+      messagingPolicyPresets: [],
       knownPresetNames: known,
       webSearchSupported: false,
     });
@@ -285,7 +286,7 @@ describe("onboard policy preset suggestions", () => {
   it("adds all Hermes Nous tool policy presets for Hermes open tier only", () => {
     const knownWithPricing = [...known, "openclaw-pricing"];
     const hermesOpen = computeSetupPresetSuggestions("open", {
-      enabledChannels: [],
+      messagingPolicyPresets: [],
       knownPresetNames: knownWithPricing,
       agent: "hermes",
     });
@@ -297,7 +298,7 @@ describe("onboard policy preset suggestions", () => {
     expect(hermesOpen).not.toContain("openclaw-pricing");
 
     const openclawOpen = computeSetupPresetSuggestions("open", {
-      enabledChannels: [],
+      messagingPolicyPresets: [],
       knownPresetNames: knownWithPricing,
       agent: "openclaw",
     });
@@ -332,7 +333,7 @@ describe("onboard policy preset suggestions", () => {
 
   it("does not add explicitly requested Hermes Nous presets to OpenClaw suggestions", () => {
     const suggestions = computeSetupPresetSuggestions("balanced", {
-      enabledChannels: [],
+      messagingPolicyPresets: [],
       knownPresetNames: known,
       agent: "openclaw",
       hermesToolGateways: ["nous-web", "nous-code"],
@@ -343,7 +344,7 @@ describe("onboard policy preset suggestions", () => {
 
   it("forwards enabled messaging channels into tier suggestions", () => {
     const suggestions = computeSetupPresetSuggestions("balanced", {
-      enabledChannels: ["telegram"],
+      messagingChannelIds: ["telegram"],
       knownPresetNames: known,
     });
     expect(suggestions).toContain("telegram");
@@ -351,7 +352,7 @@ describe("onboard policy preset suggestions", () => {
     expect(suggestions).not.toContain("brave");
 
     const multi = computeSetupPresetSuggestions("balanced", {
-      enabledChannels: ["discord", "slack"],
+      messagingChannelIds: ["discord", "slack"],
       knownPresetNames: known,
     });
     expect(multi).toContain("discord");
@@ -360,7 +361,7 @@ describe("onboard policy preset suggestions", () => {
 
   it("does not duplicate channels already present in the tier", () => {
     const suggestions = computeSetupPresetSuggestions("open", {
-      enabledChannels: ["telegram", "slack"],
+      messagingChannelIds: ["telegram", "slack"],
       knownPresetNames: known,
     });
     expect(suggestions.filter((name: string) => name === "telegram")).toHaveLength(1);
@@ -369,7 +370,7 @@ describe("onboard policy preset suggestions", () => {
 
   it("drops channel names that are not known presets", () => {
     const suggestions = computeSetupPresetSuggestions("balanced", {
-      enabledChannels: ["telegram", "not-a-real-preset"],
+      messagingChannelIds: ["telegram", "not-a-real-preset"],
       knownPresetNames: known,
     });
     expect(suggestions).toContain("telegram");
@@ -401,9 +402,9 @@ describe("onboard policy preset suggestions", () => {
     ).toContain("local-inference");
   });
 
-  it("ignores enabledChannels when null", () => {
+  it("ignores messagingChannelIds when null", () => {
     const suggestions = computeSetupPresetSuggestions("balanced", {
-      enabledChannels: null,
+      messagingChannelIds: null,
       knownPresetNames: known,
     });
     expect(suggestions).not.toContain("telegram");

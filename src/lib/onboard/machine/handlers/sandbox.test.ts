@@ -167,6 +167,7 @@ describe("handleSandboxState", () => {
       { sandboxGpuEnabled: false, mode: "0" },
       null,
       [],
+      null,
     );
     expect(calls.updateSandbox).toHaveBeenCalledWith("my-assistant", expect.objectContaining({ model: "model", provider: "provider" }));
     // Default-marking is deferred to finalization (#4614) — the sandbox step must not set it.
@@ -318,6 +319,7 @@ describe("handleSandboxState", () => {
       { sandboxGpuEnabled: false, mode: "0" },
       null,
       [],
+      null,
     );
     expect(result.webSearchConfig).toBeNull();
   });

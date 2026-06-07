@@ -41,6 +41,8 @@ type TiersApi = {
 
 export type SetupPresetSuggestionOptions = {
   messagingPolicyPresets?: string[] | null;
+  /** Channel IDs whose names map to known policy presets (e.g. "telegram", "discord"). */
+  messagingChannelIds?: string[] | null;
   webSearchConfig?: WebSearchConfig | null;
   provider?: string | null;
   agent?: string | null;
@@ -55,6 +57,8 @@ export type SetupPolicySelectionOptions = {
   onSelection?: ((policyPresets: string[]) => void) | null;
   webSearchConfig?: WebSearchConfig | null;
   messagingPolicyPresets?: string[] | null;
+  /** Channel IDs whose names map to known policy presets (e.g. "telegram", "discord"). */
+  messagingChannelIds?: string[] | null;
   provider?: string | null;
   agent?: string | null;
   knownPresetNames?: string[];
@@ -197,9 +201,29 @@ export function computeSetupPresetSuggestions(
   for (const preset of messagingPolicyPresets ?? []) {
     add(preset);
   }
+  // Channel IDs that map directly to same-named policy presets (e.g. "telegram", "discord").
+  for (const channelId of options.messagingChannelIds ?? []) {
+    add(channelId);
+  }
   if (Array.isArray(options.hermesToolGateways)) {
     for (const preset of options.hermesToolGateways) {
       if (HERMES_TOOL_GATEWAY_PRESET_NAMES.has(preset)) add(preset);
+    }
+  }
+  // When messaging state is explicitly provided, remove messaging presets not
+  // in the active set (e.g. disabled-channel presets that appear in open tiers).
+  if (messagingPolicyPresets !== null) {
+    const activeMessagingPresets = new Set([
+      ...messagingPolicyPresets,
+      ...(options.messagingChannelIds ?? []),
+    ]);
+    for (let i = suggestions.length - 1; i >= 0; i--) {
+      if (
+        ALL_MESSAGING_POLICY_PRESET_NAMES.has(suggestions[i]) &&
+        !activeMessagingPresets.has(suggestions[i])
+      ) {
+        suggestions.splice(i, 1);
+      }
     }
   }
   return suggestions;
@@ -312,6 +336,9 @@ async function setupPoliciesWithSelectionInner(
   const messagingPolicyPresets = Array.isArray(options.messagingPolicyPresets)
     ? options.messagingPolicyPresets
     : null;
+  const messagingChannelIds = Array.isArray(options.messagingChannelIds)
+    ? options.messagingChannelIds
+    : null;
   const provider = options.provider || null;
   const agent = options.agent || null;
   const hermesToolGateways = Array.isArray(options.hermesToolGateways)
@@ -395,6 +422,7 @@ async function setupPoliciesWithSelectionInner(
   deps.setPolicyTier?.(sandboxName, tierName);
   const suggestions = computeSetupPresetSuggestions(deps, tierName, {
     messagingPolicyPresets,
+    messagingChannelIds,
     webSearchConfig,
     provider,
     agent,

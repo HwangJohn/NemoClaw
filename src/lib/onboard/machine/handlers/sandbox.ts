@@ -84,6 +84,7 @@ export interface SandboxStateOptions<Gpu, Agent, WebSearchConfig, MessagingChann
       sandboxGpuConfig: SandboxGpuConfig,
       resourceProfile: ResourceProfile | null,
       hermesToolGateways: string[],
+      messagingPlan: SandboxMessagingPlan | null,
     ): Promise<string>;
     updateSandboxRegistry(sandboxName: string, updates: Record<string, unknown>): void;
     getSandboxAgentRegistryFields(agent: Agent, agentVersionKnown: boolean): Record<string, unknown>;
@@ -331,6 +332,7 @@ export async function handleSandboxState<Gpu, Agent, WebSearchConfig, MessagingC
           sandboxGpuConfig,
           resourceProfile,
           hermesToolGateways,
+          messagingPlan,
         ),
     );
     webSearchConfig = nextWebSearchConfig;

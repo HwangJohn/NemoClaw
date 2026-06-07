@@ -356,7 +356,7 @@ console.log = () => {};
   try {
     const chosen = await setupPoliciesWithSelection("test-sb", {
       selectedPresets: ["npm", "pypi"],
-      enabledChannels: ["slack"],
+      messagingPolicyPresets: ["slack"],
     });
     process.stdout.write(JSON.stringify({ chosen, appliedCalls, removedCalls, finalApplied: appliedState }) + "\n");
   } catch (err) {
@@ -390,7 +390,7 @@ console.log = () => {};
 (async () => {
   try {
     const chosen = await setupPoliciesWithSelection("test-sb", {
-      enabledChannels: ["slack"],
+      messagingPolicyPresets: ["slack"],
     });
     process.stdout.write(JSON.stringify({ chosen, appliedCalls, removedCalls, finalApplied: appliedState }) + "\n");
   } catch (err) {
@@ -424,7 +424,7 @@ console.log = () => {};
 (async () => {
   try {
     const chosen = await setupPoliciesWithSelection("test-sb", {
-      disabledChannels: ["slack"],
+      messagingPolicyPresets: [],
     });
     process.stdout.write(JSON.stringify({ chosen, appliedCalls, removedCalls, finalApplied: appliedState }) + "\n");
   } catch (err) {
@@ -455,7 +455,7 @@ console.log = () => {};
 (async () => {
   try {
     const chosen = await setupPoliciesWithSelection("test-sb", {
-      disabledChannels: ["slack"],
+      messagingPolicyPresets: [],
     });
     process.stdout.write(JSON.stringify({ chosen, appliedCalls, removedCalls, finalApplied: appliedState }) + "\n");
   } catch (err) {
