@@ -48,6 +48,7 @@ export function getPolicyPresetsFromPlan(plan: SandboxMessagingPlan | null | und
   return plan?.networkPolicy.presets ? [...plan.networkPolicy.presets] : [];
 }
 
+
 /**
  * Derive the equivalent of session.messagingChannelConfig from a plan.
  * Config inputs (kind === "config") carry their resolved env-key/value pairs
