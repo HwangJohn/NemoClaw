@@ -25,6 +25,57 @@ first, they are short and deliberately not redundant with prose:
 - [`../validation_suites/suites.yaml`](../validation_suites/suites.yaml)
   — ordered validation steps, each with a `requires_state` predicate.
 
+This hybrid model is transitional. The target architecture for #3588 is a
+single scenario runner that owns scenario resolution, orchestration, evidence
+collection, redaction, and assertion dispatch. Shell scripts should be kept to
+the smallest practical set of system-boundary probes or command fixtures, not a
+second planning or assertion-control runtime.
+
+## Current sources of truth
+
+Use the source that matches the task while the migration is in progress:
+
+| Task | Current source |
+| --- | --- |
+| Scenario workflow fan-out and live execution | `test/e2e-scenario/scenarios/registry.ts`, `test/e2e-scenario/scenarios/scenarios/baseline.ts`, and `test/e2e-scenario/scenarios/run.ts` |
+| Typed expected-state registry (single source of truth) | `test/e2e-scenario/scenarios/expected-states.ts` |
+| Product-facing desired setup/onboarding state | `test/e2e-scenario/manifests/*.yaml` |
+| Reusable live suite assertions | `test/e2e-scenario/validation_suites/` |
+| Existing nightly and platform E2E coverage | legacy `test/e2e/test-*.sh` scripts and their workflows |
+
+The near-term migration goal is to keep these surfaces aligned while coverage is
+being moved into scenario contracts and suites. The long-term goal is to remove
+the split between typed planning and shell execution. The legacy YAML resolver
+under `runtime/resolver/` and `nemoclaw_scenarios/expected-states.yaml` have
+been retired; the typed registry is the single source of truth for expected
+states. Do not add new legacy-style `test/e2e/test-*.sh` entrypoints unless
+there is a specific maintainer-approved reason.
+
+## Target runner model
+
+Future scenario coverage should move toward one runner with these properties:
+
+- the runner compiles one typed plan for each scenario and treats that plan as
+  the source of truth for setup, onboarding, expected state, suites, assertions,
+  evidence paths, and expected failures;
+- product-facing manifests remain declarative setup inputs, not executable test
+  programs;
+- assertion modules prefer TypeScript probes and typed client helpers;
+- shell is used only when the system under test is a shell command, host
+  process, container command, or platform-specific probe;
+- every shell call goes through a controlled spawn boundary with scoped
+  environment, timeout, redaction, artifact capture, and command/argument
+  validation;
+- bridge work that expands the YAML/bash runner must also identify how that
+  behavior will move into the single runner before legacy runner paths are
+  removed.
+
+The #4347-#4357 audit-phase issues should be read as acceptance coverage
+requirements, not as a permanent requirement to keep YAML resolver or bash
+runner deliverables. If a phase issue names YAML or shell-runner artifacts, map
+that requirement to equivalent single-runner behavior unless maintainers
+explicitly decide to keep a bridge path for the current migration step.
+
 ## Layered scenario model
 
 The E2E source of truth is layered as base environment, onboarding profile,
@@ -47,6 +98,10 @@ missing or wedged environment. An onboarding-phase failure does NOT
 block state-validation — negative scenarios depend on absent-state
 probes running after the deliberate onboarding failure to verify
 forbidden side effects (gateway/sandbox left behind) did not occur.
+
+The target single runner should collapse the legacy parallel YAML expressions
+(`base_scenarios`, `onboarding_profiles`, `test_plans`, `setup_scenarios`,
+`onboarding_assertions`) into the single executable typed plan model above.
 
 ## How to run
 
