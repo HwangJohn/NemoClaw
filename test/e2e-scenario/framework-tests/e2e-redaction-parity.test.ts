@@ -9,63 +9,43 @@
  *
  * The framework deliberately mirrors rather than imports — see the
  * "Framework-local mirror" comment in redaction.ts for why — but the
- * mirror is only safe if it is actually a mirror. This test parses
- * both source files at the textual level and compares the regex
- * literals.
+ * mirror is only safe if it is actually a mirror. This test imports
+ * the RegExp arrays from both modules and compares them by behavior
+ * (`.source` + `.flags`) rather than by source-text shape, so the
+ * source-shape budget (ci/source-shape-test-budget.json) stays at 0.
+ *
+ * The framework-runtime decoupling is preserved: redaction.ts itself
+ * does not import from src/lib/security/. Only this test crosses the
+ * boundary, which is the entire point of a parity test.
  */
 
 import { describe, expect, it } from "vitest";
-import fs from "node:fs";
-import path from "node:path";
 
-const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
+import {
+  CONTEXT_PATTERNS as FRAMEWORK_CONTEXT_PATTERNS,
+  TOKEN_PREFIX_PATTERNS as FRAMEWORK_TOKEN_PREFIX_PATTERNS,
+} from "../scenarios/orchestrators/redaction.ts";
+import {
+  CONTEXT_PATTERNS as PRODUCT_CONTEXT_PATTERNS,
+  TOKEN_PREFIX_PATTERNS as PRODUCT_TOKEN_PREFIX_PATTERNS,
+} from "../../../src/lib/security/secret-patterns.ts";
 
-// Pull only regex literals (lines starting with `/` and ending with
-// a flag set like /g or /gi). Filters out comment lines like `// NVIDIA`
-// that begin with `/` but are not regex.
-const REGEX_LITERAL_LINE = /^\/.+\/[a-z]*,?$/;
-
-function extractFromBlock(block: string): string[] {
-  return block
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => REGEX_LITERAL_LINE.test(line))
-    .map((line) => line.replace(/,\s*$/, ""));
-}
-
-function extractRegexLiterals(source: string, exportName: string): string[] {
-  const re = new RegExp(`export const ${exportName}[^=]*=\\s*\\[([\\s\\S]*?)\\];`, "m");
-  const m = source.match(re);
-  return m ? extractFromBlock(m[1]) : [];
-}
-
-function extractFrameworkArray(source: string, constName: string): string[] {
-  const re = new RegExp(`const ${constName}: RegExp\\[\\] = \\[([\\s\\S]*?)\\];`, "m");
-  const m = source.match(re);
-  return m ? extractFromBlock(m[1]) : [];
+function fingerprint(patterns: readonly RegExp[]): string[] {
+  return patterns.map((re) => `${re.source}::${re.flags}`);
 }
 
 describe("framework redaction parity with product source-of-truth", () => {
-  const productSource = fs.readFileSync(
-    path.join(REPO_ROOT, "src/lib/security/secret-patterns.ts"),
-    "utf8",
-  );
-  const frameworkSource = fs.readFileSync(
-    path.join(REPO_ROOT, "test/e2e-scenario/scenarios/orchestrators/redaction.ts"),
-    "utf8",
-  );
-
-  it("test_framework_TOKEN_PREFIX_PATTERNS_matches_product_source", () => {
-    const product = extractRegexLiterals(productSource, "TOKEN_PREFIX_PATTERNS");
-    const framework = extractFrameworkArray(frameworkSource, "TOKEN_PREFIX_PATTERNS");
+  it("framework TOKEN_PREFIX_PATTERNS matches product TOKEN_PREFIX_PATTERNS", () => {
+    const framework = fingerprint(FRAMEWORK_TOKEN_PREFIX_PATTERNS);
+    const product = fingerprint(PRODUCT_TOKEN_PREFIX_PATTERNS);
     expect(framework.length).toBeGreaterThan(0);
     expect(product.length).toBeGreaterThan(0);
     expect(framework).toEqual(product);
   });
 
-  it("test_framework_CONTEXT_PATTERNS_matches_product_source", () => {
-    const product = extractRegexLiterals(productSource, "CONTEXT_PATTERNS");
-    const framework = extractFrameworkArray(frameworkSource, "CONTEXT_PATTERNS");
+  it("framework CONTEXT_PATTERNS matches product CONTEXT_PATTERNS", () => {
+    const framework = fingerprint(FRAMEWORK_CONTEXT_PATTERNS);
+    const product = fingerprint(PRODUCT_CONTEXT_PATTERNS);
     expect(framework.length).toBeGreaterThan(0);
     expect(product.length).toBeGreaterThan(0);
     expect(framework).toEqual(product);

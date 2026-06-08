@@ -44,7 +44,12 @@ const REDACTED = "<REDACTED>";
 // asserts these regex sources stay in lockstep with the canonical
 // product source so adding a token shape there keeps both layers
 // honest at once.
-const TOKEN_PREFIX_PATTERNS: RegExp[] = [
+// Exported only so the parity test
+// (test/e2e-scenario/framework-tests/e2e-redaction-parity.test.ts) can
+// import the actual RegExp values rather than parsing source text.
+// Production code in this module continues to use them via the local
+// binding; nothing in the framework runtime imports these.
+export const TOKEN_PREFIX_PATTERNS: RegExp[] = [
   /nvapi-[A-Za-z0-9_-]{10,}/g,
   /nvcf-[A-Za-z0-9_-]{10,}/g,
   /ghp_[A-Za-z0-9_-]{10,}/g,
@@ -63,7 +68,7 @@ const TOKEN_PREFIX_PATTERNS: RegExp[] = [
   /\b[A-Za-z0-9]{24}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}\b/g,
 ];
 
-const CONTEXT_PATTERNS: RegExp[] = [
+export const CONTEXT_PATTERNS: RegExp[] = [
   /(?<=Bearer\s+)[A-Za-z0-9_.+/=-]{10,}/gi,
   /(?<=(?:_KEY|API_KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL)[=: ]['"]?)[A-Za-z0-9_.+/=-]{10,}/gi,
 ];
