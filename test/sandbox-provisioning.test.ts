@@ -506,6 +506,112 @@ describe("sandbox provisioning: image health checks (#1430)", () => {
         expect(probe.calls).not.toContain("pgrep");
       });
     });
+
+    // #4952: recent OpenClaw (v0.0.44 / 2026.5.18+) re-execs the long-running
+    // gateway into a process whose argv is plain `openclaw` — no `gateway`
+    // token at all (see the gateway_pid() helper in
+    // test/e2e/test-issue-2478-crash-loop-recovery.sh). The in-container curl
+    // probe fails (connection refused, exit 7) on runtime shapes where the
+    // dashboard port lives outside this namespace, so the healthcheck falls
+    // back to the in-container gateway-liveness check. A pgrep that only
+    // matches `openclaw[ -]gateway` cannot see the re-execed plain-`openclaw`
+    // process, so the marker-present container is reported permanently
+    // unhealthy even though the gateway is alive and serving.
+    //
+    // Unlike runProductionHealthProbe above (which forces pgrep's exit code
+    // and therefore can never exercise the pattern), this drives a pgrep mock
+    // that actually matches its `-f`/`-x` pattern against a simulated process
+    // table — so the probe's outcome depends on whether the HEALTHCHECK's
+    // pattern matches the real argv shape.
+    describe("matches the re-execed plain-`openclaw` gateway argv (#4952)", () => {
+      // Each entry is `comm|args`. `pgrep -f PAT` matches PAT (ERE) against
+      // args; `pgrep -x PAT` matches comm exactly; bare `pgrep PAT` matches
+      // PAT (ERE) against comm.
+      function runHealthProbeWithProcessTable(procTable: string[], curlExit = 7) {
+        const dockerfile = fs.readFileSync(DOCKERFILE, "utf-8");
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-health-argv-"));
+        const logPath = path.join(tmp, "gateway.log");
+        const markerPath = path.join(tmp, "nemoclaw-gateway-local");
+        const command = dockerHealthCommandBetween(
+          dockerfile,
+          "# Health check: poll the gateway's /health endpoint",
+          "# Entrypoint runs as root",
+        )
+          .replaceAll("/tmp/gateway.log", logPath)
+          .replaceAll("/tmp/nemoclaw-gateway-local", markerPath);
+
+        // Gateway is up and the marker is present: this container runs the
+        // in-container gateway, so the liveness fallback is meaningful.
+        fs.writeFileSync(logPath, "gateway log line\n");
+        fs.writeFileSync(markerPath, "");
+
+        const pgrepMock = [
+          "pgrep() {",
+          '  printf "pgrep %s\\n" "$*" >> "$call_log";',
+          "  local use_f=0 exact=0 pat='';",
+          '  for a in "$@"; do',
+          '    case "$a" in',
+          "      --ignore-ancestors) ;;",
+          "      -f) use_f=1 ;;",
+          "      -x) exact=1 ;;",
+          "      -*) ;;",
+          '      *) pat="$a" ;;',
+          "    esac;",
+          "  done;",
+          "  local found=1 oldifs=\"$IFS\" line comm args;",
+          "  IFS=$'\\n';",
+          '  for line in $FAKE_PROCS; do',
+          '    [ -n "$line" ] || continue;',
+          '    comm="${line%%|*}"; args="${line#*|}";',
+          '    if [ "$use_f" = 1 ]; then',
+          '      printf "%s" "$args" | grep -Eq "$pat" && { found=0; break; };',
+          '    elif [ "$exact" = 1 ]; then',
+          '      [ "$comm" = "$pat" ] && { found=0; break; };',
+          "    else",
+          '      printf "%s" "$comm" | grep -Eq "$pat" && { found=0; break; };',
+          "    fi;",
+          "  done;",
+          '  IFS="$oldifs"; return $found;',
+          "}",
+        ].join("\n");
+
+        try {
+          return runLoggedDockerShell(
+            command,
+            tmp,
+            [`curl() { printf "curl %s\\n" "$*" >> "$call_log"; return ${curlExit}; }`, pgrepMock],
+            { FAKE_PROCS: procTable.join("\n") },
+          );
+        } finally {
+          fs.rmSync(tmp, { recursive: true, force: true });
+        }
+      }
+
+      it("reports healthy when the live gateway re-execed to a plain `openclaw` argv", () => {
+        // The only openclaw process carries no `gateway` token anywhere in
+        // its argv — the exact shape #4952 reports.
+        const probe = runHealthProbeWithProcessTable(["openclaw|openclaw"]);
+        expect(probe.result.status).toBe(0);
+        expect(probe.calls).toContain("pgrep");
+      });
+
+      it("still reports healthy for the launcher-form `openclaw gateway run` argv", () => {
+        const probe = runHealthProbeWithProcessTable([
+          "openclaw|openclaw gateway run --port 18789",
+        ]);
+        expect(probe.result.status).toBe(0);
+      });
+
+      it("still reports healthy for the legacy re-execed `openclaw-gateway` argv", () => {
+        const probe = runHealthProbeWithProcessTable(["openclaw-gateway|openclaw-gateway --port 18789"]);
+        expect(probe.result.status).toBe(0);
+      });
+
+      it("reports unhealthy when no openclaw process is alive at all", () => {
+        const probe = runHealthProbeWithProcessTable(["bash|bash /usr/local/bin/nemoclaw-start"]);
+        expect(probe.result.status).toBe(1);
+      });
+    });
   });
 
   it.each([

@@ -935,10 +935,17 @@ RUN set -eu; \
 #           host-side delivery-chain monitoring (verify-deployment.ts, host
 #           port forward, sandbox status).
 #
-# The process pattern matches both `openclaw gateway run` (the launcher
-# command nemoclaw-start runs) and `openclaw-gateway` (the re-execed
-# binary form OpenClaw switches into after startup). This is the same
-# variant set the host-side gateway-stop script in services.ts matches.
+# The first pattern matches both `openclaw gateway run` (the launcher
+# command nemoclaw-start runs) and `openclaw-gateway` (the older re-execed
+# binary form). Recent OpenClaw (v0.0.44 / 2026.5.18+) re-execs the
+# long-running gateway into a process whose argv is plain `openclaw` with
+# no `gateway` token at all (#4952), which the first pattern cannot see —
+# so on a marker-present container whose in-container curl probe failed,
+# the stale pattern reported a live gateway as permanently unhealthy.
+# The `-x openclaw` fallback matches that re-execed form by exact process
+# name, mirroring the gateway_pid() helper in
+# test/e2e/test-issue-2478-crash-loop-recovery.sh (gateway-token match
+# first, bare-`openclaw` fallback second).
 #
 # pgrep uses --ignore-ancestors so it cannot self-match the healthcheck
 # shell that Docker spawns to run this CMD — that shell's argv contains
@@ -956,7 +963,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
         if [ "$rc" = 0 ]; then exit 0; fi; \
         if [ "$rc" != 7 ]; then exit 1; fi; \
         [ -f /tmp/nemoclaw-gateway-local ] || exit 0; \
-        pgrep --ignore-ancestors -f 'openclaw[ -]gateway' > /dev/null 2>&1 || exit 1; \
+        { pgrep --ignore-ancestors -f 'openclaw[ -]gateway' || pgrep --ignore-ancestors -x openclaw; } > /dev/null 2>&1 || exit 1; \
         [ -s /tmp/gateway.log ]
 
 # Entrypoint runs as root to start the gateway as the gateway user,
