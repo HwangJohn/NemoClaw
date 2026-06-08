@@ -32,7 +32,14 @@
 
 e2e_onboard_cloud_openclaw_no_docker() {
   e2e_env_apply_noninteractive
-  e2e_context_init
+  # Do NOT call e2e_context_init: the TS framework
+  # (ScenarioRunner.seedContextEnv) is the single owner of context.env
+  # initialization for the run. e2e_context_init opens with `: > ctx`
+  # which would truncate the file and wipe seeded keys (E2E_SCENARIO,
+  # E2E_SANDBOX_NAME, E2E_GATEWAY_URL) before the state-validation
+  # phase's gateway-absent / sandbox-absent probes run. Use
+  # e2e_context_set for additional keys only. Mirrors the contract
+  # documented in nemoclaw_scenarios/dispatch-action.sh.
 
   local log shim_dir rc=0
   log="${E2E_CONTEXT_DIR}/negative-preflight.log"

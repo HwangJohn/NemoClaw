@@ -8,6 +8,7 @@ import { compileRunPlans, renderPlanText, writePlanArtifacts } from "./compiler.
 import { ScenarioRunner } from "./orchestrators/runner.ts";
 import { listScenarios } from "./registry.ts";
 import { resolveRunnerForScenario } from "./runner-routing.ts";
+import { isScenarioFullyWired } from "./runtime-support.ts";
 import type { PhaseResult, ScenarioDefinition } from "./types.ts";
 
 interface Args {
@@ -85,20 +86,44 @@ function buildLabel(scenario: ScenarioDefinition): string {
 }
 
 /**
- * Build the GitHub Actions matrix for every scenario in the typed registry.
+ * Build the GitHub Actions matrix for every scenario in the typed registry
+ * that is currently fully wired end-to-end. Scenarios whose onboarding
+ * profile has no case in `nemoclaw_scenarios/onboard/dispatch.sh`, or
+ * whose `requiredSecrets` are not declared in the workflow, are filtered
+ * out and reported on stderr so the matrix never fans out into
+ * Mode-A `unsupported onboarding profile` failures or runs without the
+ * declared credential boundary.
+ *
  * Sorted by id so workflow runs are deterministic and diffable.
  */
 export function buildScenarioMatrix(): ScenarioMatrixEntry[] {
-  return listScenarios().map((scenario): ScenarioMatrixEntry => {
+  const skipped: Array<{ id: string; reasons: readonly string[] }> = [];
+  const matrix = listScenarios().flatMap((scenario): ScenarioMatrixEntry[] => {
+    const wired = isScenarioFullyWired(scenario);
+    if (!wired.ok) {
+      skipped.push({ id: scenario.id, reasons: wired.reasons });
+      return [];
+    }
     const { runner } = resolveRunnerForScenario(scenario);
-    return {
-      id: scenario.id,
-      runner,
-      label: buildLabel(scenario),
-      platform: scenario.environment?.platform ?? "unknown",
-      suites: scenario.suiteIds ?? [],
-    };
+    return [
+      {
+        id: scenario.id,
+        runner,
+        label: buildLabel(scenario),
+        platform: scenario.environment?.platform ?? "unknown",
+        suites: scenario.suiteIds ?? [],
+      },
+    ];
   });
+  if (skipped.length > 0) {
+    process.stderr.write(
+      `[buildScenarioMatrix] skipping ${skipped.length} not-yet-wired scenario(s):\n`,
+    );
+    for (const entry of skipped) {
+      process.stderr.write(`  - ${entry.id}: ${entry.reasons.join("; ")}\n`);
+    }
+  }
+  return matrix;
 }
 
 function emitMatrix() {

@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { buildScenarioMatrix } from "../scenarios/run.ts";
 import { listScenarios } from "../scenarios/registry.ts";
 import { resolveRunnerForScenario } from "../scenarios/runner-routing.ts";
+import { isScenarioFullyWired } from "../scenarios/runtime-support.ts";
 import { scenario } from "../scenarios/builder.ts";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
@@ -24,10 +25,17 @@ function runEmitMatrix() {
 }
 
 describe("typed scenario matrix", () => {
-  it("emits one matrix entry per registered scenario", () => {
+  it("emits one matrix entry per fully-wired registered scenario", () => {
+    // The matrix is intentionally a subset: scenarios whose onboarding
+    // profile is not routable by the bash dispatcher, or whose required
+    // secrets are not declared in the workflow, are filtered by
+    // isScenarioFullyWired (see scenarios/runtime-support.ts and the
+    // dedicated contract test e2e-scenario-fully-wired.test.ts).
     const matrix = buildScenarioMatrix();
-    const ids = listScenarios().map((s) => s.id);
-    expect(matrix.map((entry) => entry.id).sort()).toEqual([...ids].sort());
+    const wiredIds = listScenarios()
+      .filter((s) => isScenarioFullyWired(s).ok)
+      .map((s) => s.id);
+    expect(matrix.map((entry) => entry.id).sort()).toEqual([...wiredIds].sort());
   });
 
   it("resolves a runner label for every scenario", () => {
@@ -109,7 +117,11 @@ describe("typed scenario matrix", () => {
     expect(lines.length, "matrix output must be a single line").toBe(1);
     const parsed = JSON.parse(lines[0]);
     expect(Array.isArray(parsed)).toBe(true);
-    expect(parsed.length).toBe(listScenarios().length);
+    // Matrix length matches the fully-wired subset; runtime-support
+    // filtered the rest with structured reasons on stderr.
+    const wiredCount = listScenarios().filter((s) => isScenarioFullyWired(s).ok).length;
+    expect(parsed.length).toBe(wiredCount);
+    expect(parsed.length).toBeGreaterThan(0);
     for (const entry of parsed) {
       expect(entry).toMatchObject({
         id: expect.any(String),
