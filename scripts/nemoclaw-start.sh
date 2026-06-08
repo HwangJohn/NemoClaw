@@ -214,6 +214,16 @@ NEMOCLAW_CMD=("$@")
 mark_in_container_gateway() {
   : >/tmp/nemoclaw-gateway-local 2>/dev/null || true
 }
+
+# Record the PID of the live in-container gateway so the Docker HEALTHCHECK
+# can confirm the actual gateway process (not merely *some* `openclaw`
+# process) is still alive when the in-container curl probe cannot reach the
+# dashboard port (#4952). Refreshed on every (re)launch so a respawned gateway
+# is tracked and a window where the gateway is down reads as unhealthy.
+# Best-effort: a write failure must never block startup.
+record_gateway_pid() {
+  printf '%s\n' "${1:-}" >/tmp/nemoclaw-gateway.pid 2>/dev/null || true
+}
 # A non-empty NEMOCLAW_CMD means this container only runs a one-shot command
 # (e.g. `openclaw agent ...`) and never serves the gateway, so leave the marker
 # absent. Docker-driver sandboxes also leave it absent because OpenShell runs
@@ -3267,6 +3277,7 @@ if [ "$(id -u)" -ne 0 ]; then
   # Start gateway in background, auto-pair, then wait
   nohup "$OPENCLAW" gateway run --port "${_DASHBOARD_PORT}" >/tmp/gateway.log 2>&1 &
   GATEWAY_PID=$!
+  record_gateway_pid "$GATEWAY_PID"
   echo "[gateway] openclaw gateway launched (pid $GATEWAY_PID)" >&2
   # Diagnostic: mirror gateway log to PID 1's stderr — see root-mode block
   # below for rationale (NVIDIA/NemoClaw#2484).
@@ -3320,6 +3331,7 @@ if [ "$(id -u)" -ne 0 ]; then
     sleep 2
     nohup "$OPENCLAW" gateway run --port "${_DASHBOARD_PORT}" >>/tmp/gateway.log 2>&1 &
     GATEWAY_PID=$!
+    record_gateway_pid "$GATEWAY_PID"
     # shellcheck disable=SC2034  # read by cleanup_on_signal from sandbox-init.sh
     SANDBOX_WAIT_PID="$GATEWAY_PID"
     SANDBOX_CHILD_PIDS+=("$GATEWAY_PID")
@@ -3488,6 +3500,7 @@ validate_tmp_permissions "$_SANDBOX_SAFETY_NET" "$_PROXY_FIX_SCRIPT" "$_NEMOTRON
 # the agent cannot restart the gateway with a tampered config.
 nohup "${STEP_DOWN_PREFIX_GATEWAY[@]}" "$OPENCLAW" gateway run --port "${_DASHBOARD_PORT}" >/tmp/gateway.log 2>&1 &
 GATEWAY_PID=$!
+record_gateway_pid "$GATEWAY_PID"
 echo "[gateway] openclaw gateway launched as 'gateway' user (pid $GATEWAY_PID)" >&2
 
 # Diagnostic: mirror gateway log to PID 1's stderr so its content surfaces in
@@ -3573,6 +3586,7 @@ while :; do
   sleep 2
   nohup "${STEP_DOWN_PREFIX_GATEWAY[@]}" "$OPENCLAW" gateway run --port "${_DASHBOARD_PORT}" >>/tmp/gateway.log 2>&1 &
   GATEWAY_PID=$!
+  record_gateway_pid "$GATEWAY_PID"
   # shellcheck disable=SC2034  # read by cleanup_on_signal from sandbox-init.sh
   SANDBOX_WAIT_PID="$GATEWAY_PID"
   SANDBOX_CHILD_PIDS+=("$GATEWAY_PID")
