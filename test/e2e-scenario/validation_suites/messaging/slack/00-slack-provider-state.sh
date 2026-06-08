@@ -67,7 +67,10 @@ if [[ "${agent}" == "hermes" ]]; then
   # The Hermes venv is the same Python that loads config.yaml at runtime, so
   # PyYAML is guaranteed there even when the host runner ships a minimal
   # python3. Parsing inside the sandbox removes the awk fallback path.
-  platforms_state="$(openshell sandbox exec --name "${sandbox_name}" -- /opt/hermes/.venv/bin/python -c '
+  # Use e2e_sandbox_exec for per-call timeout + ssh-config-preferred /
+  # openshell-exec fallback. A wedged openshell sandbox exec without the
+  # wrapper can stall the suite indefinitely in live mode.
+  platforms_state="$(E2E_SANDBOX_EXEC_TIMEOUT_SECONDS=50 e2e_sandbox_exec "${sandbox_name}" -- /opt/hermes/.venv/bin/python -c '
 import sys
 import yaml
 
@@ -99,7 +102,7 @@ else:
       ;;
   esac
 
-  env_state="$(openshell sandbox exec --name "${sandbox_name}" -- sh -c 'grep -E "^SLACK_ALLOWED_CHANNELS=" /sandbox/.hermes/.env 2>/dev/null | head -n1' 2>/dev/null || true)"
+  env_state="$(E2E_SANDBOX_EXEC_TIMEOUT_SECONDS=20 e2e_sandbox_exec "${sandbox_name}" -- sh -c 'grep -E "^SLACK_ALLOWED_CHANNELS=" /sandbox/.hermes/.env 2>/dev/null | head -n1' 2>/dev/null || true)"
   case "${env_state}" in
     SLACK_ALLOWED_CHANNELS=*[!\ ]*)
       e2e_pass "expected-state.messaging.slack.hermes-allowed-channels-scoped allowlist present in .env"
@@ -121,7 +124,7 @@ else:
   gateway_log_basename=gateway.log
   gateway_log=""
   for log_path in "/sandbox/.hermes/logs/${gateway_log_basename}" "${tmp_dir}/${gateway_log_basename}"; do
-    chunk="$(openshell sandbox exec --name "${sandbox_name}" -- sh -c "tail -n 200 ${log_path} 2>/dev/null || true" 2>/dev/null || true)"
+    chunk="$(E2E_SANDBOX_EXEC_TIMEOUT_SECONDS=20 e2e_sandbox_exec "${sandbox_name}" -- sh -c "tail -n 200 ${log_path} 2>/dev/null || true" 2>/dev/null || true)"
     if [[ -n "${chunk}" ]]; then
       if [[ -n "${gateway_log}" ]]; then
         gateway_log="${gateway_log}"$'\n'"${chunk}"

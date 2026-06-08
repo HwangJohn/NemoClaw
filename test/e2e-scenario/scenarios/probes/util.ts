@@ -57,13 +57,27 @@ function tail(buf: string, max = TAIL_BYTES): string {
  * the sandbox-cmd path; not exported because direct bash spawning by
  * probes invites the same drift the canonical wrapper exists to
  * prevent.
+ *
+ * `bashArgs` are passed as positional parameters to the script via
+ * `bash -c <script> <name> <bashArgs...>` so user-controlled data
+ * (sandbox name, wrapper path, payload args) never gets interpolated
+ * into the shell command body. The script body references them as
+ * `"$1"`, `"$2"`, etc. CodeQL alert 715 (uncontrolled absolute path
+ * in shell command) is addressed by this contract.
  */
-function spawnBash(script: string, opts: RunOptions): Promise<CmdResult> {
+function spawnBash(
+  script: string,
+  opts: RunOptions,
+  bashArgs: readonly string[] = [],
+): Promise<CmdResult> {
   return new Promise((resolve) => {
     const startedAt = Date.now();
     let stdout = "";
     let stderr = "";
-    const child = spawn("bash", ["-c", script], {
+    // bash -c reserves the first positional after the script for $0.
+    // Use a fixed sentinel so the script's own $1..$N line up with
+    // the caller-supplied bashArgs.
+    const child = spawn("bash", ["-c", script, "e2e-probe-spawn", ...bashArgs], {
       env: opts.env ?? process.env,
       cwd: opts.cwd,
       stdio: [opts.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
@@ -113,9 +127,11 @@ function spawnBash(script: string, opts: RunOptions): Promise<CmdResult> {
  * preferred / openshell-exec fallback transport, the per-call
  * timeout, and the classified diagnostic on hang.
  *
- * `args` is treated as a single argv vector by the wrapper \u2014 each
- * element is single-quoted into the bash script body so payloads
- * with shell metacharacters survive intact.
+ * `args` is treated as a single argv vector by the wrapper. Each
+ * element is passed as a positional bash parameter (not
+ * interpolated into the script body) so payloads with shell
+ * metacharacters survive intact and no user-controlled data flows
+ * into the shell command string.
  */
 export async function runSandboxCmd(
   ctx: ProbeContext,
@@ -141,27 +157,33 @@ export async function runSandboxCmd(
       elapsedMs: 0,
     };
   }
-  // Quote each argv element with single-quote escapement: ' -> '\''.
-  const quotedArgs = args
-    .map((a) => `'${a.replace(/'/g, "'\\''")}'`)
-    .join(" ");
   const fnName = opts.stdin === undefined ? "e2e_sandbox_exec" : "e2e_sandbox_exec_stdin";
   // Per-call wrapper cap (bash-side timeout); outer node-side cap
   // sits a few seconds above so node always wins and we get a clean
   // CmdResult even if bash hangs mid-output.
   const perCall = opts.perCallSeconds ?? 25;
   const outerMs = opts.timeoutMs ?? perCall * 1000 + 5_000;
-  const sandboxQuoted = `'${ctx.sandboxName.replace(/'/g, "'\\''")}'`;
+  // All user-controlled values (wrapper path from ctx.repoRoot,
+  // sandbox name, payload argv) are passed as positional bash
+  // parameters rather than interpolated into the script body.
+  // Layout: $1=wrapperPath, $2=fnName, $3=sandboxName, $4..$N=argv.
+  // CodeQL alert 715 — "shell command built from environment
+  // values" — is cleared by this contract because no user data
+  // appears in the script string.
   const script = `set -uo pipefail
-. ${JSON.stringify(wrapperPath)}
-E2E_SANDBOX_EXEC_TIMEOUT_SECONDS=${perCall} ${fnName} ${sandboxQuoted} -- ${quotedArgs}
+. "$1"
+E2E_SANDBOX_EXEC_TIMEOUT_SECONDS=${perCall} "$2" "$3" -- "\${@:4}"
 `;
-  return spawnBash(script, {
-    timeoutMs: outerMs,
-    stdin: opts.stdin,
-    env: { ...process.env, E2E_CONTEXT_DIR: ctx.contextDir },
-    cwd: ctx.repoRoot,
-  });
+  return spawnBash(
+    script,
+    {
+      timeoutMs: outerMs,
+      stdin: opts.stdin,
+      env: { ...process.env, E2E_CONTEXT_DIR: ctx.contextDir },
+      cwd: ctx.repoRoot,
+    },
+    [wrapperPath, fnName, ctx.sandboxName, ...args],
+  );
 }
 
 /**
