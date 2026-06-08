@@ -53,23 +53,49 @@ function tail(buf: string, max = TAIL_BYTES): string {
 }
 
 /**
+ * Reject NUL bytes in any string that flows into a child process. Mirrors
+ * the defense-in-depth used by src/lib/runner.ts (normalizeSpawnFile /
+ * normalizeSpawnArgs) so probe-side spawns enforce the same boundary.
+ */
+function rejectNulByte(value: string, label: string): string {
+  if (value.includes("\u0000")) {
+    throw new Error(`${label} must not contain NUL bytes`);
+  }
+  return value;
+}
+
+/**
  * Spawn a bash script and capture the result. Internal helper used by
  * the sandbox-cmd path; not exported because direct bash spawning by
  * probes invites the same drift the canonical wrapper exists to
  * prevent.
  *
- * `bashArgs` are passed as positional parameters to the script via
- * `bash -c <script> <name> <bashArgs...>` so user-controlled data
- * (sandbox name, wrapper path, payload args) never gets interpolated
- * into the shell command body. The script body references them as
- * `"$1"`, `"$2"`, etc. CodeQL alert 715 (uncontrolled absolute path
- * in shell command) is addressed by this contract.
+ * Contract that addresses CodeQL js/shell-command-injection-from-environment:
+ *
+ *   1. The `script` parameter is always a string LITERAL at every call
+ *      site — callers do not interpolate user-controlled data into
+ *      the script body.
+ *   2. `bashArgs` carry all variable data and reach the script via
+ *      bash positional parameters ($1, $2, ...). Bash treats positional
+ *      argv as data, not code, so the values bypass parser expansion.
+ *   3. Every string in `bashArgs` is NUL-byte-rejected here — NUL is
+ *      the only byte process-spawn cannot survive cleanly.
+ *   4. The bash binary path is hard-coded; `shell: false` is implicit
+ *      because spawn() does not enable a shell when given an explicit
+ *      argv array.
+ *
+ * The lgtm suppression below is justified by this contract; it mirrors
+ * the established pattern in src/lib/runner.ts where the same rule is
+ * suppressed for argv arrays passed through `bash -c`.
  */
 function spawnBash(
   script: string,
   opts: RunOptions,
   bashArgs: readonly string[] = [],
 ): Promise<CmdResult> {
+  const safeArgs = bashArgs.map((arg, idx) =>
+    rejectNulByte(String(arg), `spawnBash: bashArgs[${idx + 1}]`),
+  );
   return new Promise((resolve) => {
     const startedAt = Date.now();
     let stdout = "";
@@ -77,7 +103,10 @@ function spawnBash(
     // bash -c reserves the first positional after the script for $0.
     // Use a fixed sentinel so the script's own $1..$N line up with
     // the caller-supplied bashArgs.
-    const child = spawn("bash", ["-c", script, "e2e-probe-spawn", ...bashArgs], {
+    // lgtm[js/shell-command-injection-from-environment] script body is a
+    //   string literal at every call site; safeArgs are NUL-validated and
+    //   reach the script as positional bash parameters, not via interpolation.
+    const child = spawn("bash", ["-c", script, "e2e-probe-spawn", ...safeArgs], {
       env: opts.env ?? process.env,
       cwd: opts.cwd,
       stdio: [opts.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
