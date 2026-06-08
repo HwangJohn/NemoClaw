@@ -293,6 +293,100 @@ describe("MessagingSetupApplier", () => {
     expect(message).not.toContain("tokensecretvalue");
   });
 
+  it("can resolve provider credentials outside process.env without storing raw values in the plan", async () => {
+    const plan = await buildOnboardPlan({ TELEGRAM_BOT_TOKEN: "123456:telegram-token" }, [
+      "telegram",
+    ]);
+    const calls: Array<{ args: readonly string[]; env?: Readonly<Record<string, string>> }> = [];
+
+    const result = MessagingSetupApplier.applyCredentialsAtOpenShell(plan, {
+      env: {},
+      resolveCredential: (envKey) =>
+        envKey === "TELEGRAM_BOT_TOKEN" ? "123456:stored-telegram-token" : null,
+      runOpenshell: (args, options) => {
+        calls.push({ args, env: options?.env });
+        if (args[0] === "provider" && args[1] === "get") return { status: 1 };
+        return { status: 0 };
+      },
+    });
+
+    expect(calls.map((call) => call.args)).toEqual([
+      ["provider", "get", "demo-telegram-bridge"],
+      [
+        "provider",
+        "create",
+        "--name",
+        "demo-telegram-bridge",
+        "--type",
+        "generic",
+        "--credential",
+        "TELEGRAM_BOT_TOKEN",
+      ],
+    ]);
+    expect(calls[1]?.env).toEqual({
+      TELEGRAM_BOT_TOKEN: "123456:stored-telegram-token",
+    });
+    expect(result.providerNames).toEqual(["demo-telegram-bridge"]);
+    expect(JSON.stringify(plan)).not.toContain("stored-telegram-token");
+  });
+
+  it("reuses existing gateway providers when the current credential is unavailable", async () => {
+    const plan = await buildOnboardPlan({ TELEGRAM_BOT_TOKEN: "123456:telegram-token" }, [
+      "telegram",
+    ]);
+    const calls: string[][] = [];
+
+    const result = MessagingSetupApplier.applyCredentialsAtOpenShell(plan, {
+      env: {},
+      runOpenshell: (args) => {
+        calls.push([...args]);
+        if (args[0] === "provider" && args[1] === "get") return { status: 0 };
+        return { status: 0 };
+      },
+    });
+
+    expect(calls).toEqual([["provider", "get", "demo-telegram-bridge"]]);
+    expect(result.upserted).toEqual([]);
+    expect(result.reused.map((entry) => entry.providerName)).toEqual([
+      "demo-telegram-bridge",
+    ]);
+    expect(result.providerNames).toEqual(["demo-telegram-bridge"]);
+  });
+
+  it("deletes and recreates existing providers when replacement is requested", async () => {
+    const plan = await buildOnboardPlan({ TELEGRAM_BOT_TOKEN: "123456:telegram-token" }, [
+      "telegram",
+    ]);
+    const calls: string[][] = [];
+
+    const result = MessagingSetupApplier.applyCredentialsAtOpenShell(plan, {
+      env: { TELEGRAM_BOT_TOKEN: "123456:telegram-token" },
+      replaceExisting: true,
+      runOpenshell: (args) => {
+        calls.push([...args]);
+        return { status: 0 };
+      },
+    });
+
+    expect(calls).toEqual([
+      ["provider", "get", "demo-telegram-bridge"],
+      ["provider", "delete", "demo-telegram-bridge"],
+      [
+        "provider",
+        "create",
+        "--name",
+        "demo-telegram-bridge",
+        "--type",
+        "generic",
+        "--credential",
+        "TELEGRAM_BOT_TOKEN",
+      ],
+    ]);
+    expect(result.upserted.map((entry) => `${entry.action}:${entry.providerName}`)).toEqual([
+      "create:demo-telegram-bridge",
+    ]);
+  });
+
   it("applies agent config render plans into sandbox files through OpenShell", async () => {
     const plan = await buildOnboardPlan({ TELEGRAM_BOT_TOKEN: "123456:telegram-token" }, [
       "telegram",

@@ -111,7 +111,6 @@ let exitMock: MockInstance;
 let promptMock: MockInstance;
 let getCredentialMock: MockInstance;
 let updateSandboxMock: MockInstance;
-let upsertMock: MockInstance;
 let runOpenshellMock: MockInstance;
 let applyPresetMock: MockInstance;
 let getSandboxMock: MockInstance;
@@ -136,6 +135,14 @@ function loggedText(): string {
 function conflictPromptShown(): boolean {
   return (promptMock.mock.calls as unknown[][]).some((call) =>
     String(call[0]).includes("Continue anyway?"),
+  );
+}
+
+function providerApplyCalls(): unknown[][] {
+  return (runOpenshellMock.mock.calls as unknown[][]).filter(([args]) =>
+    Array.isArray(args) &&
+    args[0] === "provider" &&
+    (args[1] === "create" || args[1] === "update"),
   );
 }
 
@@ -171,7 +178,6 @@ beforeEach(() => {
 
   // onboard/providers seam (gateway probe + register).
   vi.spyOn(providers, "providerExistsInGateway").mockReturnValue(false);
-  upsertMock = vi.spyOn(providers, "upsertMessagingProviders").mockImplementation(() => undefined);
 
   // openshell runtime + gateway recovery.
   runOpenshellMock = vi
@@ -255,7 +261,7 @@ describe("addSandboxChannel cross-sandbox conflict check (#4305)", () => {
     const text = loggedText();
     expect(text).toContain("bob");
     expect(text).toContain("same telegram credential");
-    expect(upsertMock).toHaveBeenCalledTimes(1);
+    expect(providerApplyCalls()).toHaveLength(1);
     expect(updateSandboxMock).toHaveBeenCalledWith("alpha", expect.any(Object));
   });
 
@@ -271,7 +277,7 @@ describe("addSandboxChannel cross-sandbox conflict check (#4305)", () => {
     await addSandboxChannel("alpha", { channel: "telegram" });
 
     expect(loggedText()).toContain("same telegram credential");
-    expect(upsertMock).not.toHaveBeenCalled();
+    expect(providerApplyCalls()).toHaveLength(0);
     expect(updateSandboxMock).not.toHaveBeenCalledWith("alpha", expect.any(Object));
     expect(applyPresetMock).not.toHaveBeenCalled();
   });
@@ -286,7 +292,7 @@ describe("addSandboxChannel cross-sandbox conflict check (#4305)", () => {
 
     await addSandboxChannel("alpha", { channel: "telegram" });
 
-    expect(upsertMock).not.toHaveBeenCalled();
+    expect(providerApplyCalls()).toHaveLength(0);
     expect(updateSandboxMock).not.toHaveBeenCalledWith("alpha", expect.any(Object));
   });
 
@@ -309,7 +315,7 @@ describe("addSandboxChannel cross-sandbox conflict check (#4305)", () => {
     expect(text).toContain("Aborting");
     expect(text).toContain("--force");
     expect(text).toContain("channels remove");
-    expect(upsertMock).not.toHaveBeenCalled();
+    expect(providerApplyCalls()).toHaveLength(0);
     expect(updateSandboxMock).not.toHaveBeenCalledWith("alpha", expect.any(Object));
     expect(promptMock).not.toHaveBeenCalled();
   });
@@ -329,7 +335,7 @@ describe("addSandboxChannel cross-sandbox conflict check (#4305)", () => {
     expect(text).toContain("same telegram credential"); // warning still shown
     expect(text).toContain("--force"); // proceed line
     expect(exitMock).not.toHaveBeenCalled();
-    expect(upsertMock).toHaveBeenCalledTimes(1);
+    expect(providerApplyCalls()).toHaveLength(1);
     expect(updateSandboxMock).toHaveBeenCalledWith("alpha", expect.any(Object));
     expect(promptMock).not.toHaveBeenCalled();
   });
@@ -367,7 +373,7 @@ describe("addSandboxChannel cross-sandbox conflict check (#4305)", () => {
     expect(text).not.toContain("credential hash is unavailable");
     expect(text).not.toContain("same telegram credential");
     expect(conflictPromptShown()).toBe(false);
-    expect(upsertMock).toHaveBeenCalledTimes(1);
+    expect(providerApplyCalls()).toHaveLength(1);
     expect(updateSandboxMock).toHaveBeenCalledWith("alpha", expect.any(Object));
   });
 
@@ -385,7 +391,7 @@ describe("addSandboxChannel cross-sandbox conflict check (#4305)", () => {
     expect(text).not.toContain("same telegram credential");
     expect(text).not.toContain("credential hash is unavailable");
     expect(conflictPromptShown()).toBe(false);
-    expect(upsertMock).toHaveBeenCalledTimes(1);
+    expect(providerApplyCalls()).toHaveLength(1);
     expect(updateSandboxMock).toHaveBeenCalledWith("alpha", expect.any(Object));
   });
 
@@ -404,7 +410,6 @@ describe("addSandboxChannel cross-sandbox conflict check (#4305)", () => {
     expect(text).not.toContain("credential hash is unavailable");
     expect(getCredentialMock).not.toHaveBeenCalled();
     expect(runOpenshellMock).not.toHaveBeenCalled();
-    expect(upsertMock).not.toHaveBeenCalled();
     expect(promptMock).not.toHaveBeenCalled();
     expect(exitMock).not.toHaveBeenCalled();
   });
@@ -490,12 +495,16 @@ describe("addSandboxChannel cross-sandbox conflict check (#4305)", () => {
       others: [], // no other sandbox -> no conflict resolvable
     });
     getCredentialMock.mockReturnValue(TELEGRAM_TOKEN);
-    runOpenshellMock.mockReturnValue({ status: 1, stdout: "", stderr: "down" });
+    runOpenshellMock.mockImplementation((args: unknown) =>
+      Array.isArray(args) && args[0] === "sandbox" && args[1] === "list"
+        ? { status: 1, stdout: "", stderr: "down" }
+        : { status: 0, stdout: "", stderr: "" },
+    );
 
     await addSandboxChannel("alpha", { channel: "telegram" });
 
     expect(exitMock).not.toHaveBeenCalled();
-    expect(upsertMock).toHaveBeenCalledTimes(1);
+    expect(providerApplyCalls()).toHaveLength(1);
     expect(updateSandboxMock).toHaveBeenCalledWith("alpha", expect.any(Object));
   });
 
@@ -514,7 +523,7 @@ describe("addSandboxChannel cross-sandbox conflict check (#4305)", () => {
     const text = loggedText();
     expect(text).toContain("Could not verify messaging channel conflicts");
     expect(text).toContain("rerun with --force");
-    expect(upsertMock).not.toHaveBeenCalled();
+    expect(providerApplyCalls()).toHaveLength(0);
   });
 
   it("--force proceeds when the conflict check throws", async () => {
@@ -530,7 +539,7 @@ describe("addSandboxChannel cross-sandbox conflict check (#4305)", () => {
     const text = loggedText();
     expect(text).toContain("proceeding without a completed messaging channel conflict check");
     expect(exitMock).not.toHaveBeenCalled();
-    expect(upsertMock).toHaveBeenCalledTimes(1);
+    expect(providerApplyCalls()).toHaveLength(1);
   });
 
   // Scenario 10
@@ -590,6 +599,6 @@ describe("addSandboxChannel cross-sandbox conflict check (#4305)", () => {
     expect(text).toContain("same slack credential"); // matching-token wording
     expect(text).not.toContain(slackBot);
     expect(text).not.toContain(slackApp);
-    expect(upsertMock).toHaveBeenCalledTimes(1);
+    expect(providerApplyCalls()).toHaveLength(2);
   });
 });

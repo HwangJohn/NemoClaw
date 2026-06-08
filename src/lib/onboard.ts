@@ -86,7 +86,12 @@ const {
   hasWechatConfigDrift,
   toSessionWechatConfig,
 } = require("./onboard/wechat-config") as typeof import("./onboard/wechat-config");
-const { setupMessagingChannels: setupMessagingChannelsImpl, readMessagingPlanFromEnv, writePlanToEnv, getRegistrySandboxMessagingPlan, MessagingHostStateApplier } = require("./onboard/messaging-channel-setup") as typeof import("./onboard/messaging-channel-setup");
+const { setupMessagingChannels: setupMessagingChannelsImpl, readMessagingPlanFromEnv, writePlanToEnv, getRegistrySandboxMessagingPlan, buildMessagingPlanForSandbox, MessagingHostStateApplier } = require("./onboard/messaging-channel-setup") as typeof import("./onboard/messaging-channel-setup");
+const {
+  MessagingSetupApplier,
+  enabledPlanChannels,
+  filterEnabledPlanEntries,
+}: typeof import("./messaging") = require("./messaging");
 const {
   clearAgentScopedResumeState,
 }: typeof import("./onboard/agent-resume-state") = require("./onboard/agent-resume-state");
@@ -366,7 +371,7 @@ const gatewayReuse: typeof import("./onboard/gateway-reuse") = require("./onboar
 const messagingConfig: typeof import("./onboard/messaging-config") = require("./onboard/messaging-config");
 const {
   detectMessagingCredentialRotation,
-  getMessagingChannelForEnvKey,
+  detectMessagingCredentialRotationFromPlan,
   getRecordedMessagingChannelsForResume: getRecordedMessagingChannelsForResumeFromState,
 }: typeof import("./onboard/messaging-credentials") = require("./onboard/messaging-credentials");
 const {
@@ -511,11 +516,7 @@ import {
   stringSetsEqual,
 } from "./onboard/hermes-managed-tools";
 import { mergePolicyMessagingChannels } from "./onboard/messaging-policy-presets";
-import {
-  filterEnabledChannelsByAgent,
-  resolveQrSelectedChannels,
-} from "./onboard/messaging-state";
-import { getValidatedMessagingToken, getValidatedMessagingTokenByEnvKey } from "./onboard/messaging-token";
+import { filterEnabledChannelsByAgent } from "./onboard/messaging-state";
 import { handleOllamaProbeFailure } from "./onboard/ollama-probe-failure";
 import { runOllamaStartupOrGate } from "./onboard/ollama-startup";
 import type {
@@ -847,6 +848,8 @@ function upsertProvider(
 }
 
 type MessagingTokenDef = { name: string; envKey: string; token: string | null; providerType?: string };
+type SandboxMessagingPlan = import("./messaging").SandboxMessagingPlan;
+type MessagingCredentialApplyResult = import("./messaging").MessagingCredentialApplyResult;
 
 type EndpointValidationResult =
   | { ok: true; api: string | null; retry?: undefined }
@@ -891,6 +894,49 @@ function upsertMessagingProviders(
   }
   if (mutated) persistMigratedLegacyKeys();
   return upserted;
+}
+
+function resolveMessagingProviderCredential(envKey: string): string | null {
+  return normalizeCredentialValue(process.env[envKey]) || getCredential(envKey) || null;
+}
+
+function applyMessagingPlanCredentials(
+  plan: SandboxMessagingPlan | null | undefined,
+  options: { replaceExisting?: boolean } = {},
+): string[] {
+  if (!plan) return [];
+  let result: MessagingCredentialApplyResult;
+  try {
+    result = MessagingSetupApplier.applyCredentialsAtOpenShell(plan, {
+      runOpenshell: (args, runOptions) => runOpenshell([...args], runOptions),
+      replaceExisting: Boolean(options.replaceExisting),
+      resolveCredential: (envKey) => resolveMessagingProviderCredential(envKey),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`\n  ✗ Failed to create messaging provider from manifest plan: ${message}`);
+    process.exit(1);
+  }
+
+  markPlanCredentialMigrations(result);
+  return [...result.providerNames];
+}
+
+function markPlanCredentialMigrations(result: MessagingCredentialApplyResult): void {
+  let mutated = false;
+  for (const entry of result.upserted) {
+    const stagedValue = stagedLegacyValues.get(entry.envKey);
+    if (stagedValue === undefined) continue;
+    const registeredValue = resolveMessagingProviderCredential(entry.envKey);
+    if (registeredValue === stagedValue) {
+      migratedLegacyKeys.add(entry.envKey);
+      mutated = true;
+    } else {
+      migratedLegacyKeys.delete(entry.envKey);
+      mutated = true;
+    }
+  }
+  if (mutated) persistMigratedLegacyKeys();
 }
 const providerExistsInGateway = (name: string) => onboardProviders.providerExistsInGateway(name, runOpenshell);
 
@@ -2757,6 +2803,14 @@ async function createSandbox(
   });
   const hermesDashboardState = hermesDashboardForwarding.resolveStateForPort(effectivePort);
 
+  // Drop channels the operator disabled via `nemoclaw <sandbox> channels stop`.
+  // Credentials stay in the keychain; the bridge simply isn't registered with
+  // the gateway on the next rebuild. `channels start` removes the entry and
+  // the bridge comes back.
+  const disabledChannels: string[] = require("./onboard/channel-state").resolveDisabledChannels(
+    sandboxName,
+  );
+
   // Check whether messaging providers will be needed — this must happen before
   // the sandbox reuse decision so we can detect stale sandboxes that were created
   // without provider attachments (security: prevents legacy raw-env-var leaks).
@@ -2773,8 +2827,24 @@ async function createSandbox(
   // prior run of a different sandbox must not gate or bypass conflict detection
   // for the current sandbox creation.
   const envPlan = readMessagingPlanFromEnv();
-  const currentPlan = envPlan?.sandboxName === sandboxName ? envPlan : null;
-  const hasPlanCredentials = currentPlan?.credentialBindings.some((b) => b.credentialAvailable) ?? false;
+  let currentPlan = envPlan?.sandboxName === sandboxName ? envPlan : null;
+  if (!currentPlan) {
+    currentPlan = await buildMessagingPlanForSandbox({
+      agent,
+      sandboxName,
+      configuredChannels: enabledChannels,
+      disabledChannels,
+      providerExists: providerExistsInGateway,
+    });
+    if (currentPlan) writePlanToEnv(currentPlan);
+  }
+  const activeMessagingChannels = currentPlan
+    ? enabledPlanChannels(currentPlan).map((channel) => channel.channelId)
+    : [];
+  const activeCredentialBindings = currentPlan
+    ? filterEnabledPlanEntries(currentPlan, currentPlan.credentialBindings)
+    : [];
+  const hasPlanCredentials = activeCredentialBindings.some((b) => b.credentialAvailable);
   if (hasPlanCredentials) {
     const { backfillMessagingChannels, findChannelConflictsFromPlan, createMessagingConflictProbe } =
       require("./messaging/applier") as typeof import("./messaging/applier");
@@ -2808,61 +2878,6 @@ async function createSandbox(
     }
   }
 
-  // When enabledChannels is provided (from the toggle picker), only include
-  // channels the user selected. When null (backward compat), include all.
-  const enabledEnvKeys =
-    enabledChannels != null
-      ? new Set(
-          MESSAGING_CHANNELS.filter((c) => enabledChannels.includes(c.name)).flatMap((c) =>
-            getChannelTokenKeys(c),
-          ),
-        )
-      : null;
-
-  // Drop channels the operator disabled via `nemoclaw <sandbox> channels stop`.
-  // Credentials stay in the keychain; the bridge simply isn't registered with
-  // the gateway on the next rebuild. `channels start` removes the entry and
-  // the bridge comes back.
-  const disabledChannels: string[] = require("./onboard/channel-state").resolveDisabledChannels(
-    sandboxName,
-  );
-  const disabledChannelNames = new Set(disabledChannels);
-  const disabledEnvKeys = new Set(
-    MESSAGING_CHANNELS.filter((c) => disabledChannelNames.has(c.name)).flatMap((c) =>
-      getChannelTokenKeys(c),
-    ),
-  );
-
-  const messagingTokenDefs: MessagingTokenDef[] = [
-    {
-      name: `${sandboxName}-discord-bridge`,
-      envKey: "DISCORD_BOT_TOKEN",
-      token: getValidatedMessagingTokenByEnvKey(MESSAGING_CHANNELS, "DISCORD_BOT_TOKEN"),
-    },
-    {
-      name: `${sandboxName}-slack-bridge`,
-      envKey: "SLACK_BOT_TOKEN",
-      token: getValidatedMessagingTokenByEnvKey(MESSAGING_CHANNELS, "SLACK_BOT_TOKEN"),
-    },
-    {
-      name: `${sandboxName}-slack-app`,
-      envKey: "SLACK_APP_TOKEN",
-      token: getValidatedMessagingTokenByEnvKey(MESSAGING_CHANNELS, "SLACK_APP_TOKEN"),
-    },
-    {
-      name: `${sandboxName}-telegram-bridge`,
-      envKey: "TELEGRAM_BOT_TOKEN",
-      token: getValidatedMessagingTokenByEnvKey(MESSAGING_CHANNELS, "TELEGRAM_BOT_TOKEN"),
-    },
-    {
-      name: `${sandboxName}-wechat-bridge`,
-      envKey: "WECHAT_BOT_TOKEN",
-      token: getValidatedMessagingTokenByEnvKey(MESSAGING_CHANNELS, "WECHAT_BOT_TOKEN"),
-    },
-  ]
-    .filter(({ envKey }) => !enabledEnvKeys || enabledEnvKeys.has(envKey))
-    .filter(({ envKey }) => !disabledEnvKeys.has(envKey));
-
   const braveWebSearchEnabled = braveProviderProfile.shouldEnableBraveWebSearch(webSearchConfig);
   const braveApiKey = braveWebSearchEnabled ? getCredential(webSearch.BRAVE_API_KEY_ENV) || normalizeCredentialValue(process.env[webSearch.BRAVE_API_KEY_ENV]) : null;
   // Fail before any recreate/delete path runs: otherwise a missing key would
@@ -2874,24 +2889,12 @@ async function createSandbox(
     );
     process.exit(1);
   }
-  if (braveWebSearchEnabled) messagingTokenDefs.push({ name: `${sandboxName}-brave-search`, envKey: webSearch.BRAVE_API_KEY_ENV, token: braveApiKey, providerType: braveProviderProfile.BRAVE_PROVIDER_PROFILE_ID });
-  const extraPlaceholderKeys: string[] = require("./onboard/extra-placeholder-keys").registerExtraPlaceholderProviders(sandboxName, messagingTokenDefs);
-  const hasMessagingTokens = messagingTokenDefs.some(({ token }) => !!token);
-  const reusableMessagingProviders: string[] = [];
-  const reusableMessagingChannels: string[] = [];
-  if (enabledChannels != null) {
-    for (const { name, envKey, token } of messagingTokenDefs) {
-      if (token) continue;
-      const channel =
-        envKey === "SLACK_APP_TOKEN" ? "slack" : getMessagingChannelForEnvKey(envKey);
-      if (!channel || !enabledChannels.includes(channel)) continue;
-      if (!providerExistsInGateway(name)) continue;
-      reusableMessagingProviders.push(name);
-      if (!reusableMessagingChannels.includes(channel)) {
-        reusableMessagingChannels.push(channel);
-      }
-    }
-  }
+  const compatibilityProviderDefs: MessagingTokenDef[] = [];
+  if (braveWebSearchEnabled) compatibilityProviderDefs.push({ name: `${sandboxName}-brave-search`, envKey: webSearch.BRAVE_API_KEY_ENV, token: braveApiKey, providerType: braveProviderProfile.BRAVE_PROVIDER_PROFILE_ID });
+  const extraPlaceholderKeys: string[] = require("./onboard/extra-placeholder-keys").registerExtraPlaceholderProviders(sandboxName, compatibilityProviderDefs);
+  const hasMessagingTokens =
+    activeCredentialBindings.some((binding) => Boolean(resolveMessagingProviderCredential(binding.providerEnvKey))) ||
+    compatibilityProviderDefs.some(({ token }) => !!token);
 
   const existingRegistryEntryBeforePrune = registry.getSandbox(sandboxName);
 
@@ -2962,7 +2965,12 @@ async function createSandbox(
     // this avoids destroying sandboxes already created with provider attachments.
     const needsProviderMigration =
       hasMessagingTokens &&
-      messagingTokenDefs.some(({ name, token }) => token && !providerExistsInGateway(name));
+      (activeCredentialBindings.some(
+        (binding) =>
+          resolveMessagingProviderCredential(binding.providerEnvKey) &&
+          !providerExistsInGateway(binding.providerName),
+      ) ||
+        compatibilityProviderDefs.some(({ name, token }) => token && !providerExistsInGateway(name)));
     const selectionDrift = getSelectionDrift(sandboxName, provider, model, { runOpenshell });
     const confirmedSelectionDrift = selectionDrift.changed && !selectionDrift.unknown;
     const sandboxGpuDrift = hasSandboxGpuDrift(sandboxName, effectiveSandboxGpuConfig);
@@ -2980,8 +2988,10 @@ async function createSandbox(
     // Detect whether any messaging credential has been rotated since the
     // sandbox was created. Provider credentials are resolved once at sandbox
     // startup, so a rotated token requires a rebuild to take effect.
-    const credentialRotation = hasMessagingTokens
-      ? detectMessagingCredentialRotation(sandboxName, messagingTokenDefs)
+    const credentialRotation = currentPlan
+      ? detectMessagingCredentialRotationFromPlan(sandboxName, currentPlan, {
+          resolveCredential: resolveMessagingProviderCredential,
+        })
       : { changed: false, changedProviders: [] };
 
     if (
@@ -3021,7 +3031,8 @@ async function createSandbox(
             policyPresetCarry.seedReusedSandboxPolicyPresets(sandboxName, isNonInteractive());
             // Upsert messaging providers even on reuse so credential changes take
             // effect without requiring a full sandbox recreation.
-            upsertMessagingProviders(messagingTokenDefs);
+            applyMessagingPlanCredentials(currentPlan);
+            upsertMessagingProviders(compatibilityProviderDefs);
             if (selectionDrift.unknown) {
               note(
                 "  [non-interactive] Existing provider/model selection is unreadable; reusing sandbox.",
@@ -3081,7 +3092,8 @@ async function createSandbox(
           console.log("  Choosing 'n' will delete the existing sandbox and create a new one.");
           if (await promptYesNoOrDefault("  Reuse existing sandbox?", null, true)) {
             policyPresetCarry.seedReusedSandboxPolicyPresets(sandboxName, isNonInteractive());
-            upsertMessagingProviders(messagingTokenDefs);
+            applyMessagingPlanCredentials(currentPlan);
+            upsertMessagingProviders(compatibilityProviderDefs);
             const reusedPort2 = ensureDashboardForward(sandboxName, chatUiUrl);
             chatUiUrl = `http://127.0.0.1:${reusedPort2}`;
             process.env.CHAT_UI_URL = chatUiUrl;
@@ -3281,31 +3293,6 @@ async function createSandbox(
     "openclaw-sandbox.yaml",
   );
   const basePolicyPath = (agent && agentOnboard.getAgentPolicyPath(agent)) || defaultPolicyPath;
-  const tokensByEnvKey = Object.fromEntries(
-    messagingTokenDefs.map(({ envKey, token }) => [envKey, token]),
-  );
-  const qrSelectedChannels = resolveQrSelectedChannels(
-    MESSAGING_CHANNELS,
-    enabledChannels,
-    disabledChannelNames,
-  );
-  const activeMessagingChannels = [
-    ...new Set([
-      ...messagingTokenDefs
-        .filter(({ token }) => !!token)
-        .flatMap(({ envKey }) => {
-          const channel = getMessagingChannelForEnvKey(envKey);
-          if (channel) return [channel];
-          // SLACK_APP_TOKEN alone does not enable slack; bot token is required.
-          if (envKey === "SLACK_APP_TOKEN") {
-            return tokensByEnvKey["SLACK_BOT_TOKEN"] ? ["slack"] : [];
-          }
-          return [];
-        }),
-      ...reusableMessagingChannels,
-      ...qrSelectedChannels,
-    ]),
-  ];
   const { useDockerGpuPatch, logMessage: sandboxGpuLogMessage } =
     dockerGpuSandboxCreate.resolveDockerGpuSandboxCreatePlan(effectiveSandboxGpuConfig, {
       dockerDriverGateway: isLinuxDockerDriverGatewayEnabled(),
@@ -3347,8 +3334,8 @@ async function createSandbox(
   // `openshell provider update` cannot change `--type` (#3626).
   const messagingProviders = [
     ...new Set([
-      ...upsertMessagingProviders(messagingTokenDefs, { replaceExisting: true }),
-      ...reusableMessagingProviders,
+      ...applyMessagingPlanCredentials(currentPlan, { replaceExisting: true }),
+      ...upsertMessagingProviders(compatibilityProviderDefs, { replaceExisting: true }),
     ]),
   ];
   for (const p of messagingProviders) {
@@ -3361,7 +3348,9 @@ async function createSandbox(
 
   console.log(`  Creating sandbox '${sandboxName}' (this takes a few minutes on first run)...`);
   const messagingChannelConfig = readMessagingChannelConfigFromEnv();
-  const enabledTokenEnvKeys = new Set(messagingTokenDefs.map(({ envKey }) => envKey));
+  const enabledTokenEnvKeys = new Set(
+    activeCredentialBindings.map((binding) => binding.providerEnvKey),
+  );
   const activeChannelNames = new Set(activeMessagingChannels);
   const { messagingAllowedIds, discordGuilds, slackConfig } = collectMessagingBuildConfig({
     channels: MESSAGING_CHANNELS,

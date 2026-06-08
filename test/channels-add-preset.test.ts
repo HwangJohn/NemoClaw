@@ -79,8 +79,17 @@ function buildPreamble({
 const resolver = require(${j("adapters/openshell/resolve.js")});
 resolver.resolveOpenshell = () => "/fake/openshell";
 
+const providerCalls = [];
+const recordProviderApply = (args, opts = {}) => {
+  const credentialIndex = args.indexOf("--credential");
+  providerCalls.push({ name: args[1] === "create" ? args[args.indexOf("--name") + 1] : args[2], envKey: credentialIndex >= 0 ? args[credentialIndex + 1] : null, command: args.join(" "), env: opts.env || null });
+  callOrder.push("applyCredentialsAtOpenShell");
+};
 const openshellRuntime = require(${j("adapters/openshell/runtime.js")});
-openshellRuntime.runOpenshell = () => ({ status: 0, stdout: "", stderr: "" });
+openshellRuntime.runOpenshell = (args, opts = {}) => {
+  if (Array.isArray(args) && args[0] === "provider" && (args[1] === "create" || args[1] === "update")) recordProviderApply(args, opts);
+  return { status: 0, stdout: "", stderr: "" };
+};
 
 const processRecovery = require(${j("actions/sandbox/process-recovery.js")});
 processRecovery.executeSandboxExecCommand = () => ({ status: 0, stdout: "NEMOCLAW_CHANNEL_CLEAR_OK", stderr: "" });
@@ -112,13 +121,6 @@ credentials.prompt = async (msg) => { throw new Error("unexpected prompt: " + ms
 
 const onboard = require(${j("onboard.js")});
 onboard.isNonInteractive = () => true;
-
-const onboardProviders = require(${j("onboard/providers.js")});
-const providerCalls = [];
-onboardProviders.upsertMessagingProviders = (defs) => {
-  providerCalls.push(...defs);
-  callOrder.push("upsertMessagingProviders");
-};
 
 const workflowPlanner = require(${j("messaging/compiler/workflow-planner.js")});
 const originalBuildPlan = workflowPlanner.MessagingWorkflowPlanner.prototype.buildPlan;
@@ -985,7 +987,7 @@ process.exit = (code) => {
     const upsertNames = (payload.providerCalls as Array<{ name: string }>).map((d) => d.name);
     assert.ok(
       upsertNames.length >= 2,
-      `expected initial and restorative upsertMessagingProviders calls; got ${JSON.stringify(payload.providerCalls)}`,
+      `expected initial and restorative provider apply calls; got ${JSON.stringify(payload.providerCalls)}`,
     );
     assert.ok(
       !payload.callOrder.includes("promptAndRebuild"),
@@ -1006,11 +1008,16 @@ registry.getSandbox = () => ({
   disabledChannels: [],
 });
 credentials.getCredential = (key) => key === "TELEGRAM_BOT_TOKEN" ? "prior-telegram-token" : null;
-let upsertCalls = 0;
-onboardProviders.upsertMessagingProviders = (defs) => {
-  upsertCalls += 1;
-  providerCalls.push(...defs);
-  if (upsertCalls >= 2) throw new Error("simulated gateway upsert failure during restore");
+let providerApplyCalls = 0;
+openshellRuntime.runOpenshell = (args, opts = {}) => {
+  if (Array.isArray(args) && args[0] === "provider" && (args[1] === "create" || args[1] === "update")) {
+    providerApplyCalls += 1;
+    recordProviderApply(args, opts);
+    if (providerApplyCalls >= 2) {
+      return { status: 1, stdout: "", stderr: "simulated gateway upsert failure during restore" };
+    }
+  }
+  return { status: 0, stdout: "", stderr: "" };
 };
 const ctx = module.exports;
 const exitCodes = [];
@@ -1114,12 +1121,12 @@ const ctx = module.exports;
     );
     assert.ok(
       payload.callOrder.indexOf("slackProbe:app") <
-        payload.callOrder.indexOf("upsertMessagingProviders"),
+        payload.callOrder.indexOf("applyCredentialsAtOpenShell"),
       `Slack validation must complete before provider registration; got ${JSON.stringify(payload.callOrder)}`,
     );
     assert.ok(
       payload.callOrder.indexOf("saveCredential:SLACK_APP_TOKEN") <
-        payload.callOrder.indexOf("upsertMessagingProviders"),
+        payload.callOrder.indexOf("applyCredentialsAtOpenShell"),
       `token persistence should happen before provider registration; got ${JSON.stringify(payload.callOrder)}`,
     );
   });
@@ -1171,7 +1178,7 @@ global.__slackBotProbe = {
     );
     assert.ok(
       payload.callOrder.indexOf("saveCredential:SLACK_APP_TOKEN") <
-        payload.callOrder.indexOf("upsertMessagingProviders"),
+        payload.callOrder.indexOf("applyCredentialsAtOpenShell"),
       `token persistence should happen before provider registration; got ${JSON.stringify(payload.callOrder)}`,
     );
   });
@@ -1230,10 +1237,6 @@ process.exit = (code) => {
       !payload.callOrder.some((entry: string) => entry.startsWith("saveCredential:")),
       `rejected Slack credentials must not be persisted; got ${JSON.stringify(payload.callOrder)}`,
     );
-    assert.ok(
-      !payload.callOrder.includes("upsertMessagingProviders"),
-      `rejected Slack credentials must not register providers; got ${JSON.stringify(payload.callOrder)}`,
-    );
   });
 
   it("aborts Slack channel add on indeterminate Slack API validation before provider registration", () => {
@@ -1289,10 +1292,6 @@ process.exit = (code) => {
     assert.ok(
       !payload.callOrder.some((entry: string) => entry.startsWith("saveCredential:")),
       `indeterminate Slack credentials must not be persisted; got ${JSON.stringify(payload.callOrder)}`,
-    );
-    assert.ok(
-      !payload.callOrder.includes("upsertMessagingProviders"),
-      `indeterminate Slack credentials must not register providers; got ${JSON.stringify(payload.callOrder)}`,
     );
   });
 });
@@ -1643,9 +1642,6 @@ credentials.prompt = async () => "y";
 
 const onboard = require(${j("onboard.js")});
 onboard.isNonInteractive = () => false;
-
-const onboardProviders = require(${j("onboard/providers.js")});
-onboardProviders.upsertMessagingProviders = () => {};
 
 const registry = require(${j("state/registry.js")});
 registry.getSandbox = () => ({

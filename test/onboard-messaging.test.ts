@@ -117,6 +117,7 @@ const { createSandbox, setupMessagingChannels } = require(${onboardPath});
 (async () => {
   process.env.OPENSHELL_GATEWAY = "nemoclaw";
   process.env.NEMOCLAW_SKIP_TELEGRAM_REACHABILITY = "1";
+  process.env.NEMOCLAW_SKIP_SLACK_AUTH_VALIDATION = "1";
   process.env.DISCORD_BOT_TOKEN = "test-discord-token-value";
   process.env.SLACK_BOT_TOKEN = "xoxb-test-slack-token-value";
   process.env.SLACK_APP_TOKEN = "xapp-test-slack-app-token-value";
@@ -2106,5 +2107,4 @@ const { setupMessagingChannels, MESSAGING_CHANNELS } = require(${onboardPath});
       );
     }
   });
-
 });

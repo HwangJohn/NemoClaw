@@ -20,6 +20,7 @@ import {
 } from "../messaging";
 export { MessagingHostStateApplier };
 import { resolveMessagingChannelConfigEnvValue } from "../messaging-channel-config";
+import { hashCredential } from "../security/credential-hash";
 import {
   promptMessagingChannelLineSelection,
   readMessagingChannelSelection,
@@ -39,6 +40,14 @@ export interface SetupMessagingChannelsDeps {
   readonly note?: (message: string) => void;
   readonly isNonInteractive?: () => boolean;
   readonly sandboxName?: string | null;
+}
+
+export interface BuildMessagingPlanForSandboxOptions {
+  readonly agent?: AgentDefinition | null;
+  readonly sandboxName: string;
+  readonly configuredChannels?: readonly string[] | null;
+  readonly disabledChannels?: readonly string[] | null;
+  readonly providerExists?: (providerName: string) => boolean;
 }
 
 const getMessagingToken = (envKey: string): string | null =>
@@ -160,6 +169,7 @@ export async function setupSelectedMessagingChannels(
   const planner = new MessagingWorkflowPlanner(registry, createBuiltInMessagingHookRegistry());
 
   if (options.interactive === false) {
+    const credentials = buildCredentialCompilerContext(registry, selectedChannels);
     const plan = await planner.buildPlan({
       sandboxName,
       agent,
@@ -167,7 +177,8 @@ export async function setupSelectedMessagingChannels(
       isInteractive: false,
       configuredChannels: selectedChannels,
       supportedChannelIds,
-      credentialAvailability: buildCredentialAvailability(registry, selectedChannels),
+      credentialAvailability: credentials.availability,
+      credentialHashes: credentials.hashes,
     });
     MessagingSetupApplier.writePlanToEnv(plan);
     for (const channel of plan.channels) {
@@ -176,6 +187,7 @@ export async function setupSelectedMessagingChannels(
     return plan;
   }
 
+  const credentials = buildCredentialCompilerContext(registry, selectedChannels);
   const plan = await planner.buildPlan({
     sandboxName,
     agent,
@@ -183,7 +195,8 @@ export async function setupSelectedMessagingChannels(
     isInteractive: true,
     configuredChannels: selectedChannels,
     supportedChannelIds,
-    credentialAvailability: buildCredentialAvailability(registry, selectedChannels),
+    credentialAvailability: credentials.availability,
+    credentialHashes: credentials.hashes,
   });
   MessagingSetupApplier.writePlanToEnv(plan);
 
@@ -197,6 +210,67 @@ export async function setupSelectedMessagingChannels(
   }
 
   return plan;
+}
+
+export async function buildMessagingPlanForSandbox(
+  options: BuildMessagingPlanForSandboxOptions,
+): Promise<SandboxMessagingPlan | null> {
+  const registry = createBuiltInChannelManifestRegistry();
+  const agent = toMessagingAgentId(options.agent);
+  const availableChannels = registry.listAvailable(
+    getMessagingManifestAvailabilityContext(options.agent ?? null),
+  );
+  const supportedChannelIds = availableChannels.map((channel) => channel.id);
+  const selectedChannels =
+    options.configuredChannels !== undefined && options.configuredChannels !== null
+      ? uniqueSelectedChannels(options.configuredChannels, supportedChannelIds, registry)
+      : resolveMessagingManifestSeed(
+          availableChannels,
+          null,
+          (manifest) => hasMessagingManifestRequiredInputs(manifest, getMessagingInputValue),
+          { includeAllExisting: false },
+        );
+  if (selectedChannels.length === 0) return null;
+
+  const credentials = buildCredentialCompilerContext(registry, selectedChannels);
+  applyGatewayProviderAvailability(credentials.availability, registry, selectedChannels, options);
+  const planner = new MessagingWorkflowPlanner(registry);
+  return planner.buildPlan({
+    sandboxName: options.sandboxName,
+    agent,
+    workflow: "rebuild",
+    isInteractive: false,
+    configuredChannels: selectedChannels,
+    disabledChannels: options.disabledChannels ?? [],
+    supportedChannelIds,
+    credentialAvailability: credentials.availability,
+    credentialHashes: credentials.hashes,
+  });
+}
+
+function applyGatewayProviderAvailability(
+  availability: Record<string, boolean>,
+  registry: ReturnType<typeof createBuiltInChannelManifestRegistry>,
+  channelIds: readonly string[],
+  options: BuildMessagingPlanForSandboxOptions,
+): void {
+  if (!options.providerExists) return;
+  for (const channelId of channelIds) {
+    const manifest = registry.get(channelId);
+    if (!manifest) continue;
+    for (const credential of manifest.credentials) {
+      const providerName = credential.providerName.replaceAll(
+        "{sandboxName}",
+        options.sandboxName,
+      );
+      if (!options.providerExists(providerName)) continue;
+      availability[credential.sourceInput] = true;
+      availability[`${manifest.id}.${credential.sourceInput}`] = true;
+      availability[credential.id] = true;
+      availability[`${manifest.id}.${credential.id}`] = true;
+      availability[credential.providerEnvKey] = true;
+    }
+  }
 }
 
 function uniqueSelectedChannels(
@@ -224,24 +298,32 @@ function logEnrollmentHelp(manifest: ChannelManifest): void {
   console.log(`  ${help}`);
 }
 
-function buildCredentialAvailability(
+function buildCredentialCompilerContext(
   registry: ReturnType<typeof createBuiltInChannelManifestRegistry>,
   channelIds: readonly string[],
-): Record<string, boolean> {
+): { readonly availability: Record<string, boolean>; readonly hashes: Record<string, string> } {
   const availability: Record<string, boolean> = {};
+  const hashes: Record<string, string> = {};
   for (const channelId of channelIds) {
     const manifest = registry.get(channelId);
     if (!manifest) continue;
     for (const input of manifest.inputs) {
-      if (input.kind !== "secret" || !input.envKey || !getMessagingToken(input.envKey)) {
+      if (input.kind !== "secret" || !input.envKey) {
         continue;
       }
+      const token = getMessagingToken(input.envKey);
+      if (!token) continue;
       availability[input.id] = true;
       availability[`${manifest.id}.${input.id}`] = true;
       availability[input.envKey] = true;
+      const hash = hashCredential(token);
+      if (!hash) continue;
+      hashes[input.id] = hash;
+      hashes[`${manifest.id}.${input.id}`] = hash;
+      hashes[input.envKey] = hash;
     }
   }
-  return availability;
+  return { availability, hashes };
 }
 
 function printInSandboxQrStatus(manifest: ChannelManifest): void {

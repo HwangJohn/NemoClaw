@@ -30,11 +30,13 @@ export function applyCredentialsAtOpenShell(
   const upserted: MessagingCredentialApplyEntry[] = [];
   const reused: MessagingCredentialReuseEntry[] = [];
   const missing: MessagingMissingCredentialEntry[] = [];
+  const failures: string[] = [];
 
   for (const binding of filterEnabledPlanEntries(plan, plan.credentialBindings)) {
-    const credential = readCredentialEnv(env, binding.providerEnvKey);
+    const credential = resolveCredentialValue(binding.providerEnvKey, env, options);
+    const exists = providerExistsInGateway(binding.providerName, runOpenshell);
     if (!credential) {
-      if (providerExistsInGateway(binding.providerName, runOpenshell)) {
+      if (exists) {
         reused.push(toReuseEntry(binding));
       } else {
         missing.push(toMissingEntry(binding));
@@ -42,9 +44,23 @@ export function applyCredentialsAtOpenShell(
       continue;
     }
 
-    const action = providerExistsInGateway(binding.providerName, runOpenshell)
-      ? "update"
-      : "create";
+    if (exists && options.replaceExisting) {
+      const deleteResult = runOpenshell(["provider", "delete", binding.providerName], {
+        ignoreError: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      const deleteStatus = deleteResult.status ?? 0;
+      if (deleteStatus !== 0) {
+        const message = `Failed to replace messaging provider '${binding.providerName}': ${compactOutput(deleteResult)}`;
+        if (options.bestEffort) {
+          failures.push(message);
+          continue;
+        }
+        throw new Error(message);
+      }
+    }
+
+    const action = exists && !options.replaceExisting ? "update" : "create";
     const result = runOpenshell(
       buildProviderArgs(action, binding.providerName, binding.providerEnvKey),
       {
@@ -55,9 +71,12 @@ export function applyCredentialsAtOpenShell(
     );
     const status = result.status ?? 0;
     if (status !== 0) {
-      throw new Error(
-        `Failed to ${action} messaging provider '${binding.providerName}': ${compactOutput(result)}`,
-      );
+      const message = `Failed to ${action} messaging provider '${binding.providerName}': ${compactOutput(result)}`;
+      if (options.bestEffort) {
+        failures.push(message);
+        continue;
+      }
+      throw new Error(message);
     }
     upserted.push({
       channelId: binding.channelId,
@@ -66,6 +85,10 @@ export function applyCredentialsAtOpenShell(
       envKey: binding.providerEnvKey,
       action,
     });
+  }
+
+  if (failures.length > 0) {
+    throw new Error(failures.join("; "));
   }
 
   const providerNames = uniqueStrings([
@@ -85,8 +108,19 @@ export function applyCredentialsAtOpenShell(
   };
 }
 
-function readCredentialEnv(env: NodeJS.ProcessEnv, envKey: string): string | null {
-  const raw = env[envKey];
+function resolveCredentialValue(
+  envKey: string,
+  env: NodeJS.ProcessEnv,
+  options: MessagingCredentialApplyOptions,
+): string | null {
+  const raw = options.resolveCredential
+    ? options.resolveCredential(envKey, env)
+    : env[envKey];
+  return normalizeCredentialValue(raw);
+}
+
+function normalizeCredentialValue(value: string | null | undefined): string | null {
+  const raw = value;
   if (typeof raw !== "string") return null;
   const normalized = raw.replace(/\r/g, "").trim();
   return normalized || null;

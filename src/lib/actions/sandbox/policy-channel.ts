@@ -486,14 +486,11 @@ async function checkChannelAddConflict(
 async function applyChannelAddToGatewayAndRegistry(
   sandboxName: string,
   channelName: string,
+  plan: SandboxMessagingPlan,
   acquired: Record<string, string>,
 ): Promise<void> {
-  const tokenDefs = Object.entries(acquired).map(([envKey, token]) => ({
-    name: bridgeProviderName(sandboxName, channelName, envKey),
-    envKey,
-    token,
-  }));
-  if (tokenDefs.length > 0) {
+  const channelPlan = filterPlanToChannel(plan, channelName);
+  if (channelPlan.credentialBindings.length > 0) {
     const recovery = await recoverNamedGatewayRuntime();
     if (!recovery.recovered) {
       console.error(
@@ -503,9 +500,19 @@ async function applyChannelAddToGatewayAndRegistry(
       console.error("  'openshell gateway start --name nemoclaw' manually.");
       process.exit(1);
     }
-    // upsertMessagingProviders handles create-or-update and process.exits on
-    // failure, so reaching the next line means every entry is registered.
-    onboardProviders.upsertMessagingProviders(tokenDefs, runOpenshell);
+    try {
+      MessagingSetupApplier.applyCredentialsAtOpenShell(channelPlan, {
+        env: { ...process.env, ...acquired },
+        runOpenshell: (args, runOptions) =>
+          runOpenshell([...args], runOptions as Parameters<typeof runOpenshell>[1]),
+        resolveCredential: (envKey, env) =>
+          normalizeEnvValue(env[envKey]) ?? getMessagingToken(envKey),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`\n  ✗ Failed to create messaging provider from manifest plan: ${message}`);
+      process.exit(1);
+    }
   }
 
   // Persist the enabled-channels list in the registry so a deferred
@@ -528,14 +535,14 @@ async function applyChannelAddToGatewayAndRegistry(
 async function applyChannelRemoveToGatewayAndRegistry(
   sandboxName: string,
   channelName: string,
-  channelTokenKeys: string[],
+  providerNames: readonly string[],
   options: { bestEffort?: boolean } = {},
 ): Promise<{ ok: boolean; residual: string[] }> {
   const bestEffort = Boolean(options.bestEffort);
   const residual: string[] = [];
   let gatewayReachable = true;
 
-  if (channelTokenKeys.length > 0) {
+  if (providerNames.length > 0) {
     const recovery = await recoverNamedGatewayRuntime();
     if (!recovery.recovered) {
       console.error(
@@ -560,8 +567,7 @@ async function applyChannelRemoveToGatewayAndRegistry(
   // configured for a sandbox that is no longer alive.
   const detachFailures: Array<{ name: string; output: string }> = [];
   if (gatewayReachable) {
-    for (const envKey of channelTokenKeys) {
-      const name = bridgeProviderName(sandboxName, channelName, envKey);
+    for (const name of providerNames) {
       const result = runOpenshell(["sandbox", "provider", "detach", sandboxName, name], {
         ignoreError: true,
         stdio: ["ignore", "pipe", "pipe"],
@@ -597,8 +603,7 @@ async function applyChannelRemoveToGatewayAndRegistry(
   const deleteFailures: Array<{ name: string; output: string }> = [];
   if (gatewayReachable) {
     const detachFailedSet = new Set(detachFailures.map((f) => f.name));
-    for (const envKey of channelTokenKeys) {
-      const name = bridgeProviderName(sandboxName, channelName, envKey);
+    for (const name of providerNames) {
       if (!bestEffort && detachFailedSet.has(name)) continue;
       const result = runOpenshell(["provider", "delete", name], {
         ignoreError: true,
@@ -788,6 +793,7 @@ async function planSandboxChannelAdd(
   hydrateAddChannelEnvFromSession(sandboxName, channelId);
 
   try {
+    const credentials = buildCredentialCompilerContext([channelId]);
     const plan = await planner.buildChannelAddPlanFromSandboxEntry({
       sandboxName,
       agent: toMessagingAgentId(agent),
@@ -795,7 +801,8 @@ async function planSandboxChannelAdd(
       channelId,
       sandboxEntry: registry.getSandbox(sandboxName),
       supportedChannelIds,
-      credentialAvailability: buildCredentialAvailability([channelId]),
+      credentialAvailability: credentials.availability,
+      credentialHashes: credentials.hashes,
     });
     MessagingSetupApplier.writePlanToEnv(plan);
     return plan;
@@ -846,20 +853,29 @@ async function persistManifestChannelRemovePlan(
   if (plan) MessagingHostStateApplier.applyPlanToRegistry(sandboxName, plan);
 }
 
-function buildCredentialAvailability(channelIds: readonly string[]): Record<string, boolean> {
+function buildCredentialCompilerContext(
+  channelIds: readonly string[],
+): { readonly availability: Record<string, boolean>; readonly hashes: Record<string, string> } {
   const availability: Record<string, boolean> = {};
+  const hashes: Record<string, string> = {};
   for (const channelId of channelIds) {
     const manifest = messagingManifestRegistry.get(channelId);
     if (!manifest) continue;
     for (const input of manifest.inputs) {
       if (input.kind !== "secret" || !input.envKey) continue;
-      if (!getMessagingToken(input.envKey)) continue;
+      const token = getMessagingToken(input.envKey);
+      if (!token) continue;
       availability[input.id] = true;
       availability[`${manifest.id}.${input.id}`] = true;
       availability[input.envKey] = true;
+      const hash = hashCredential(token);
+      if (!hash) continue;
+      hashes[input.id] = hash;
+      hashes[`${manifest.id}.${input.id}`] = hash;
+      hashes[input.envKey] = hash;
     }
   }
-  return availability;
+  return { availability, hashes };
 }
 
 function collectManifestCredentials(manifest: ChannelManifest): Record<string, string> {
@@ -869,6 +885,51 @@ function collectManifestCredentials(manifest: ChannelManifest): Record<string, s
     if (value) acquired[credential.providerEnvKey] = value;
   }
   return acquired;
+}
+
+function filterPlanToChannel(
+  plan: SandboxMessagingPlan,
+  channelId: string,
+): SandboxMessagingPlan {
+  const networkEntries = plan.networkPolicy.entries.filter(
+    (entry) => entry.channelId === channelId,
+  );
+  return {
+    ...plan,
+    channels: plan.channels.filter((channel) => channel.channelId === channelId),
+    disabledChannels: plan.disabledChannels.filter((entry) => entry === channelId),
+    credentialBindings: plan.credentialBindings.filter((entry) => entry.channelId === channelId),
+    networkPolicy: {
+      presets: [...new Set(networkEntries.map((entry) => entry.presetName))],
+      entries: networkEntries,
+    },
+    agentRender: plan.agentRender.filter((entry) => entry.channelId === channelId),
+    buildSteps: plan.buildSteps.filter((entry) => entry.channelId === channelId),
+    stateUpdates: plan.stateUpdates.filter((entry) => entry.channelId === channelId),
+    healthChecks: plan.healthChecks.filter((entry) => entry.channelId === channelId),
+  };
+}
+
+function channelProviderNamesFromPlan(
+  plan: SandboxMessagingPlan | null | undefined,
+  channelId: string,
+): string[] {
+  if (!plan) return [];
+  return [
+    ...new Set(
+      plan.credentialBindings
+        .filter((binding) => binding.channelId === channelId)
+        .map((binding) => binding.providerName),
+    ),
+  ];
+}
+
+function fallbackChannelProviderNames(
+  sandboxName: string,
+  channelName: string,
+  envKeys: readonly string[],
+): string[] {
+  return envKeys.map((envKey) => bridgeProviderName(sandboxName, channelName, envKey));
 }
 
 function assertAddChannelPlanActive(
@@ -1072,7 +1133,7 @@ export async function addSandboxChannel(
     if (!applyChannelPresetIfAvailable(sandboxName, canonical)) {
       process.exit(1);
     }
-    await applyChannelAddToGatewayAndRegistry(sandboxName, canonical, {});
+    await applyChannelAddToGatewayAndRegistry(sandboxName, canonical, plan, {});
     persistManifestAddState(sandboxName, manifest);
     MessagingHostStateApplier.applyPlanToRegistry(sandboxName, plan);
     console.log("");
@@ -1114,11 +1175,12 @@ export async function addSandboxChannel(
   // discard the change. Pre-fix this was safe because saveCredential()
   // wrote credentials.json; with env-only persistence, exiting before
   // the rebuild used to drop the queued token.
-  await applyChannelAddToGatewayAndRegistry(sandboxName, canonical, acquired);
+  await applyChannelAddToGatewayAndRegistry(sandboxName, canonical, plan, acquired);
   console.log(`  ${G}✓${R} Registered ${canonical} bridge with the OpenShell gateway.`);
 
   if (!applyChannelPresetIfAvailable(sandboxName, canonical)) {
     await rollbackChannelAdd(sandboxName, channelDef, canonical, {
+      plan,
       wasAlreadyEnabled,
       priorMessagingChannels,
       priorCreds,
@@ -1138,6 +1200,7 @@ async function rollbackChannelAdd(
   channel: ChannelDef,
   canonical: string,
   snapshot: {
+    plan: SandboxMessagingPlan;
     wasAlreadyEnabled: boolean;
     priorMessagingChannels: string[];
     priorCreds: Record<string, string>;
@@ -1160,13 +1223,13 @@ async function rollbackChannelAdd(
     );
     if (Object.keys(snapshot.priorCreds).length > 0) {
       try {
-        const priorTokenDefs = Object.entries(snapshot.priorCreds).map(([envKey, token]) => ({
-          name: bridgeProviderName(sandboxName, canonical, envKey),
-          envKey,
-          token,
-        }));
-        onboardProviders.upsertMessagingProviders(priorTokenDefs, runOpenshell, {
+        MessagingSetupApplier.applyCredentialsAtOpenShell(filterPlanToChannel(snapshot.plan, canonical), {
+          env: { ...process.env, ...snapshot.priorCreds },
+          runOpenshell: (args, runOptions) =>
+            runOpenshell([...args], runOptions as Parameters<typeof runOpenshell>[1]),
           bestEffort: true,
+          resolveCredential: (envKey, env) =>
+            normalizeEnvValue(env[envKey]) ?? getMessagingToken(envKey),
         });
       } catch (err) {
         console.error(
@@ -1186,7 +1249,9 @@ async function rollbackChannelAdd(
   const result = await applyChannelRemoveToGatewayAndRegistry(
     sandboxName,
     canonical,
-    getChannelTokenKeys(channel),
+    channelProviderNamesFromPlan(snapshot.plan, canonical).length > 0
+      ? channelProviderNamesFromPlan(snapshot.plan, canonical)
+      : fallbackChannelProviderNames(sandboxName, canonical, getChannelTokenKeys(channel)),
     { bestEffort: true },
   );
   if (!result.ok) {
@@ -1424,8 +1489,12 @@ export async function removeSandboxChannel(
     process.exit(1);
   }
 
-  await applyChannelRemoveToGatewayAndRegistry(sandboxName, canonical, tokenKeys);
-  if (tokenKeys.length > 0) {
+  const providerNames =
+    channelProviderNamesFromPlan(registryEntry?.messaging?.plan, canonical).length > 0
+      ? channelProviderNamesFromPlan(registryEntry?.messaging?.plan, canonical)
+      : fallbackChannelProviderNames(sandboxName, canonical, tokenKeys);
+  await applyChannelRemoveToGatewayAndRegistry(sandboxName, canonical, providerNames);
+  if (providerNames.length > 0) {
     console.log(`  ${G}✓${R} Removed ${canonical} bridge from the OpenShell gateway.`);
   } else {
     console.log(`  ${G}✓${R} Removed ${canonical} channel.`);

@@ -61,6 +61,12 @@ export type MessagingOpenShellRunner = (
 
 export interface MessagingCredentialApplyOptions extends MessagingSetupEnvOptions {
   readonly runOpenshell: MessagingOpenShellRunner;
+  readonly replaceExisting?: boolean;
+  readonly bestEffort?: boolean;
+  readonly resolveCredential?: (
+    envKey: string,
+    env: NodeJS.ProcessEnv,
+  ) => string | null | undefined;
 }
 
 export interface MessagingCredentialApplyResult {

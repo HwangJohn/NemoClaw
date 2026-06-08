@@ -10,6 +10,9 @@ import type {
 /** Credential availability lookup by env key, channel.input id, or credential id. */
 export type MessagingCompilerCredentialAvailability = Readonly<Record<string, boolean>>;
 
+/** Credential hash lookup by env key, channel.input id, or credential id. */
+export type MessagingCompilerCredentialHashes = Readonly<Record<string, string>>;
+
 /** Compiler inputs; values here must not contain raw secret material. */
 export interface ManifestCompilerContext {
   readonly sandboxName: string;
@@ -20,4 +23,5 @@ export interface ManifestCompilerContext {
   readonly disabledChannels?: readonly MessagingChannelId[];
   readonly supportedChannelIds?: readonly MessagingChannelId[];
   readonly credentialAvailability?: MessagingCompilerCredentialAvailability;
+  readonly credentialHashes?: MessagingCompilerCredentialHashes;
 }

@@ -23,8 +23,9 @@ export function planCredentialBindings(
       context.credentialAvailability?.[`${manifest.id}.${credential.id}`] === true;
 
     const envKey = sourceInput?.sourceEnv ?? credential.providerEnvKey;
-    const credentialHash =
-      credentialAvailable ? (hashCredential(process.env[envKey]) ?? undefined) : undefined;
+    const credentialHash = credentialAvailable
+      ? resolveCredentialHash(manifest, credential, envKey, context)
+      : undefined;
 
     return {
       channelId: manifest.id,
@@ -37,4 +38,25 @@ export function planCredentialBindings(
       ...(credentialHash !== undefined ? { credentialHash } : {}),
     };
   });
+}
+
+function resolveCredentialHash(
+  manifest: ChannelManifest,
+  credential: ChannelManifest["credentials"][number],
+  envKey: string,
+  context: ManifestCompilerContext,
+): string | undefined {
+  const hashes = context.credentialHashes ?? {};
+  const keys = [
+    envKey,
+    credential.sourceInput,
+    `${manifest.id}.${credential.sourceInput}`,
+    credential.id,
+    `${manifest.id}.${credential.id}`,
+  ];
+  for (const key of keys) {
+    const hash = hashes[key];
+    if (hash) return hash;
+  }
+  return hashCredential(process.env[envKey]) ?? undefined;
 }

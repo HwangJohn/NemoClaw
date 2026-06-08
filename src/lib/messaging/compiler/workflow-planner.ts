@@ -14,6 +14,7 @@ import { ManifestCompiler } from "./manifest-compiler";
 import type {
   ManifestCompilerContext,
   MessagingCompilerCredentialAvailability,
+  MessagingCompilerCredentialHashes,
 } from "./types";
 
 export interface MessagingWorkflowPlannerBuildContext {
@@ -25,6 +26,7 @@ export interface MessagingWorkflowPlannerBuildContext {
   readonly disabledChannels?: readonly MessagingChannelId[];
   readonly supportedChannelIds?: readonly MessagingChannelId[];
   readonly credentialAvailability?: MessagingCompilerCredentialAvailability;
+  readonly credentialHashes?: MessagingCompilerCredentialHashes;
 }
 
 export class MessagingWorkflowPlanner {
@@ -53,6 +55,7 @@ export class MessagingWorkflowPlanner {
       disabledChannels,
       supportedChannelIds: context.supportedChannelIds,
       credentialAvailability: context.credentialAvailability,
+      credentialHashes: context.credentialHashes,
     };
     return this.compiler.compile(compilerContext);
   }
@@ -77,6 +80,7 @@ export class MessagingWorkflowPlanner {
         ),
         context.credentialAvailability,
       ),
+      credentialHashes: context.credentialHashes,
     });
     return existingPlan
       ? mergeSandboxMessagingPlans(existingPlan, compiledPlan)
@@ -206,6 +210,7 @@ export interface MessagingWorkflowPlannerSandboxContext {
   readonly sandboxEntry?: MessagingWorkflowPlannerSandboxEntry | null;
   readonly supportedChannelIds?: readonly MessagingChannelId[];
   readonly credentialAvailability?: MessagingCompilerCredentialAvailability;
+  readonly credentialHashes?: MessagingCompilerCredentialHashes;
 }
 
 export interface MessagingWorkflowPlannerChannelAddContext
