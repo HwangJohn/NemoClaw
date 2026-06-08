@@ -78,7 +78,7 @@ e2e_lifecycle_rebuild_current_version() {
   # Step 3: write the marker file.
   if ! E2E_SANDBOX_EXEC_TIMEOUT_SECONDS=30 \
     e2e_sandbox_exec "${sandbox_name}" -- sh -c \
-      "mkdir -p '$(dirname "${LIFECYCLE_REBUILD_MARKER_PATH}")' && printf '%s' '${marker_content}' > '${LIFECYCLE_REBUILD_MARKER_PATH}'"; then
+    "mkdir -p '$(dirname "${LIFECYCLE_REBUILD_MARKER_PATH}")' && printf '%s' '${marker_content}' > '${LIFECYCLE_REBUILD_MARKER_PATH}'"; then
     echo "lifecycle:rebuild-current-version: failed to write marker into sandbox" >&2
     return 1
   fi

@@ -25,8 +25,8 @@ payload='{"model":"nvidia/nemotron-3-super-120b-a12b","messages":[{"role":"user"
 # --max-time stays ~10s under the wrapper cap.
 # shellcheck disable=SC2034 # consumed by e2e_sandbox_exec via env
 E2E_SANDBOX_EXEC_TIMEOUT_SECONDS=50 \
-response="$(e2e_sandbox_exec "${name}" -- curl -fsS --max-time 40 -H 'Content-Type: application/json' \
-  -d "${payload}" "https://inference.local/v1/chat/completions")"
+  response="$(e2e_sandbox_exec "${name}" -- curl -fsS --max-time 40 -H 'Content-Type: application/json' \
+    -d "${payload}" "https://inference.local/v1/chat/completions")"
 # CodeRabbit review item #12: substring expansion instead of `| head`
 # avoids SIGPIPE-driven false failures under `set -o pipefail`.
 printf '%s\n' "${response:0:1024}"

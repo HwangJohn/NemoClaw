@@ -45,5 +45,5 @@ esac
 # curl under `pipefail` and flagging a successful request as failed.
 # shellcheck disable=SC2034 # consumed by e2e_sandbox_exec via env
 E2E_SANDBOX_EXEC_TIMEOUT_SECONDS=35 \
-body="$(e2e_sandbox_exec "${name}" -- curl -fsS --max-time 25 "https://${host}/v1/models")"
+  body="$(e2e_sandbox_exec "${name}" -- curl -fsS --max-time 25 "https://${host}/v1/models")"
 printf '%s\n' "${body:0:512}"

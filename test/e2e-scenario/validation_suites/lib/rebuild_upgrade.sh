@@ -135,12 +135,12 @@ rebuild_upgrade_assert_policy_presets_preserved() {
   local preset matchers found m
   for preset in ${presets}; do
     case "${preset}" in
-      npm)              matchers=("npm" "registry.npmjs.org") ;;
-      pypi)             matchers=("pypi" "pypi.org" "files.pythonhosted.org") ;;
-      huggingface)      matchers=("huggingface" "huggingface.co") ;;
-      brew)             matchers=("brew" "formulae.brew.sh") ;;
+      npm) matchers=("npm" "registry.npmjs.org") ;;
+      pypi) matchers=("pypi" "pypi.org" "files.pythonhosted.org") ;;
+      huggingface) matchers=("huggingface" "huggingface.co") ;;
+      brew) matchers=("brew" "formulae.brew.sh") ;;
       openclaw-pricing) matchers=("openclaw-pricing" "openrouter.ai") ;;
-      *)                matchers=("${preset}") ;;
+      *) matchers=("${preset}") ;;
     esac
     found=0
     for m in "${matchers[@]}"; do
