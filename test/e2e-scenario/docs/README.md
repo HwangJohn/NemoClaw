@@ -19,9 +19,11 @@ first, they are short and deliberately not redundant with prose:
 - [`../nemoclaw_scenarios/scenarios.yaml`](../nemoclaw_scenarios/scenarios.yaml)
   — platforms, installs, runtimes, onboarding choices, and the
   concrete scenarios that combine them.
-- [`../nemoclaw_scenarios/expected-states.yaml`](../nemoclaw_scenarios/expected-states.yaml)
-  — reusable structural contracts (gateway health, sandbox status,
-  inference routing, etc.).
+- [`../scenarios/expected-states.ts`](../scenarios/expected-states.ts)
+  — typed registry of reusable structural contracts (gateway health,
+  sandbox status, inference routing, etc.). Single source of truth
+  since the legacy YAML resolver was retired.
+
 - [`../validation_suites/suites.yaml`](../validation_suites/suites.yaml)
   — ordered validation steps, each with a `requires_state` predicate.
 
@@ -160,8 +162,9 @@ Add-a-scenario, add-a-state, and add-a-suite are short edits to the
 three YAML files above, plus shell scripts under
 `nemoclaw_scenarios/install/`, `nemoclaw_scenarios/onboard/`,
 `validation_suites/assert/`, or `validation_suites/<category>/`. The
-schemas in
-[`../runtime/resolver/schema.ts`](../runtime/resolver/schema.ts)
+typed contracts in
+[`../scenarios/types.ts`](../scenarios/types.ts) and
+[`../scenarios/expected-states.ts`](../scenarios/expected-states.ts)
 describe the required shape; `npx tsx test/e2e-scenario/scenarios/run.ts --scenarios <id> --plan-only`
 validates your change without running anything destructive.
 
