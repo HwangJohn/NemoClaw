@@ -1,16 +1,34 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { compileRunPlans, renderPlanText, writePlanArtifacts } from "./compiler.ts";
 import { ScenarioRunner } from "./orchestrators/runner.ts";
 import { listScenarios } from "./registry.ts";
-import type { PhaseResult } from "./types.ts";
+import { resolveRunnerForScenario } from "./runner-routing.ts";
+import type { PhaseResult, ScenarioDefinition } from "./types.ts";
 
 interface Args {
   list: boolean;
   emitMatrix: boolean;
   planOnly: boolean;
   scenarios: string[];
+}
+
+/**
+ * Shape of a single GitHub Actions matrix `include` entry emitted by
+ * `--emit-matrix`. The fields are kept short and JSON-stable so the consuming
+ * workflow can reference them as `${{ matrix.id }}`, `${{ matrix.runner }}`,
+ * etc. without further parsing.
+ */
+export interface ScenarioMatrixEntry {
+  id: string;
+  runner: string;
+  label: string;
+  platform: string;
+  suites: string[];
 }
 
 function parseArgs(argv: string[]): Args {
@@ -50,16 +68,45 @@ function printList() {
   }
 }
 
-function emitMatrix() {
-  // Read-only emission of the typed registry as a GitHub Actions matrix
-  // payload. Consumed by the dynamic matrix workflow (PR #4359).
-  const payload = {
-    include: listScenarios().map((scenario) => ({
+function buildLabel(scenario: ScenarioDefinition): string {
+  const platform = scenario.environment?.platform ?? "unknown-platform";
+  const suites = scenario.suiteIds ?? [];
+  if (scenario.expectedFailure) {
+    const cls = scenario.expectedFailure.errorClass ?? "expected-failure";
+    return `${platform} \u00b7 ${scenario.id} \u00b7 expect-fail:${cls}`;
+  }
+  if (suites.length === 0) {
+    return `${platform} \u00b7 ${scenario.id}`;
+  }
+  if (suites.length <= 3) {
+    return `${platform} \u00b7 ${scenario.id} \u00b7 ${suites.join("+")}`;
+  }
+  return `${platform} \u00b7 ${scenario.id} \u00b7 ${suites.length} suites`;
+}
+
+/**
+ * Build the GitHub Actions matrix for every scenario in the typed registry.
+ * Sorted by id so workflow runs are deterministic and diffable.
+ */
+export function buildScenarioMatrix(): ScenarioMatrixEntry[] {
+  return listScenarios().map((scenario): ScenarioMatrixEntry => {
+    const { runner } = resolveRunnerForScenario(scenario);
+    return {
       id: scenario.id,
-      description: scenario.description ?? "",
-    })),
-  };
-  console.log(JSON.stringify(payload));
+      runner,
+      label: buildLabel(scenario),
+      platform: scenario.environment?.platform ?? "unknown",
+      suites: scenario.suiteIds ?? [],
+    };
+  });
+}
+
+function emitMatrix() {
+  // Single line so GHA's `$GITHUB_OUTPUT` can consume it via
+  //   echo "matrix=$(npx tsx ... --emit-matrix)" >> "$GITHUB_OUTPUT"
+  // without needing heredoc multi-line output handling.
+  // Consumed by the dynamic matrix workflow (PR #4359).
+  process.stdout.write(`${JSON.stringify(buildScenarioMatrix())}\n`);
 }
 
 async function main() {
@@ -155,9 +202,25 @@ function planFailed(plan: import("./types.ts").RunPlan, results: PhaseResult[]):
   return false;
 }
 
-try {
-  await main();
-} catch (error) {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
+// Only execute when invoked directly as a script. Importing this module from
+// tests (e.g. `buildScenarioMatrix`) must not trigger the CLI side-effects.
+// Compare via realpath so symlinked paths (e.g. `/tmp` -> `/private/tmp` on
+// macOS) still resolve as equal.
+function isInvokedDirectly(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return realpathSync(entry) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isInvokedDirectly()) {
+  try {
+    await main();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  }
 }

@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import yaml from "js-yaml";
 
 import { compileRunPlans } from "../scenarios/compiler.ts";
 import {
@@ -18,57 +17,19 @@ import { ScenarioRunner } from "../scenarios/orchestrators/runner.ts";
 import { listScenarios } from "../scenarios/registry.ts";
 import type { ExpectedState, PhaseName, PhaseResult, RunContext, RunPlanPhase } from "../scenarios/types.ts";
 
-const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
-const STATES_YAML_PATH = path.join(
-  REPO_ROOT,
-  "test/e2e-scenario/nemoclaw_scenarios/expected-states.yaml",
-);
-
 function freshCtx(): RunContext {
   return { contextDir: fs.mkdtempSync(path.join(os.tmpdir(), "e2e-state-")) };
 }
 
-describe("typed expected-state registry mirrors expected-states.yaml", () => {
-  it("typed registry covers every YAML expected_state id", () => {
-    const yamlDoc = yaml.load(fs.readFileSync(STATES_YAML_PATH, "utf8")) as {
-      expected_states: Record<string, unknown>;
-    };
-    const yamlIds = Object.keys(yamlDoc.expected_states).sort();
-    const typedIds = listExpectedStates()
-      .map((s) => s.id)
-      .sort();
-    expect(typedIds).toEqual(yamlIds);
-  });
-
-  it("structural cli/gateway/sandbox dimensions match the YAML for each shared id", () => {
-    const yamlDoc = yaml.load(fs.readFileSync(STATES_YAML_PATH, "utf8")) as {
-      expected_states: Record<string, Record<string, Record<string, unknown>>>;
-    };
-    for (const state of listExpectedStates()) {
-      const yamlEntry = yamlDoc.expected_states[state.id];
-      expect(yamlEntry, `YAML entry for ${state.id}`).toBeTruthy();
-      // cli.installed
-      if (state.cli?.installed !== undefined) {
-        expect(yamlEntry.cli?.installed).toBe(state.cli.installed);
-      }
-      // gateway.expected
-      if (state.gateway) {
-        expect(yamlEntry.gateway?.expected).toBe(state.gateway.expected);
-        if (state.gateway.health) {
-          expect(yamlEntry.gateway?.health).toBe(state.gateway.health);
-        }
-      }
-      // sandbox.expected
-      if (state.sandbox) {
-        expect(yamlEntry.sandbox?.expected).toBe(state.sandbox.expected);
-        if (state.sandbox.status) {
-          expect(yamlEntry.sandbox?.status).toBe(state.sandbox.status);
-        }
-        if (state.sandbox.agent) {
-          expect(yamlEntry.sandbox?.agent).toBe(state.sandbox.agent);
-        }
-      }
-    }
+// The legacy parity tests against `nemoclaw_scenarios/expected-states.yaml`
+// were retired alongside the YAML resolver path (see commit 9da75ac0a).
+// The typed registry in `scenarios/expected-states.ts` is the single source
+// of truth; these id-coverage assertions replace the YAML-mirror checks.
+describe("typed expected-state registry id coverage", () => {
+  it("exposes a non-empty list of registered expected-state ids", () => {
+    const ids = listExpectedStates().map((s) => s.id);
+    expect(ids.length).toBeGreaterThan(0);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 
   it("requireExpectedState throws on unknown id with available list", () => {

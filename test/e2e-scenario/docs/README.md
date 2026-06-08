@@ -97,7 +97,7 @@ test/e2e/
 
 The CI entry point is `.github/workflows/e2e-scenarios.yaml` (manual dispatch). Existing legacy workflows (`nightly-e2e.yaml`, `macos-e2e.yaml`, `wsl-e2e.yaml`, etc.) remain in place during the migration.
 
-Migration coverage is tracked through the layered scenario definitions, suite inventory, and the domain migration issues linked from issue #3588. Do not add a workflow-level parity report or assertion-ledger gate; use focused code review and the scenario coverage report to decide what to migrate next.
+Migration status is tracked outside the repository in GitHub issues and pull requests, not in repo-local checklists. The parent architecture issue is #3588. Do not add a workflow-level parity report or assertion-ledger gate; use focused code review, framework tests, and the scenario coverage report to decide what to migrate next.
 
 ## How to add a scenario, state, or suite
 
