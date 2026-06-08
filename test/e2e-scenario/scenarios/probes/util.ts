@@ -100,12 +100,13 @@ function spawnBash(
     const startedAt = Date.now();
     let stdout = "";
     let stderr = "";
-    // bash -c reserves the first positional after the script for $0.
-    // Use a fixed sentinel so the script's own $1..$N line up with
-    // the caller-supplied bashArgs.
-    // lgtm[js/shell-command-injection-from-environment] script body is a
-    //   string literal at every call site; safeArgs are NUL-validated and
-    //   reach the script as positional bash parameters, not via interpolation.
+    // bash -c reserves the first positional after the script for $0;
+    // a fixed sentinel keeps the script's own $1..$N aligned with the
+    // caller-supplied bashArgs. Spawn safety contract is documented on
+    // spawnBash above (literal script body, NUL-validated positional
+    // argv, hard-coded bash binary). The lgtm marker MUST be the line
+    // immediately preceding the spawn() call so CodeQL/LGTM picks it up.
+    // lgtm[js/shell-command-injection-from-environment]
     const child = spawn("bash", ["-c", script, "e2e-probe-spawn", ...safeArgs], {
       env: opts.env ?? process.env,
       cwd: opts.cwd,
