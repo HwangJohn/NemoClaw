@@ -184,7 +184,11 @@ sandbox_lifecycle_assert_snapshot_create_list_restore_marker() {
     return 1
   }
   sandbox_lifecycle_pass validation.sandbox_snapshot.marker_written "marker written"
-  sandbox_lifecycle_run_with_timeout 30 nemoclaw snapshot create "${E2E_SANDBOX_NAME}" >/dev/null || {
+  # Argv shape: `nemoclaw <sandbox> snapshot <subcommand>`. The earlier
+  # form `nemoclaw snapshot create <sandbox>` parsed `snapshot` as a
+  # sandbox name and produced the misleading 'Unknown command: snapshot'
+  # error. Mirrors test/e2e/test-snapshot-commands.sh argv layout.
+  sandbox_lifecycle_run_with_timeout 30 nemoclaw "${E2E_SANDBOX_NAME}" snapshot create >/dev/null || {
     sandbox_lifecycle_fail validation.sandbox_snapshot.create_succeeds "snapshot create failed"
     return 1
   }
@@ -193,12 +197,14 @@ sandbox_lifecycle_assert_snapshot_create_list_restore_marker() {
     sandbox_lifecycle_fail validation.sandbox_snapshot.restore_rolls_back_marker "failed to mutate marker"
     return 1
   }
-  sandbox_lifecycle_run_with_timeout 30 nemoclaw snapshot list "${E2E_SANDBOX_NAME}" >/dev/null || {
+  sandbox_lifecycle_run_with_timeout 30 nemoclaw "${E2E_SANDBOX_NAME}" snapshot list >/dev/null || {
     sandbox_lifecycle_fail validation.sandbox_snapshot.list_shows_snapshot "snapshot list failed"
     return 1
   }
   sandbox_lifecycle_pass validation.sandbox_snapshot.list_shows_snapshot "snapshot listed"
-  sandbox_lifecycle_run_with_timeout 30 nemoclaw snapshot restore "${E2E_SANDBOX_NAME}" latest >/dev/null || {
+  # `snapshot restore` with no positional arg defaults to latest;
+  # matches test/e2e/test-snapshot-commands.sh Phase 6.
+  sandbox_lifecycle_run_with_timeout 30 nemoclaw "${E2E_SANDBOX_NAME}" snapshot restore >/dev/null || {
     sandbox_lifecycle_fail validation.sandbox_snapshot.restore_rolls_back_marker "snapshot restore failed"
     return 1
   }

@@ -175,6 +175,24 @@ export function buildChildEnv(
     }
   }
   Object.assign(out, opts.frameworkOverlay);
+  // The install action drops nemoclaw / openshell shims under
+  // ~/.local/bin (see nemoclaw_scenarios/install/repo-current.sh).
+  // On Ubuntu GH runners ~/.local/bin is on the default PATH; on
+  // self-hosted GPU runners and inside WSL it often is not, so the
+  // onboarding action's child runs without nemoclaw on PATH and
+  // dies with 'nemoclaw: command not found'. Add ~/.local/bin to
+  // every child's PATH at the framework boundary so the install
+  // location is consistent across phases. Idempotent equivalent of
+  // the install-path-refresh.sh nemoclaw_ensure_local_bin_on_path
+  // helper, applied centrally instead of per-script.
+  const home = out.HOME ?? base.HOME;
+  if (typeof home === "string" && home.length > 0) {
+    const localBin = `${home}/.local/bin`;
+    const currentPath = out.PATH ?? "";
+    if (!currentPath.split(":").includes(localBin)) {
+      out.PATH = currentPath ? `${localBin}:${currentPath}` : localBin;
+    }
+  }
   return out;
 }
 
