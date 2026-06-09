@@ -110,7 +110,8 @@ function instance(overrides: Partial<NemoClawInstance> = {}): NemoClawInstance {
 
 function fixture(runner: FakeRunner): StateValidationPhaseFixture {
   const host = new HostCliClient(runner);
-  return new StateValidationPhaseFixture(host, new GatewayClient(host), new SandboxClient(runner));
+  const sandbox = new SandboxClient(runner);
+  return new StateValidationPhaseFixture(host, new GatewayClient(host, sandbox), sandbox);
 }
 
 describe("state-validation phase fixture", () => {
@@ -203,6 +204,7 @@ describe("state-validation phase fixture", () => {
       args: [
         "sandbox",
         "exec",
+        "--name",
         "e2e-ubuntu-repo-cloud-openclaw",
         "--",
         "curl",

@@ -128,11 +128,11 @@
       "domain": "sandbox-lifecycle",
       "ownerIssue": "#4356",
       "status": "not-migrated",
-      "targetVitestScenarios": [],
+      "targetVitestScenarios": ["test/e2e-scenario/live/gateway-guard-recovery.test.ts"],
       "bridgeProbes": [],
       "retiredReason": "",
       "deletionReady": false,
-      "notes": "Crash-loop recovery remains a late migration because it exercises failure timing and recovery classification."
+      "notes": "Phase 4 (post-disruption recovery; #2701 contract) is migrated to test/e2e-scenario/live/gateway-guard-recovery.test.ts. Phases 1, 2, 3, and 5 (#2478 steady-state recovery cycles + 300s soak) remain in legacy bash pending a follow-up migration PR; status stays not-migrated until full coverage flips to covered. The legacy script also retains the #2478 WARNING assertion alongside the new #2701 guard-chain assertion until the recovery code path no longer warn-and-proceeds."
     },
     {
       "legacyScript": "test/e2e/test-agent-turn-latency-e2e.sh",
