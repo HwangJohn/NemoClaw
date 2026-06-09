@@ -891,8 +891,13 @@ export function buildConfig(env: Env = process.env): JsonObject {
     if (ch === "slack") {
       account.appToken = placeholder(ch, "SLACK_APP_TOKEN");
     }
-    if (ch === "telegram") {
+    // The Discord gateway client and the Telegram long-poll client only honor
+    // a per-account proxy; they ignore the managed env proxy, so route them
+    // through the sandbox proxy explicitly (Discord gateway: re-fix of #3894).
+    if (ch === "telegram" || ch === "discord") {
       account.proxy = proxyUrl;
+    }
+    if (ch === "telegram") {
       account.groupPolicy = "open";
     }
     if (isObject(allowedIds) && ch in allowedIds && allowedIds[ch]) {
