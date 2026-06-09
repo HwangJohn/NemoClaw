@@ -102,7 +102,8 @@ describe("E2E fixture clients", () => {
   it("gateway client delegates through NemoClaw gateway status", async () => {
     const runner = new FakeRunner();
     const host = new HostCliClient(runner, { cliPath: "nemoclaw" });
-    const gateway = new GatewayClient(host);
+    const sandbox = new SandboxClient(runner);
+    const gateway = new GatewayClient(host, sandbox);
 
     await gateway.expectHealthy();
 
@@ -116,7 +117,8 @@ describe("E2E fixture clients", () => {
   it("gateway client preserves caller-provided probe options", async () => {
     const runner = new FakeRunner();
     const host = new HostCliClient(runner, { cliPath: "nemoclaw" });
-    const gateway = new GatewayClient(host);
+    const sandbox = new SandboxClient(runner);
+    const gateway = new GatewayClient(host, sandbox);
 
     await gateway.status({
       artifactName: "custom-gateway-status",
@@ -145,7 +147,7 @@ describe("E2E fixture clients", () => {
 
     expect(runner.calls[0]).toEqual({
       command: "openshell",
-      args: ["sandbox", "exec", "assistant", "--", "echo", "ok"],
+      args: ["sandbox", "exec", "--name", "assistant", "--", "echo", "ok"],
       options: {
         artifactName: "sandbox-exec-assistant",
       },
@@ -165,7 +167,7 @@ describe("E2E fixture clients", () => {
 
     expect(runner.calls[0]).toEqual({
       command: "openshell",
-      args: ["sandbox", "status", "assistant"],
+      args: ["sandbox", "status", "--name", "assistant"],
       options: {
         artifactName: "custom-sandbox-status",
         env: { NEMOCLAW_TEST_VALUE: "1" },
@@ -192,6 +194,7 @@ describe("E2E fixture clients", () => {
     expect(runner.calls[0]?.args).toEqual([
       "sandbox",
       "exec",
+      "--name",
       "assistant",
       "--",
       "sh",

@@ -113,10 +113,11 @@ function fixture(
   io: ConstructorParameters<typeof StateValidationPhaseFixture>[3] = {},
 ): StateValidationPhaseFixture {
   const host = new HostCliClient(runner);
+  const sandbox = new SandboxClient(runner);
   return new StateValidationPhaseFixture(
     host,
-    new GatewayClient(host),
-    new SandboxClient(runner),
+    new GatewayClient(host, sandbox),
+    sandbox,
     io,
   );
 }
@@ -211,6 +212,7 @@ describe("state-validation phase fixture", () => {
       args: [
         "sandbox",
         "exec",
+        "--name",
         "e2e-ubuntu-repo-cloud-openclaw",
         "--",
         "curl",
