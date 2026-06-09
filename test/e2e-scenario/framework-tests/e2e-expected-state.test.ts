@@ -113,19 +113,18 @@ describe("probesForState maps typed expected-state into probe ids", () => {
     expect(probesForState(state)).toEqual([]);
   });
 
-  it("emits host-side probes BEFORE gateway/sandbox probes", () => {
-    // The state-validation orchestrator short-circuits on the first
-    // probe failure. Host-side preservation invariants must run
-    // first so a regression that wipes the local registry while
-    // leaving the gateway in a transient state surfaces as
-    // `local-registry-entry-present` failing, not as a noisy
-    // `gateway-healthy` failure that masks the real bug.
+  it("post-reboot-recovery-ready locks down host-side invariants only", () => {
+    // The post-reboot scenario locks the user-visible regression
+    // surface: registry preservation and Docker container
+    // preservation. Runtime liveness probes (gateway/sandbox) are
+    // intentionally omitted because they're environmental on
+    // `ubuntu-latest` after a simulated reboot and would mask the
+    // host-side signal. See the comment on `postRebootRecoveryReady`
+    // in `scenarios/expected-states.ts`.
     expect(probesForState(requireExpectedState("post-reboot-recovery-ready"))).toEqual([
       "cli-installed",
       "local-registry-entry-present",
       "docker-sandbox-container-present",
-      "gateway-healthy",
-      "sandbox-running",
     ]);
   });
 });

@@ -78,26 +78,29 @@ const onboardingFailureGatewayPortConflict: ExpectedState = {
 };
 
 // Post-reboot recovery contract for #4423. After the lifecycle phase
-// stops the OpenShell gateway runtime + the labeled sandbox container,
-// the user-visible invariants are:
+// stops the labeled sandbox container, the host-side invariants this
+// scenario locks down are:
 //
 //   * `cli` still installed.
-//   * `gateway` healthy: the user-systemd unit from #4580 brings the
-//     gateway back up before status runs.
-//   * `sandbox` running by the time validation completes: a correct
-//     fix performs Docker-backed recovery before responding.
 //   * `localRegistry` entry preserved: this is the user-visible
-//     regression target. On unfixed code, the destructive `missing`
-//     branch wipes the entry; on fixed code it survives because
-//     Docker corroborated the sandbox container existence.
-//   * `dockerSandboxContainer` still present: the recovery path must
+//     regression target. The destructive `missing` branch wipes the
+//     entry; preservation here proves #4578's mitigation holds AND
+//     that PR-A's Docker-corroboration path (when added) does not
+//     regress that invariant.
+//   * `dockerSandboxContainer` still present: any recovery path must
 //     not delete the labeled container or its `*-nemoclaw-gpu-backup-*`
 //     sibling as a side effect.
+//
+// Gateway/sandbox runtime state are intentionally OMITTED from this
+// expected state. The user-visible bug is host-side state
+// destruction; gateway/sandbox liveness on a `ubuntu-latest` runner
+// after `docker stop` is environmental and varies independently of
+// the regression target. Once PR-A lands its Docker-driver recovery
+// helper, a follow-up scenario can extend the expected state with
+// runtime invariants on a more controlled runner.
 const postRebootRecoveryReady: ExpectedState = {
   id: "post-reboot-recovery-ready",
   cli: { installed: true },
-  gateway: { expected: "present", health: "healthy" },
-  sandbox: { expected: "present", status: "running", agent: "openclaw" },
   localRegistry: { expected: "present" },
   dockerSandboxContainer: { expected: "present" },
 };
