@@ -112,6 +112,22 @@ describe("probesForState maps typed expected-state into probe ids", () => {
     };
     expect(probesForState(state)).toEqual([]);
   });
+
+  it("emits host-side probes BEFORE gateway/sandbox probes", () => {
+    // The state-validation orchestrator short-circuits on the first
+    // probe failure. Host-side preservation invariants must run
+    // first so a regression that wipes the local registry while
+    // leaving the gateway in a transient state surfaces as
+    // `local-registry-entry-present` failing, not as a noisy
+    // `gateway-healthy` failure that masks the real bug.
+    expect(probesForState(requireExpectedState("post-reboot-recovery-ready"))).toEqual([
+      "cli-installed",
+      "local-registry-entry-present",
+      "docker-sandbox-container-present",
+      "gateway-healthy",
+      "sandbox-running",
+    ]);
+  });
 });
 
 describe("compiler emits state-validation phase actions from expected-state registry", () => {

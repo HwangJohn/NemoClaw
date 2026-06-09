@@ -147,6 +147,22 @@ export function probesForState(state: ExpectedState): readonly StateProbeId[] {
   if (state.cli?.installed === true) {
     probes.push("cli-installed");
   }
+  // Host-side aspects run BEFORE runtime-derived gateway/sandbox
+  // probes. The state-validation orchestrator short-circuits on the
+  // first probe failure, so host-side preservation invariants —
+  // which are the user-visible regression targets for #4423-class
+  // bugs — must be observed first. A regression that destroys the
+  // registry while leaving the gateway in a transient state would
+  // otherwise be masked by a noisy gateway-healthy failure.
+  // "absent" deliberately emits no probe today: it would require
+  // asserting the registry/container does NOT exist, which has no
+  // scenario in flight. Add when a negative scenario needs it.
+  if (state.localRegistry?.expected === "present") {
+    probes.push("local-registry-entry-present");
+  }
+  if (state.dockerSandboxContainer?.expected === "present") {
+    probes.push("docker-sandbox-container-present");
+  }
   if (state.gateway?.expected === "present" && state.gateway.health === "healthy") {
     probes.push("gateway-healthy");
   } else if (state.gateway?.expected === "absent") {
@@ -156,16 +172,6 @@ export function probesForState(state: ExpectedState): readonly StateProbeId[] {
     probes.push("sandbox-running");
   } else if (state.sandbox?.expected === "absent") {
     probes.push("sandbox-absent");
-  }
-  // Host-side aspects. "absent" deliberately emits no probe today: it
-  // would require asserting the registry/container does NOT exist,
-  // which has no scenario in flight. Add when a negative scenario
-  // needs it.
-  if (state.localRegistry?.expected === "present") {
-    probes.push("local-registry-entry-present");
-  }
-  if (state.dockerSandboxContainer?.expected === "present") {
-    probes.push("docker-sandbox-container-present");
   }
   return probes;
 }
