@@ -17,8 +17,6 @@ import type { NemoClawInstance } from "./onboarding.ts";
 // probe.
 const OPENSHELL_SANDBOX_NAME_LABEL = "openshell.ai/sandbox-name";
 const DOCKER_PROBE_TIMEOUT_MS = 15_000;
-const GATEWAY_STOP_TIMEOUT_MS = 60_000;
-const GATEWAY_START_TIMEOUT_MS = 5 * 60_000;
 // Status invocation can take several minutes on unfixed code while
 // the gateway recovery path retries. Keep the budget generous; the
 // bug is independent of latency.
@@ -84,28 +82,25 @@ export class LifecyclePhaseFixture {
    * Reproduce the host-side conditions of a DGX Spark / Linux Docker-driver
    * reboot AND drive the user-visible action that exposes the bug:
    *
-   *   1. Stop OpenShell's gateway runtime so it drops the in-memory
-   *      sandbox view.
-   *
-   *   2. Locate the OpenShell-labeled Docker container for the
+   *   1. Locate the OpenShell-labeled Docker container for the
    *      scenario's sandbox name and either stop it (default) or
    *      stop+rename it to a `*-nemoclaw-gpu-backup-*` sibling.
+   *      The gateway runtime is left HEALTHY — the bug class
+   *      tracked by #4423 (parts 2 & 3) requires a `healthy_named`
+   *      gateway when status runs, otherwise #4578's mitigation
+   *      takes over and the destructive branch is never reached.
+   *      Stopping the labeled sandbox container is enough to make
+   *      `openshell sandbox get <name>` return NotFound while
+   *      Docker still has the recoverable container on disk —
+   *      which is the precise precondition for the destructive
+   *      `missing` branch in `src/lib/actions/sandbox/status.ts`.
    *
-   *   3. Restart the gateway with `openshell gateway start --name
-   *      nemoclaw`. This is the user-systemd autostart path from
-   *      #4580 in compressed form: the gateway comes back HEALTHY
-   *      with no memory of the sandbox, while Docker still has the
-   *      labeled container. That combination is the precise
-   *      precondition for the remaining #4423 destructive branches
-   *      in `status.ts:308` (and parallel `ensureLiveSandboxOrExit`).
-   *      Without this restart the gateway-down branch takes over
-   *      and #4578's mitigation hides the bug.
-   *
-   *   4. Invoke `nemoclaw <name> status`. With a healthy gateway and
-   *      sandbox lookup returning NotFound, on unfixed `main` the
-   *      destructive `missing` branch wipes the registry. On the
-   *      PR-A fix branch the new Docker-driver recovery helper
-   *      restarts the labeled container before stale-removal fires.
+   *   2. Invoke `nemoclaw <name> status`. With healthy_named gateway
+   *      + sandbox lookup NotFound + Docker container present, on
+   *      unfixed `main` the destructive branch wipes the registry.
+   *      On the PR-A fix branch the new Docker-driver recovery
+   *      helper restarts the labeled container before stale-removal
+   *      fires.
    *
    *   We deliberately do NOT assert on the status exit code here
    *   because the bug is precisely that status "succeeds" at
@@ -126,17 +121,6 @@ export class LifecyclePhaseFixture {
   ): Promise<LifecycleResult> {
     const mode: PostRebootMode = options.mode ?? "stop-original";
     const steps: LifecycleResult["steps"] = [];
-
-    const gatewayStop = await this.sandbox.openshell(["gateway", "stop"], {
-      artifactName: "lifecycle-post-reboot-gateway-stop",
-      env: buildAvailabilityProbeEnv(),
-      timeoutMs: GATEWAY_STOP_TIMEOUT_MS,
-    });
-    // gateway stop is best-effort: a fresh-start/no-runtime gateway
-    // will exit non-zero with NoSuchProcess, which is exactly the
-    // post-reboot state we want to simulate. Don't fail the lifecycle
-    // phase on it.
-    steps.push({ id: "gateway-stop", results: [gatewayStop] });
 
     const containerNames = await this.discoverLabeledContainerNames(instance);
     if (containerNames.length === 0) {
@@ -180,19 +164,6 @@ export class LifecyclePhaseFixture {
         });
       });
     }
-
-    // Restart the gateway in a fresh state. This compresses the
-    // post-reboot user-systemd autostart path (#4580) into one step
-    // so status sees a HEALTHY gateway with no sandbox memory — the
-    // precondition for the destructive `missing` branch we want
-    // PR-A to neutralize.
-    const gatewayStart = await this.sandbox.openshell(["gateway", "start", "--name", "nemoclaw"], {
-      artifactName: "lifecycle-post-reboot-gateway-start",
-      env: buildAvailabilityProbeEnv(),
-      timeoutMs: GATEWAY_START_TIMEOUT_MS,
-    });
-    assertExitZero(gatewayStart, "openshell gateway start --name nemoclaw");
-    steps.push({ id: "gateway-start", results: [gatewayStart] });
 
     // Final step: drive the user-visible action that exposed #4423.
     // We invoke status through the host CLI client so artifacts are

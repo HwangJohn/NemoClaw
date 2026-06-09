@@ -95,12 +95,10 @@ function fixture(runner: FakeRunner, cleanup: FakeCleanup): LifecyclePhaseFixtur
 }
 
 describe("LifecyclePhaseFixture.simulate post-reboot-recovery (stop-original)", () => {
-  it("stops gateway+container, restarts gateway fresh, then runs `nemoclaw <name> status`", async () => {
+  it("stops the labeled container then runs `nemoclaw <name> status`", async () => {
     const runner = new FakeRunner();
-    runner.enqueue(shellResult(0)); // openshell gateway stop
     runner.enqueue(shellResult(0, "openshell-cluster-e2e-ubuntu-repo-cloud-openclaw\n")); // discover
     runner.enqueue(shellResult(0)); // docker stop
-    runner.enqueue(shellResult(0)); // openshell gateway start --name nemoclaw
     runner.enqueue(shellResult(1, "Removed stale local registry entry.\n")); // status (non-zero on unfixed)
     const cleanup = new FakeCleanup();
 
@@ -108,13 +106,10 @@ describe("LifecyclePhaseFixture.simulate post-reboot-recovery (stop-original)", 
 
     expect(result.profile).toBe("post-reboot-recovery");
     expect(result.steps.map((step) => step.id)).toEqual([
-      "gateway-stop",
       "docker-stop:openshell-cluster-e2e-ubuntu-repo-cloud-openclaw",
-      "gateway-start",
       "nemoclaw-status:e2e-ubuntu-repo-cloud-openclaw",
     ]);
     expect(runner.calls.map((call) => ({ command: call.command, args: call.args }))).toEqual([
-      { command: "openshell", args: ["gateway", "stop"] },
       {
         command: "docker",
         args: [
@@ -127,7 +122,6 @@ describe("LifecyclePhaseFixture.simulate post-reboot-recovery (stop-original)", 
         ],
       },
       { command: "docker", args: ["stop", "openshell-cluster-e2e-ubuntu-repo-cloud-openclaw"] },
-      { command: "openshell", args: ["gateway", "start", "--name", "nemoclaw"] },
       { command: "nemoclaw", args: ["e2e-ubuntu-repo-cloud-openclaw", "status"] },
     ]);
     expect(cleanup.calls.map((call) => call.name)).toEqual([
@@ -137,10 +131,8 @@ describe("LifecyclePhaseFixture.simulate post-reboot-recovery (stop-original)", 
 
   it("tolerates a non-zero status exit (the bug succeeds at destroying state)", async () => {
     const runner = new FakeRunner();
-    runner.enqueue(shellResult(0)); // gateway stop
     runner.enqueue(shellResult(0, "container-1\n")); // discover
     runner.enqueue(shellResult(0)); // docker stop
-    runner.enqueue(shellResult(0)); // gateway start
     runner.enqueue(shellResult(1, "Removed stale local registry entry.\n")); // status non-zero
     const cleanup = new FakeCleanup();
 
@@ -151,36 +143,8 @@ describe("LifecyclePhaseFixture.simulate post-reboot-recovery (stop-original)", 
     expect(result.steps.find((step) => step.id.startsWith("nemoclaw-status:"))).toBeTruthy();
   });
 
-  it("tolerates a non-zero gateway stop (post-reboot fresh runtime)", async () => {
-    const runner = new FakeRunner();
-    runner.enqueue(shellResult(1, "no gateway runtime")); // gateway stop fails
-    runner.enqueue(shellResult(0, "container-1\n")); // discover
-    runner.enqueue(shellResult(0)); // docker stop
-    runner.enqueue(shellResult(0)); // gateway start
-    runner.enqueue(shellResult(0)); // status
-    const cleanup = new FakeCleanup();
-
-    const result = await fixture(runner, cleanup).simulate("post-reboot-recovery", instance());
-
-    expect(result.steps.find((step) => step.id === "gateway-stop")).toBeTruthy();
-  });
-
-  it("fails if gateway-start cannot bring the gateway back up", async () => {
-    const runner = new FakeRunner();
-    runner.enqueue(shellResult(0)); // gateway stop
-    runner.enqueue(shellResult(0, "container-1\n")); // discover
-    runner.enqueue(shellResult(0)); // docker stop
-    runner.enqueue(shellResult(2, "could not connect to docker")); // gateway start fails
-    const cleanup = new FakeCleanup();
-
-    await expect(
-      fixture(runner, cleanup).simulate("post-reboot-recovery", instance()),
-    ).rejects.toThrow(/openshell gateway start --name nemoclaw/);
-  });
-
   it("fails when no Docker container carries the OpenShell sandbox-name label", async () => {
     const runner = new FakeRunner();
-    runner.enqueue(shellResult(0)); // gateway stop
     runner.enqueue(shellResult(0, "\n")); // discover returns nothing
     const cleanup = new FakeCleanup();
 
@@ -191,7 +155,6 @@ describe("LifecyclePhaseFixture.simulate post-reboot-recovery (stop-original)", 
 
   it("fails when docker discover returns non-zero", async () => {
     const runner = new FakeRunner();
-    runner.enqueue(shellResult(0)); // gateway stop
     runner.enqueue(shellResult(1, "Cannot connect to the Docker daemon"));
     const cleanup = new FakeCleanup();
 
@@ -204,11 +167,9 @@ describe("LifecyclePhaseFixture.simulate post-reboot-recovery (stop-original)", 
 describe("LifecyclePhaseFixture.simulate post-reboot-recovery (rename-to-gpu-backup)", () => {
   it("stops, then renames the labeled container to a *-nemoclaw-gpu-backup-* sibling", async () => {
     const runner = new FakeRunner();
-    runner.enqueue(shellResult(0)); // openshell gateway stop
     runner.enqueue(shellResult(0, "openshell-cluster-e2e-x\n")); // discover
     runner.enqueue(shellResult(0)); // docker stop
     runner.enqueue(shellResult(0)); // docker rename
-    runner.enqueue(shellResult(0)); // openshell gateway start
     runner.enqueue(shellResult(1, "Removed stale local registry entry.\n")); // status
     const cleanup = new FakeCleanup();
 
