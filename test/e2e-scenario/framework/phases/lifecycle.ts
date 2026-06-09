@@ -18,6 +18,7 @@ import type { NemoClawInstance } from "./onboarding.ts";
 const OPENSHELL_SANDBOX_NAME_LABEL = "openshell.ai/sandbox-name";
 const DOCKER_PROBE_TIMEOUT_MS = 15_000;
 const GATEWAY_STOP_TIMEOUT_MS = 60_000;
+const GATEWAY_START_TIMEOUT_MS = 5 * 60_000;
 // Status invocation can take several minutes on unfixed code while
 // the gateway recovery path retries. Keep the budget generous; the
 // bug is independent of latency.
@@ -83,22 +84,28 @@ export class LifecyclePhaseFixture {
    * Reproduce the host-side conditions of a DGX Spark / Linux Docker-driver
    * reboot AND drive the user-visible action that exposes the bug:
    *
-   *   1. Ask OpenShell to stop its gateway runtime so the in-memory
-   *      sandbox view drops to NotFound. The actual sandbox container
-   *      is unaffected — that is the entire point of the bug class
-   *      tracked by #4423.
+   *   1. Stop OpenShell's gateway runtime so it drops the in-memory
+   *      sandbox view.
    *
    *   2. Locate the OpenShell-labeled Docker container for the
    *      scenario's sandbox name and either stop it (default) or
    *      stop+rename it to a `*-nemoclaw-gpu-backup-*` sibling.
    *
-   *   3. Invoke `nemoclaw <name> status` — the user-visible action
-   *      that documented the regression in #4423. On unfixed `main`
-   *      this restarts the gateway (per #4580) and then the
-   *      destructive `missing` branch in `status.ts` wipes the
-   *      registry entry. On the PR-A fix branch the new Docker-driver
-   *      recovery helper restarts the labeled container before
-   *      stale-removal can fire.
+   *   3. Restart the gateway with `openshell gateway start --name
+   *      nemoclaw`. This is the user-systemd autostart path from
+   *      #4580 in compressed form: the gateway comes back HEALTHY
+   *      with no memory of the sandbox, while Docker still has the
+   *      labeled container. That combination is the precise
+   *      precondition for the remaining #4423 destructive branches
+   *      in `status.ts:308` (and parallel `ensureLiveSandboxOrExit`).
+   *      Without this restart the gateway-down branch takes over
+   *      and #4578's mitigation hides the bug.
+   *
+   *   4. Invoke `nemoclaw <name> status`. With a healthy gateway and
+   *      sandbox lookup returning NotFound, on unfixed `main` the
+   *      destructive `missing` branch wipes the registry. On the
+   *      PR-A fix branch the new Docker-driver recovery helper
+   *      restarts the labeled container before stale-removal fires.
    *
    *   We deliberately do NOT assert on the status exit code here
    *   because the bug is precisely that status "succeeds" at
@@ -173,6 +180,19 @@ export class LifecyclePhaseFixture {
         });
       });
     }
+
+    // Restart the gateway in a fresh state. This compresses the
+    // post-reboot user-systemd autostart path (#4580) into one step
+    // so status sees a HEALTHY gateway with no sandbox memory — the
+    // precondition for the destructive `missing` branch we want
+    // PR-A to neutralize.
+    const gatewayStart = await this.sandbox.openshell(["gateway", "start", "--name", "nemoclaw"], {
+      artifactName: "lifecycle-post-reboot-gateway-start",
+      env: buildAvailabilityProbeEnv(),
+      timeoutMs: GATEWAY_START_TIMEOUT_MS,
+    });
+    assertExitZero(gatewayStart, "openshell gateway start --name nemoclaw");
+    steps.push({ id: "gateway-start", results: [gatewayStart] });
 
     // Final step: drive the user-visible action that exposed #4423.
     // We invoke status through the host CLI client so artifacts are
