@@ -856,6 +856,17 @@ function backupStateFile(
   return "backed_up";
 }
 
+function buildStateFileReadCommand(dir: string, spec: StateFileSpec): string {
+  const remotePath = stateFileRemotePath(dir, spec.path);
+  const quotedRemotePath = shellQuote(remotePath);
+  return [
+    `src=${quotedRemotePath}`,
+    '[ ! -e "$src" ] && exit 2',
+    '[ -f "$src" ] && [ ! -L "$src" ] || { echo "unsafe state file: $src" >&2; exit 10; }',
+    'cat -- "$src"',
+  ].join("; ");
+}
+
 function buildStateFileRestoreCommand(dir: string, spec: StateFileSpec): string {
   const remotePath = stateFileRemotePath(dir, spec.path);
   const quotedRemotePath = shellQuote(remotePath);
@@ -888,12 +899,204 @@ function buildStateFileRestoreCommand(dir: string, spec: StateFileSpec): string 
   ].join("; ");
 }
 
+function readCurrentStateFile(
+  configFile: string,
+  sandboxName: string,
+  dir: string,
+  spec: StateFileSpec,
+): Buffer | null {
+  const command = buildStateFileReadCommand(dir, spec);
+  const result = spawnSync("ssh", [...sshArgs(configFile, sandboxName), command], {
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 120000,
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  if (result.status === 0 && !result.error && !result.signal) return result.stdout;
+  if (result.status !== 2) {
+    const detail =
+      (result.stderr?.toString() || "").trim() ||
+      result.error?.message ||
+      (result.signal ? `signal ${result.signal}` : `exit ${String(result.status)}`);
+    _log(`WARNING: state file current read ${spec.path} failed: ${detail.substring(0, 200)}`);
+  }
+  return null;
+}
+
+function isPlainJsonObject(value: unknown): value is Record<string, unknown> {
+  return isRecord(value);
+}
+
+function cloneJson<T>(value: T): T {
+  if (value === undefined) return undefined as T;
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function mergeJsonObjects(
+  base: Record<string, unknown>,
+  overlay: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = cloneJson(base);
+  for (const [key, value] of Object.entries(overlay)) {
+    const existing = merged[key];
+    if (isPlainJsonObject(existing) && isPlainJsonObject(value)) {
+      merged[key] = mergeJsonObjects(existing, value);
+    } else {
+      merged[key] = cloneJson(value);
+    }
+  }
+  return merged;
+}
+
+const NEMOCLAW_MANAGED_OPENCLAW_CHANNELS = new Set([
+  "discord",
+  "slack",
+  "telegram",
+  "whatsapp",
+  "wechat",
+  "openclaw-weixin",
+]);
+
+function mergeOpenClawChannels(
+  backupChannels: unknown,
+  currentChannels: unknown,
+): Record<string, unknown> | unknown {
+  if (!isPlainJsonObject(backupChannels)) return cloneJson(currentChannels);
+  if (!isPlainJsonObject(currentChannels)) return cloneJson(backupChannels);
+
+  const merged: Record<string, unknown> = cloneJson(currentChannels);
+  for (const [key, value] of Object.entries(backupChannels)) {
+    if (key === "defaults") {
+      merged[key] =
+        isPlainJsonObject(value) && isPlainJsonObject(merged[key])
+          ? mergeJsonObjects(merged[key] as Record<string, unknown>, value)
+          : cloneJson(value);
+      continue;
+    }
+
+    if (NEMOCLAW_MANAGED_OPENCLAW_CHANNELS.has(key)) {
+      // Freshly generated channel blocks carry current OpenShell placeholder
+      // revisions and current start/stop/add/remove state. Never resurrect a
+      // managed channel that the fresh config omitted, and never overwrite a
+      // present managed channel with a stale backed-up account block.
+      continue;
+    }
+
+    const existing = merged[key];
+    merged[key] =
+      isPlainJsonObject(existing) && isPlainJsonObject(value)
+        ? mergeJsonObjects(existing, value)
+        : cloneJson(value);
+  }
+  return merged;
+}
+
+function mergeOpenClawModels(backupModels: unknown, currentModels: unknown): unknown {
+  if (!isPlainJsonObject(backupModels)) return cloneJson(currentModels);
+  if (!isPlainJsonObject(currentModels)) return cloneJson(backupModels);
+
+  const merged = mergeJsonObjects(currentModels, backupModels);
+  const backupProviders = backupModels.providers;
+  const currentProviders = currentModels.providers;
+  if (isPlainJsonObject(backupProviders) && isPlainJsonObject(currentProviders)) {
+    merged.providers = {
+      ...cloneJson(backupProviders),
+      // Current generated provider entries win so rebuild does not restore stale
+      // runtime placeholders or model routing for providers NemoClaw manages.
+      ...cloneJson(currentProviders),
+    };
+  }
+  return merged;
+}
+
+function mergeOpenClawPlugins(backupPlugins: unknown, currentPlugins: unknown): unknown {
+  if (!isPlainJsonObject(backupPlugins)) return cloneJson(currentPlugins);
+  if (!isPlainJsonObject(currentPlugins)) return cloneJson(backupPlugins);
+
+  const merged = mergeJsonObjects(currentPlugins, backupPlugins);
+  const backupEntries = backupPlugins.entries;
+  const currentEntries = currentPlugins.entries;
+  if (isPlainJsonObject(backupEntries) && isPlainJsonObject(currentEntries)) {
+    merged.entries = {
+      ...cloneJson(backupEntries),
+      // Current generated plugin enablement wins for channels/provider plugins;
+      // backup-only custom plugin entries are still preserved.
+      ...cloneJson(currentEntries),
+    };
+  }
+  return merged;
+}
+
+export function mergeOpenClawRestoredConfig(
+  backedUpConfig: unknown,
+  currentConfig: unknown,
+): unknown {
+  if (!isPlainJsonObject(backedUpConfig)) return cloneJson(currentConfig ?? backedUpConfig);
+  if (!isPlainJsonObject(currentConfig)) return cloneJson(backedUpConfig);
+
+  const merged = mergeJsonObjects(currentConfig, backedUpConfig);
+
+  // Runtime-owned sections are regenerated during rebuild and must survive the
+  // restore. The backup is sanitized (gateway removed) and may contain stale
+  // OpenShell resolve placeholder revisions, so it is unsafe to wholesale
+  // replace the fresh config with the backed-up file.
+  for (const key of ["gateway", "proxy", "diagnostics"] as const) {
+    if (key in currentConfig) merged[key] = cloneJson(currentConfig[key]);
+    else delete merged[key];
+  }
+
+  merged.channels = mergeOpenClawChannels(backedUpConfig.channels, currentConfig.channels);
+  merged.models = mergeOpenClawModels(backedUpConfig.models, currentConfig.models);
+  merged.plugins = mergeOpenClawPlugins(backedUpConfig.plugins, currentConfig.plugins);
+
+  return merged;
+}
+
+function shouldMergeOpenClawConfig(
+  manifest: RebuildManifest,
+  dir: string,
+  spec: StateFileSpec,
+): boolean {
+  return (
+    spec.strategy === "copy" &&
+    spec.path === "openclaw.json" &&
+    (manifest.agentType === "openclaw" || dir.replace(/\/+$/, "").endsWith("/.openclaw"))
+  );
+}
+
+function buildStateFileRestoreInput(
+  configFile: string,
+  sandboxName: string,
+  dir: string,
+  spec: StateFileSpec,
+  backupPath: string,
+  mergeOpenClawConfig: boolean,
+): Buffer {
+  const localPath = path.join(backupPath, spec.path);
+  const backupContents = readFileSync(localPath);
+  if (!mergeOpenClawConfig) return backupContents;
+
+  const currentContents = readCurrentStateFile(configFile, sandboxName, dir, spec);
+  if (!currentContents) return backupContents;
+  try {
+    const backedUpConfig = parseJson<unknown>(backupContents.toString("utf-8"));
+    const currentConfig = parseJson<unknown>(currentContents.toString("utf-8"));
+    const merged = mergeOpenClawRestoredConfig(backedUpConfig, currentConfig);
+    return Buffer.from(`${JSON.stringify(merged, null, 2)}\n`);
+  } catch (err) {
+    _log(
+      `WARNING: openclaw.json selective merge failed; restoring sanitized backup as-is: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return backupContents;
+  }
+}
+
 function restoreStateFile(
   configFile: string,
   sandboxName: string,
   dir: string,
   spec: StateFileSpec,
   backupPath: string,
+  mergeOpenClawConfig = false,
 ): boolean {
   const localPath = path.join(backupPath, spec.path);
   if (!existsSync(localPath)) return true;
@@ -901,7 +1104,14 @@ function restoreStateFile(
   const command = buildStateFileRestoreCommand(dir, spec);
   _log(`Restoring state file ${spec.path} (${spec.strategy})`);
   const result = spawnSync("ssh", [...sshArgs(configFile, sandboxName), command], {
-    input: readFileSync(localPath),
+    input: buildStateFileRestoreInput(
+      configFile,
+      sandboxName,
+      dir,
+      spec,
+      backupPath,
+      mergeOpenClawConfig,
+    ),
     stdio: ["pipe", "pipe", "pipe"],
     timeout: 120000,
   });
@@ -1476,7 +1686,16 @@ export function restoreSandboxState(sandboxName: string, backupPath: string): Re
     }
 
     for (const spec of localFiles) {
-      if (restoreStateFile(configFile, sandboxName, dir, spec, backupPath)) {
+      if (
+        restoreStateFile(
+          configFile,
+          sandboxName,
+          dir,
+          spec,
+          backupPath,
+          shouldMergeOpenClawConfig(manifest, dir, spec),
+        )
+      ) {
         restoredFiles.push(spec.path);
       } else {
         failedFiles.push(spec.path);
