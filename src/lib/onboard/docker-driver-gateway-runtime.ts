@@ -16,6 +16,7 @@ import * as vmDriverProcess from "./vm-driver-process";
 export type DockerDriverGatewayRuntimeDrift = { reason: string };
 
 type RunCapture = (args: string[], opts?: { ignoreError?: boolean }) => string;
+type DockerDriverGatewayEnvModule = typeof import("./docker-driver-gateway-env");
 
 export interface DockerDriverGatewayRuntimeDeps {
   gatewayPort: number;
@@ -23,6 +24,7 @@ export interface DockerDriverGatewayRuntimeDeps {
   getBlueprintMaxOpenshellVersion(): string | null;
   getInstalledOpenshellVersion(versionOutput?: string | null): string | null;
   isOpenshellDevVersion(versionOutput: string | null | undefined): boolean;
+  loadDockerDriverGatewayEnv?(): DockerDriverGatewayEnvModule;
   runCapture: RunCapture;
   shouldUseOpenshellDevChannel(): boolean;
   supportedOpenshellFallbackVersion: string;
@@ -79,8 +81,8 @@ export function createDockerDriverGatewayRuntimeHelpers(deps: DockerDriverGatewa
   resolveOpenShellSandboxBinary(): string | null;
   shouldRequireDockerDriverEnv(platform?: NodeJS.Platform): boolean;
 } {
-  const dockerDriverGatewayEnv: typeof import("./docker-driver-gateway-env") =
-    require("./docker-driver-gateway-env");
+  const dockerDriverGatewayEnv: DockerDriverGatewayEnvModule =
+    deps.loadDockerDriverGatewayEnv?.() ?? require("./docker-driver-gateway-env");
 
   function getDockerDriverGatewayStateDir(): string {
     const configured = process.env.NEMOCLAW_OPENSHELL_GATEWAY_STATE_DIR;
