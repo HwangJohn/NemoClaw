@@ -1,8 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
+import { createOpenshellCliHelpers } from "../../../dist/lib/onboard/openshell-cli";
 import { prepareSandboxCreateLaunch } from "../../../dist/lib/onboard/sandbox-create-launch";
 
 const disabledHermesDashboardState = { config: null, enabled: false };
@@ -108,5 +114,65 @@ describe("prepareSandboxCreateLaunch", () => {
 
     expect(result.envArgs).not.toContain("NEMOCLAW_PROXY_HOST=bad:ipv6::host");
     expect(result.envArgs).not.toContain("NEMOCLAW_PROXY_PORT=70000");
+  });
+
+  it("preserves argv boundaries when the production renderer shells out", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-launch-shell-"));
+    try {
+      const fakeOpenshell = path.join(tmpDir, "fake openshell");
+      const capturedArgsPath = path.join(tmpDir, "argv.bin");
+      const injectedFromPath = path.join(tmpDir, "from-injected");
+      const injectedUrlPath = path.join(tmpDir, "url-injected");
+      const injectedProxyPath = path.join(tmpDir, "proxy-injected");
+      fs.writeFileSync(
+        fakeOpenshell,
+        '#!/usr/bin/env bash\nprintf \'%s\\0\' "$@" > "$CAPTURE_ARGS"\n',
+      );
+      fs.chmodSync(fakeOpenshell, 0o755);
+
+      const helpers = createOpenshellCliHelpers({
+        getCachedBinary: () => fakeOpenshell,
+        setCachedBinary: vi.fn(),
+        getGatewayPort: () => 31818,
+        getDockerDriverGatewayEndpoint: () => "http://127.0.0.1:31818",
+      });
+      const dangerousDockerfile = `${tmpDir}/Dockerfile; touch ${injectedFromPath}`;
+      const dangerousChatUiUrl = `http://127.0.0.1:19000/?q='; touch ${injectedUrlPath} #`;
+      const dangerousProxy = `http://proxy.example:8080/'; touch ${injectedProxyPath} #`;
+      const result = prepareSandboxCreateLaunch({
+        agent: null,
+        chatUiUrl: dangerousChatUiUrl,
+        createArgs: ["--from", dangerousDockerfile, "--name", "demo; echo pwned"],
+        env: { HTTP_PROXY: dangerousProxy },
+        extraPlaceholderKeys: ["TELEGRAM_BOT_TOKEN_AGENT_A"],
+        getDashboardForwardPort: () => "19000",
+        hermesDashboardState: disabledHermesDashboardState,
+        openshellShellCommand: helpers.openshellShellCommand,
+        buildEnv: () => ({}),
+      });
+
+      execFileSync("bash", ["-lc", result.createCommand], {
+        env: { ...process.env, CAPTURE_ARGS: capturedArgsPath },
+      });
+
+      const capturedArgs = fs.readFileSync(capturedArgsPath, "utf-8").split("\0").filter(Boolean);
+      expect(capturedArgs).toEqual([
+        "sandbox",
+        "create",
+        "--from",
+        dangerousDockerfile,
+        "--name",
+        "demo; echo pwned",
+        "--",
+        "env",
+        ...result.envArgs,
+        "nemoclaw-start",
+      ]);
+      expect(fs.existsSync(injectedFromPath)).toBe(false);
+      expect(fs.existsSync(injectedUrlPath)).toBe(false);
+      expect(fs.existsSync(injectedProxyPath)).toBe(false);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });
