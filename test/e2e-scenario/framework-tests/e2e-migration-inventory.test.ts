@@ -162,13 +162,7 @@ describe("E2E migration inventory deletion gates", () => {
     for (const entry of inventory.entries) {
       expect(statuses.has(entry.status)).toBe(true);
       expect(entry.legacyScript).not.toBe("");
-      // Retired entries delete the legacy script in the same PR that
-      // transitions to status="retired" (deletionReady=true unblocks the
-      // freeze workflow). The script path stays in the inventory for the
-      // historical audit trail; do not require it to still exist on disk.
-      if (entry.status !== "retired") {
-        expect(repoPathExists(entry.legacyScript)).toBe(true);
-      }
+      expect(repoPathExists(entry.legacyScript)).toBe(true);
       expect(legacyScripts.has(entry.legacyScript)).toBe(false);
       legacyScripts.add(entry.legacyScript);
       expect(entry.domain).not.toBe("");
@@ -191,12 +185,7 @@ describe("E2E migration inventory deletion gates", () => {
 
   it("covers every current direct legacy shell entrypoint", () => {
     const inventory = loadInventory();
-    // Compare against current-on-disk scripts only. Retired entries keep
-    // their legacyScript path in the inventory for the audit trail even
-    // after the file has been deleted, so they must not participate in the
-    // filesystem-equality check.
     const inventoriedShellScripts = inventory.entries
-      .filter((entry) => entry.status !== "retired")
       .map((entry) => entry.legacyScript)
       .filter((legacyScript) => /^test\/e2e\/test-.+\.sh$/.test(legacyScript))
       .sort();
