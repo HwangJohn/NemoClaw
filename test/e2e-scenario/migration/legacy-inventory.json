@@ -270,12 +270,12 @@
       "legacyScript": "test/e2e/test-docker-unreachable-gateway-start.sh",
       "domain": "sandbox-lifecycle",
       "ownerIssue": "#4355",
-      "status": "not-migrated",
-      "targetVitestScenarios": [],
+      "status": "bridge-probe",
+      "targetVitestScenarios": ["src/lib/onboard/gateway-start-failure-integration.test.ts"],
       "bridgeProbes": [],
       "retiredReason": "",
       "deletionReady": false,
-      "notes": "Initial completeness row; classify detailed coverage and deletion evidence in the owning migration issue before deleting."
+      "notes": "Retiring to Vitest integration test, not migrating to e2e-scenario framework. Original script is a Node-process unit test of startGateway() with a PATH-shimmed openshell binary, not a sandbox-lifecycle e2e. Stage 1 (this entry transition + stub test file with it.todo placeholders): see e2e-migrate/test-docker-unreachable-gateway-start branch. Stage 2 will implement the test bodies, flip status to retired with deletionReady=true, and delete the legacy script + the docker-unreachable-gateway-start-e2e job in regression-e2e.yaml. Existing unit-level coverage already in src/lib/onboard/gateway-start-failure.test.ts and docker-driver-gateway-failure.test.ts. Unique regression target is the startGatewayWithOptions call-site contract: docker-unreachable classification short-circuits via pRetry.AbortError before any health-poll loop or post-start status/gateway-info probes."
     },
     {
       "legacyScript": "test/e2e/test-docs-validation.sh",
