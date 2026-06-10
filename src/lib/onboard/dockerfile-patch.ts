@@ -11,7 +11,7 @@ const PROXY_HOST_RE = /^[A-Za-z0-9._-]+$/;
 const POSITIVE_INT_RE = /^[1-9][0-9]*$/;
 
 type LooseObject = Record<string, unknown>;
-const O_NOFOLLOW = fs.constants.O_NOFOLLOW ?? 0;
+const O_NOFOLLOW = fs.constants.O_NOFOLLOW;
 
 function errnoCode(err: unknown): string | null {
   return typeof err === "object" && err !== null && "code" in err
@@ -20,12 +20,12 @@ function errnoCode(err: unknown): string | null {
 }
 
 function openExistingRegularDockerfileNoFollow(dockerfilePath: string, flags: number): number {
-  if (fs.lstatSync(dockerfilePath).isSymbolicLink()) {
-    throw new Error(`Refusing to patch Dockerfile through a symlink: ${dockerfilePath}`);
+  if (typeof O_NOFOLLOW !== "number") {
+    throw new Error("Refusing to patch Dockerfile: O_NOFOLLOW is unavailable on this platform.");
   }
   let fd: number;
   try {
-    fd = fs.openSync(dockerfilePath, flags | O_NOFOLLOW);
+    fd = fs.openSync(dockerfilePath, flags | O_NOFOLLOW, 0o600);
   } catch (err) {
     if (errnoCode(err) === "ELOOP") {
       throw new Error(`Refusing to patch Dockerfile through a symlink: ${dockerfilePath}`);
