@@ -328,9 +328,10 @@ describe("startGatewayWithOptions docker-unreachable abort (#2347)", () => {
   //       startGatewayWithOptions into an exported helper that takes
   //       streamGatewayStart as a DI parameter.
   //
-  // Both are out of scope for this retirement PR. The follow-up issue
-  // (TODO: link once filed) tracks landing option (b) and converting
-  // these `it.todo` placeholders into real assertions. Until then, the
+  // Both are out of scope for this retirement PR. Follow-up issue
+  // [#5113](https://github.com/NVIDIA/NemoClaw/issues/5113) tracks
+  // landing option (b) and converting these `it.todo` placeholders into
+  // real assertions. Until then, the
   // primary safety net for these contracts is code review on
   // src/lib/onboard.ts:startGatewayWithOptions plus the existing
   // classifyGatewayStartFailure / printDockerDaemonRecovery /
