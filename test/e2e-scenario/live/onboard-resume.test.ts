@@ -184,7 +184,11 @@ test("onboard-resume: interrupted onboard then --resume completes without redoin
   expect(firstText).toContain("[e2e] Forced onboarding failure at step 'policies'.");
 
   // Assertion: sandbox-exists-after-interrupt — `openshell sandbox get` exits 0.
-  expect(await sandbox.exists(SANDBOX_NAME)).toBe(true);
+  // Pass framework env so the spawn can locate `openshell` on PATH; the
+  // SandboxClient threads options through to ShellProbe but does not
+  // auto-supply env (mirrors HostCliClient — callers stay explicit about the
+  // env boundary).
+  expect(await sandbox.exists(SANDBOX_NAME, { env: buildAvailabilityProbeEnv() })).toBe(true);
 
   // Assertion: session-file-present.
   expect(fs.existsSync(SESSION_FILE)).toBe(true);
