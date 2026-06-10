@@ -523,12 +523,12 @@
       "legacyScript": "test/e2e/test-onboard-resume.sh",
       "domain": "smoke-onboarding",
       "ownerIssue": "#4348",
-      "status": "not-migrated",
-      "targetVitestScenarios": [],
+      "status": "bridge-probe",
+      "targetVitestScenarios": ["test/e2e-scenario/live/onboard-resume.test.ts"],
       "bridgeProbes": [],
       "retiredReason": "",
       "deletionReady": false,
-      "notes": "Initial completeness row; classify detailed coverage and deletion evidence in the owning migration issue before deleting."
+      "notes": "Migration in progress (epic #5098, owner #4348): typed live test at test/e2e-scenario/live/onboard-resume.test.ts. Bash script retained until typed coverage soaks per epic policy; deletion is a follow-up PR with #4357 approval."
     },
     {
       "legacyScript": "test/e2e/test-openclaw-discord-pairing.sh",
