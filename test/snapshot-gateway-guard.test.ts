@@ -130,7 +130,10 @@ function makeHealthyVmGatewayEnv(prefix: string): Record<string, string> {
     "exit 0",
   ]);
 
-  writeExecutable(path.join(localBin, "ssh"), ["exit 0"]);
+  writeExecutable(path.join(localBin, "ssh"), [
+    'printf "%s" "$*" | grep -q "openclaw.json" && printf "%s" "$*" | grep -q "cat --" && exit 2',
+    "exit 0",
+  ]);
   writeExecutable(path.join(localBin, "docker"), [
     'if [ "$1" = "inspect" ]; then echo "false"; exit 0; fi',
     "exit 0",
@@ -169,7 +172,10 @@ function makeVmRestoreToEnv(
     "exit 0",
   ]);
 
-  writeExecutable(path.join(localBin, "ssh"), ["exit 0"]);
+  writeExecutable(path.join(localBin, "ssh"), [
+    'printf "%s" "$*" | grep -q "openclaw.json" && printf "%s" "$*" | grep -q "cat --" && exit 2',
+    "exit 0",
+  ]);
 
   // `docker exec` must never run: if the fast path regresses,
   // resolveSrcPodImage falls into the kubectl-via-docker probe and this

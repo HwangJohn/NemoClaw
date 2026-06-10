@@ -942,13 +942,18 @@ function buildStateFileRestoreInput(
   spec: StateFileSpec,
   backupPath: string,
   mergeOpenClawConfig: boolean,
-): Buffer {
+): Buffer | null {
   const localPath = path.join(backupPath, spec.path);
   const backupContents = readFileSync(localPath);
   if (!mergeOpenClawConfig) return backupContents;
 
   const currentContents = readCurrentStateFile(configFile, sandboxName, dir, spec);
-  if (!currentContents) return backupContents;
+  if (!currentContents) {
+    _log(
+      "FAILED: openclaw.json selective merge could not read the current rebuild config; leaving current file intact",
+    );
+    return null;
+  }
   try {
     const backedUpConfig = parseJson<unknown>(backupContents.toString("utf-8"));
     const currentConfig = parseJson<unknown>(currentContents.toString("utf-8"));
@@ -956,9 +961,9 @@ function buildStateFileRestoreInput(
     return Buffer.from(`${JSON.stringify(merged, null, 2)}\n`);
   } catch (err) {
     _log(
-      `WARNING: openclaw.json selective merge failed; restoring sanitized backup as-is: ${err instanceof Error ? err.message : String(err)}`,
+      `FAILED: openclaw.json selective merge failed; leaving current file intact: ${err instanceof Error ? err.message : String(err)}`,
     );
-    return backupContents;
+    return null;
   }
 }
 
@@ -975,15 +980,18 @@ function restoreStateFile(
 
   const command = buildStateFileRestoreCommand(dir, spec);
   _log(`Restoring state file ${spec.path} (${spec.strategy})`);
+  const input = buildStateFileRestoreInput(
+    configFile,
+    sandboxName,
+    dir,
+    spec,
+    backupPath,
+    mergeOpenClawConfig,
+  );
+  if (input === null) return false;
+
   const result = spawnSync("ssh", [...sshArgs(configFile, sandboxName), command], {
-    input: buildStateFileRestoreInput(
-      configFile,
-      sandboxName,
-      dir,
-      spec,
-      backupPath,
-      mergeOpenClawConfig,
-    ),
+    input,
     stdio: ["pipe", "pipe", "pipe"],
     timeout: 120000,
   });
