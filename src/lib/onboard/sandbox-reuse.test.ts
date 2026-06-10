@@ -86,4 +86,46 @@ describe("applyReusedSandboxDashboardState", () => {
       hermesDashboardState,
     });
   });
+
+  it("clears Hermes dashboard registry fields when the reused sandbox has it disabled", () => {
+    const updateSandbox = vi.fn();
+    const sandboxGpuConfig: SandboxGpuConfig = {
+      hostGpuDetected: false,
+      hostGpuPlatform: null,
+      sandboxGpuEnabled: false,
+      mode: "auto",
+      sandboxGpuDevice: null,
+      errors: [],
+    };
+    const hermesDashboardState = { enabled: false, config: null };
+    const result = applyReusedSandboxDashboardState({
+      sandboxName: "reuse-me",
+      chatUiUrl: "http://127.0.0.1:18789",
+      env: {},
+      agent: null,
+      model: "test-model",
+      provider: "openai-compatible",
+      selectionVerified: true,
+      sandboxGpuConfig,
+      gatewayName: "nemoclaw",
+      gatewayPort: 8080,
+      ensureDashboardForward: vi.fn(() => 18789),
+      hermesDashboardForwarding: {
+        resolveStateForPort: vi.fn(() => hermesDashboardState),
+        ensureForState: vi.fn(),
+      },
+      updateSandbox,
+      updateReusedSandboxMetadata: vi.fn(),
+    });
+
+    expect(updateSandbox).toHaveBeenCalledWith("reuse-me", {
+      hermesDashboardEnabled: undefined,
+      hermesDashboardPort: undefined,
+      hermesDashboardInternalPort: undefined,
+      hermesDashboardTui: undefined,
+      gatewayName: "nemoclaw",
+      gatewayPort: 8080,
+    });
+    expect(result.hermesDashboardState).toBe(hermesDashboardState);
+  });
 });
