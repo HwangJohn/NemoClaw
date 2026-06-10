@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { buildAvailabilityProbeEnv } from "../framework/availability-env.ts";
 import { expect, test } from "../framework/e2e-test.ts";
 
 // Migrated from test/e2e/test-onboard-resume.sh — regression for #446.
@@ -71,9 +72,15 @@ test("onboard-resume: interrupted onboard then --resume completes without redoin
     `bin/nemoclaw.js missing — ensure the workflow runs npm ci + npm run build:cli before this test`,
   ).toBe(true);
 
-  // Assertion: docker-running — `docker info` exits 0.
+  // Assertion: docker-running — `docker info` exits 0. Pass framework
+  // allowlist env (includes PATH, HOME, etc.) so spawn can locate `docker`.
+  // The shell-probe boundary defaults to no env inheritance; framework spawns
+  // must opt in via buildAvailabilityProbeEnv() to keep secret-passthrough
+  // explicit (NVIDIA_API_KEY is NOT in the allowlist; we layer it explicitly
+  // in Phase 2 below).
   const dockerInfo = await host.command("docker", ["info"], {
     artifactName: "prereq-docker-info",
+    env: buildAvailabilityProbeEnv(),
     timeoutMs: 30_000,
   });
   expect(dockerInfo.exitCode, dockerInfo.stderr).toBe(0);
@@ -82,6 +89,7 @@ test("onboard-resume: interrupted onboard then --resume completes without redoin
   // the workflow's `bash install.sh` step before this test runs).
   const openshellVersion = await host.command("openshell", ["--version"], {
     artifactName: "prereq-openshell-version",
+    env: buildAvailabilityProbeEnv(),
     timeoutMs: 30_000,
   });
   expect(openshellVersion.exitCode, openshellVersion.stderr).toBe(0);
@@ -97,20 +105,25 @@ test("onboard-resume: interrupted onboard then --resume completes without redoin
   // Done after the prereq gates pass so we don't mutate host state if
   // the test would have skipped anyway.
   // ──────────────────────────────────────────────────────────────────
+  const probeEnv = buildAvailabilityProbeEnv();
   await host.command("node", [CLI_ENTRYPOINT, SANDBOX_NAME, "destroy", "--yes"], {
     artifactName: "pre-cleanup-nemoclaw-destroy",
+    env: probeEnv,
     timeoutMs: 60_000,
   });
   await sandbox.openshell(["sandbox", "delete", SANDBOX_NAME], {
     artifactName: "pre-cleanup-openshell-sandbox-delete",
+    env: probeEnv,
     timeoutMs: 60_000,
   });
   await sandbox.openshell(["forward", "stop", "18789"], {
     artifactName: "pre-cleanup-openshell-forward-stop",
+    env: probeEnv,
     timeoutMs: 30_000,
   });
   await sandbox.openshell(["gateway", "destroy", "-g", "nemoclaw"], {
     artifactName: "pre-cleanup-openshell-gateway-destroy",
+    env: probeEnv,
     timeoutMs: 60_000,
   });
   fs.rmSync(SESSION_FILE, { force: true });
@@ -118,20 +131,25 @@ test("onboard-resume: interrupted onboard then --resume completes without redoin
   // Register cleanup for the sandbox we are about to create. The cleanup
   // fixture runs these in LIFO at end-of-test regardless of pass/fail.
   cleanup.add(`destroy sandbox ${SANDBOX_NAME}`, async () => {
+    const cleanupEnv = buildAvailabilityProbeEnv();
     await host.command("node", [CLI_ENTRYPOINT, SANDBOX_NAME, "destroy", "--yes"], {
       artifactName: "cleanup-nemoclaw-destroy",
+      env: cleanupEnv,
       timeoutMs: 120_000,
     });
     await sandbox.openshell(["sandbox", "delete", SANDBOX_NAME], {
       artifactName: "cleanup-openshell-sandbox-delete",
+      env: cleanupEnv,
       timeoutMs: 60_000,
     });
     await sandbox.openshell(["forward", "stop", "18789"], {
       artifactName: "cleanup-openshell-forward-stop",
+      env: cleanupEnv,
       timeoutMs: 30_000,
     });
     await sandbox.openshell(["gateway", "destroy", "-g", "nemoclaw"], {
       artifactName: "cleanup-openshell-gateway-destroy",
+      env: cleanupEnv,
       timeoutMs: 60_000,
     });
     fs.rmSync(SESSION_FILE, { force: true });
@@ -143,16 +161,14 @@ test("onboard-resume: interrupted onboard then --resume completes without redoin
   const firstRun = await host.command("node", [CLI_ENTRYPOINT, "onboard", "--non-interactive"], {
     artifactName: "phase-2-onboard-interrupted",
     env: {
+      ...buildAvailabilityProbeEnv(),
       NVIDIA_API_KEY: apiKey,
-      NEMOCLAW_NON_INTERACTIVE: "1",
-      NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
       NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
       NEMOCLAW_RECREATE_SANDBOX: "1",
       NEMOCLAW_POLICY_MODE: "suggested",
       NEMOCLAW_E2E_FAILURE_INJECTION: "1",
       NEMOCLAW_E2E_FORCE_FAIL_AT_STEP: "policies",
     },
-    inheritEnv: true,
     redactionValues: [apiKey],
     timeoutMs: ONBOARD_TIMEOUT_MS,
   });
@@ -189,14 +205,16 @@ test("onboard-resume: interrupted onboard then --resume completes without redoin
     [CLI_ENTRYPOINT, "onboard", "--resume", "--non-interactive"],
     {
       artifactName: "phase-3-onboard-resume",
+      // buildAvailabilityProbeEnv() does NOT pass NVIDIA_API_KEY through —
+      // it's outside the framework allowlist. Resume must hydrate the
+      // credential from the session file. This is exactly the bash test's
+      // `env -u NVIDIA_API_KEY` invariant, expressed via the framework's
+      // explicit secret-passthrough rule.
       env: {
-        // NVIDIA_API_KEY intentionally absent.
-        NEMOCLAW_NON_INTERACTIVE: "1",
-        NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
+        ...buildAvailabilityProbeEnv(),
         NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
         NEMOCLAW_POLICY_MODE: "skip",
       },
-      inheritEnv: true,
       redactionValues: [apiKey],
       timeoutMs: ONBOARD_TIMEOUT_MS,
     },
@@ -230,7 +248,11 @@ test("onboard-resume: interrupted onboard then --resume completes without redoin
   const sandboxStatus = await host.command(
     "node",
     [CLI_ENTRYPOINT, SANDBOX_NAME, "status"],
-    { artifactName: "phase-3-nemoclaw-status", timeoutMs: 60_000 },
+    {
+      artifactName: "phase-3-nemoclaw-status",
+      env: buildAvailabilityProbeEnv(),
+      timeoutMs: 60_000,
+    },
   );
   expect(sandboxStatus.exitCode, sandboxStatus.stderr).toBe(0);
 
