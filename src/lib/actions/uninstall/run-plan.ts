@@ -5,6 +5,7 @@ import { type SpawnSyncOptions, type SpawnSyncReturns, spawnSync } from "node:ch
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import tty from "node:tty";
 
 import { dockerSpawnSync } from "../../adapters/docker/exec";
 import { type AgentBranding, getAgentBranding } from "../../cli/branding";
@@ -92,14 +93,45 @@ function defaultCommandExists(command: string, env: NodeJS.ProcessEnv): boolean 
   return false;
 }
 
-function defaultReadLine(): string | null {
+// Pause between retries while fd 0 reports EAGAIN (non-blocking stdin with no
+// input yet). Short enough to be imperceptible at an interactive prompt; long
+// enough to avoid a hot loop while waiting for keystrokes.
+const READ_LINE_RETRY_DELAY_MS = 25;
+
+interface ReadLineDeps {
+  readSync?: (
+    fd: number,
+    buffer: Buffer,
+    offset: number,
+    length: number,
+    position: number | null,
+  ) => number;
+  sleep?: (ms: number) => void;
+}
+
+// Reads one line from fd 0 directly rather than via `process.stdin`:
+// instantiating that stream flips fd 0 into non-blocking mode (a process-wide
+// libuv side effect), which breaks raw blocking reads. Other code may already
+// have touched `process.stdin` before us, so a non-blocking fd must also be
+// tolerated here: EAGAIN means "no input yet", not end-of-input — wait briefly
+// and retry. Treating EAGAIN as EOF (#5020) made every confirm prompt
+// auto-abort on Linux TTYs before the user could type. Exported for tests.
+export function defaultReadLine(deps: ReadLineDeps = {}): string | null {
+  const readSync = deps.readSync ?? fs.readSync;
+  const sleep = deps.sleep ?? sleepMs;
   const chunks: Buffer[] = [];
   const byte = Buffer.alloc(1);
   while (true) {
     let bytesRead = 0;
     try {
-      bytesRead = fs.readSync(0, byte, 0, 1, null);
-    } catch {
+      bytesRead = readSync(0, byte, 0, 1, null);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code === "EAGAIN" || code === "EWOULDBLOCK") {
+        sleep(READ_LINE_RETRY_DELAY_MS);
+        continue;
+      }
+      if (code === "EINTR") continue;
       return chunks.length > 0 ? Buffer.concat(chunks).toString("utf-8") : null;
     }
     if (bytesRead === 0 || byte[0] === 10) break;
@@ -254,7 +286,11 @@ function buildRuntime(deps: UninstallRunDeps): UninstallRuntime {
     env,
     error: deps.error ?? ((message) => console.error(message)),
     existsSync: deps.existsSync ?? ((target) => fs.existsSync(target)),
-    isTty: deps.isTty ?? !!process.stdin.isTTY,
+    // tty.isatty(0) asks the kernel directly. Never use `process.stdin.isTTY`
+    // here: the `process.stdin` getter instantiates the stream and switches
+    // fd 0 to non-blocking mode as a side effect, which would poison
+    // defaultReadLine's raw reads for the rest of the process (#5020).
+    isTty: deps.isTty ?? tty.isatty(0),
     kill:
       deps.kill ??
       ((pid, signal) => {
@@ -311,6 +347,11 @@ function confirm(options: UninstallRunOptions, runtime: UninstallRuntime): boole
   runtime.log("Proceed? [y/N]");
   const reply = runtime.readLine();
   if (reply && /^(y|yes)$/i.test(reply.trim())) return true;
+  if (reply === null) {
+    runtime.log(
+      "No input available on stdin (closed or non-interactive); re-run with --yes to skip this prompt.",
+    );
+  }
   runtime.log("Aborted.");
   return false;
 }
