@@ -44,6 +44,19 @@ export class SandboxClient {
     });
   }
 
+  get(name: string, options: ShellProbeRunOptions = {}): Promise<ShellProbeResult> {
+    validateSandboxName(name);
+    return this.openshell(["sandbox", "get", name], {
+      artifactName: `sandbox-get-${name}`,
+      ...options,
+    });
+  }
+
+  async exists(name: string, options: ShellProbeRunOptions = {}): Promise<boolean> {
+    const result = await this.get(name, options);
+    return result.exitCode === 0;
+  }
+
   exec(
     name: string,
     command: string[],

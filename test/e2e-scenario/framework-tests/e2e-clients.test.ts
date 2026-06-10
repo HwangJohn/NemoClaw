@@ -175,6 +175,47 @@ describe("E2E fixture clients", () => {
     });
   });
 
+  it("sandbox client builds OpenShell sandbox get commands", async () => {
+    const runner = new FakeRunner();
+    const sandbox = new SandboxClient(runner, { openshellPath: "openshell" });
+
+    await sandbox.get("e2e-resume");
+
+    expect(runner.calls[0]).toEqual({
+      command: "openshell",
+      args: ["sandbox", "get", "e2e-resume"],
+      options: {
+        artifactName: "sandbox-get-e2e-resume",
+      },
+    });
+  });
+
+  it("sandbox client exists() returns true on exit 0", async () => {
+    const runner = new FakeRunner();
+    runner.exitCode = 0;
+    const sandbox = new SandboxClient(runner, { openshellPath: "openshell" });
+
+    expect(await sandbox.exists("e2e-resume")).toBe(true);
+    expect(runner.calls[0].args).toEqual(["sandbox", "get", "e2e-resume"]);
+  });
+
+  it("sandbox client exists() returns false on non-zero exit", async () => {
+    const runner = new FakeRunner();
+    runner.exitCode = 1;
+    runner.stderr = "sandbox not found";
+    const sandbox = new SandboxClient(runner, { openshellPath: "openshell" });
+
+    expect(await sandbox.exists("missing")).toBe(false);
+  });
+
+  it("sandbox client get() rejects flag-shaped sandbox names before command construction", async () => {
+    const runner = new FakeRunner();
+    const sandbox = new SandboxClient(runner, { openshellPath: "openshell" });
+
+    await expect(() => sandbox.get("--bad")).toThrow(/sandbox name is invalid/);
+    expect(runner.calls).toEqual([]);
+  });
+
   it("sandbox client rejects flag-shaped sandbox names before command construction", async () => {
     const runner = new FakeRunner();
     const sandbox = new SandboxClient(runner, { openshellPath: "openshell" });
