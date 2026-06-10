@@ -3,6 +3,7 @@
 
 import * as onboardSession from "../state/onboard-session";
 import * as registry from "../state/registry";
+import { readMessagingPlanFromEnv } from "./messaging-channel-setup";
 import { getDisabledChannelsFromPlan } from "./messaging-plan-session";
 
 type DisabledChannelsSession = Pick<onboardSession.Session, "messagingPlan" | "sandboxName">;
@@ -17,7 +18,7 @@ export function resolveDisabledChannels(
   sandboxName: string,
   deps?: DisabledChannelsDeps,
 ): string[] {
-  const envPlan = deps?.readMessagingPlanFromEnv?.();
+  const envPlan = (deps?.readMessagingPlanFromEnv ?? readMessagingPlanFromEnv)();
   if (envPlan?.sandboxName === sandboxName) {
     return getDisabledChannelsFromPlan(envPlan) ?? [];
   }

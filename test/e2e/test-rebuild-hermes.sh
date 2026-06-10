@@ -308,6 +308,8 @@ except Exception:
 sess['sandboxName'] = '${SANDBOX_NAME}'
 sess['agent'] = 'hermes'
 sess['status'] = 'complete'
+for key in ('messagingChannels', 'messagingChannelConfig', 'disabledChannels'):
+    sess.pop(key, None)
 sess['messagingPlan'] = plan
 with open(sess_path, 'w') as f:
     json.dump(sess, f, indent=2)

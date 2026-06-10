@@ -11,7 +11,9 @@ function makeMinimalPlan(
   sandboxName: string,
   agent = "openclaw",
   channelIds: readonly SandboxMessagingPlan["channels"][number]["channelId"][] = [],
+  disabledChannels: readonly SandboxMessagingPlan["channels"][number]["channelId"][] = [],
 ): SandboxMessagingPlan {
+  const disabled = new Set(disabledChannels);
   return {
     schemaVersion: 1,
     sandboxName,
@@ -21,14 +23,14 @@ function makeMinimalPlan(
       channelId,
       displayName: channelId,
       authMode: "token-paste",
-      active: true,
+      active: !disabled.has(channelId),
       selected: true,
       configured: true,
-      disabled: false,
+      disabled: disabled.has(channelId),
       inputs: [],
       hooks: [],
     })),
-    disabledChannels: [],
+    disabledChannels: [...disabled],
     credentialBindings: [],
     networkPolicy: { presets: [], entries: [] },
     agentRender: [],
@@ -443,7 +445,7 @@ describe("handleSandboxState", () => {
 
   it("prefers env-staged plan over registry plan on non-interactive resume (rebuild path)", async () => {
     const registryPlan = makeMinimalPlan("my-assistant");
-    const rebuiltPlan = makeMinimalPlan("my-assistant");
+    const rebuiltPlan = makeMinimalPlan("my-assistant", "openclaw", ["telegram"], ["telegram"]);
     const session = createSession({ sandboxName: "my-assistant", messagingPlan: registryPlan });
     const getRecordedMessagingChannelsForResume = vi.fn(() => ["telegram"]);
     const writePlanToEnv = vi.fn();
@@ -462,6 +464,12 @@ describe("handleSandboxState", () => {
 
     expect(writePlanToEnv).not.toHaveBeenCalled();
     expect(getSession().messagingPlan).toEqual(rebuiltPlan);
+    expect(getSession().messagingPlan?.disabledChannels).toEqual(["telegram"]);
+    expect(getSession().messagingPlan?.channels[0]).toMatchObject({
+      channelId: "telegram",
+      active: false,
+      disabled: true,
+    });
   });
 
   it("does not restore plan to env when registry has no entry", async () => {

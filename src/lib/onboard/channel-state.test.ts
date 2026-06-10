@@ -4,6 +4,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { resolveDisabledChannels } from "./channel-state";
+import { MessagingSetupApplier } from "../messaging";
 import type { Session } from "../state/onboard-session";
 
 function sessionWithPlan(
@@ -30,6 +31,15 @@ function sessionWithPlan(
 }
 
 describe("onboard channel state helpers", () => {
+  it("prefers the staged env messaging plan for default callers", () => {
+    MessagingSetupApplier.writePlanToEnv(sessionWithPlan("alpha", ["slack"]).messagingPlan!);
+    try {
+      expect(resolveDisabledChannels("alpha")).toEqual(["slack"]);
+    } finally {
+      MessagingSetupApplier.clearPlanEnv();
+    }
+  });
+
   it("prefers disabledChannels from the onboard session mirror", () => {
     const getRegistryDisabledChannels = vi.fn(() => ["discord"]);
 
