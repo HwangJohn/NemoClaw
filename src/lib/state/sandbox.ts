@@ -34,6 +34,7 @@ import { isRecord, type UnknownRecord } from "../core/json-types.js";
 import { shellQuote } from "../runner.js";
 import { isSensitiveFile, sanitizeConfigFile } from "../security/credential-filter.js";
 import * as registry from "./registry.js";
+import type { CustomPolicyEntry } from "./registry.js";
 import { runTarListing } from "./tar-listing.js";
 
 const HOME_DIR = path.resolve(process.env.HOME || os.homedir());
@@ -65,6 +66,14 @@ export interface RebuildManifest {
   backupPath: string;
   blueprintDigest: string | null;
   policyPresets?: string[];
+  /**
+   * Custom policy presets applied via `--from-file`/`--from-dir`, captured with
+   * their full content so they can be re-applied on restore without the source
+   * file. Like `policyPresets`, these live in the gateway policy engine (not the
+   * sandbox filesystem) and are otherwise lost on destroy/recreate. Absent on
+   * older manifests.
+   */
+  customPolicies?: CustomPolicyEntry[];
   instances?: InstanceBackup[];
   // Optional user-provided label for `snapshot restore <name>`.
   name?: string;
@@ -150,6 +159,19 @@ function isInstanceBackup(value: unknown): value is InstanceBackup {
   );
 }
 
+function isCustomPolicyEntryArray(value: unknown): value is CustomPolicyEntry[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (entry) =>
+        typeof entry === "object" &&
+        entry !== null &&
+        typeof (entry as { name?: unknown }).name === "string" &&
+        typeof (entry as { content?: unknown }).content === "string",
+    )
+  );
+}
+
 function isRebuildManifest(value: unknown): value is RebuildManifest {
   if (!isRecord(value) || !isStateDirArray(value.stateDirs)) return false;
   return (
@@ -168,6 +190,7 @@ function isRebuildManifest(value: unknown): value is RebuildManifest {
       value.blueprintDigest === null ||
       typeof value.blueprintDigest === "string") &&
     (value.policyPresets === undefined || isStringArray(value.policyPresets)) &&
+    (value.customPolicies === undefined || isCustomPolicyEntryArray(value.customPolicies)) &&
     (value.instances === undefined ||
       (Array.isArray(value.instances) &&
         value.instances.every((entry) => isInstanceBackup(entry)))) &&
@@ -983,6 +1006,11 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
   // not on the sandbox filesystem, so they are lost on destroy/recreate.
   const policyPresets: string[] = sb?.policies && sb.policies.length > 0 ? [...sb.policies] : [];
   _log(`policyPresets from registry: [${policyPresets.join(",")}]`);
+  // Custom presets (applied via --from-file/--from-dir) also live only in the
+  // gateway policy engine, so capture their full content for replay on restore.
+  const customPolicies: CustomPolicyEntry[] =
+    sb?.customPolicies && sb.customPolicies.length > 0 ? [...sb.customPolicies] : [];
+  _log(`customPolicies from registry: [${customPolicies.map((c) => c.name).join(",")}]`);
 
   const manifest: RebuildManifest = {
     version: MANIFEST_VERSION,
@@ -997,6 +1025,7 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
     backupPath,
     blueprintDigest: computeBlueprintDigest(),
     policyPresets,
+    ...(customPolicies.length > 0 ? { customPolicies } : {}),
     ...(providedName !== null ? { name: providedName } : {}),
   };
 
