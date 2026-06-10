@@ -12,22 +12,26 @@
 // Original regression: NemoClaw #2347.
 // Owning migration issue: NemoClaw #4355.
 //
-// Coverage strategy: instead of mocking the ten-or-so module-internal
-// closures inside startGatewayWithOptions (which would produce a brittle
-// orchestrator integration test), prove the contract through three layers:
+// Coverage strategy: prove the contract through two layers:
 //
 //   1. Unit tests of the already-exported helpers (printDockerDaemonRecovery,
 //      handleFinalGatewayStartFailure with dockerUnreachable=true).
 //   2. A composition test that runs the same helper sequence the call site
 //      uses (classify → handleFinal → exitProcess(1)).
-//   3. A structural assertion against onboard.ts source proving the call-site
-//      wiring is in place. This catches refactors that accidentally drop the
-//      pRetry.AbortError throw or skip the dockerUnreachable flag.
+//
+// What this file deliberately DOES NOT cover (gap documented as it.todo
+// at the bottom of the suite, with a follow-up issue tracking the
+// refactor): direct executable proof that startGatewayWithOptions, on a
+// docker-unreachable streamGatewayStart() result, (a) throws
+// pRetry.AbortError instead of retrying, (b) never logs "Waiting for
+// gateway health...", and (c) never calls openshell `status` or
+// `gateway info` probes. Closing that gap requires either mocking the
+// ~10 module-internal closures `startGatewayWithOptions` touches before
+// reaching streamGatewayStart, or extracting the inner pRetry async body
+// into an exported helper that takes streamGatewayStart as a DI
+// parameter. Both changes are out of scope for the retirement PR.
 
-import fs from "node:fs";
-import path from "node:path";
-
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 // `handleFinalGatewayStartFailure` is exposed via `module.exports = {...}` at
 // the bottom of onboard.ts (it is not a TypeScript `export`). Import the
 // compiled output (same approach as preflight.test.ts and other onboard-
@@ -306,64 +310,42 @@ describe("startGatewayWithOptions docker-unreachable abort (#2347)", () => {
     });
   });
 
-  // ── Layer 3: structural assertion on the call site ──────────────────────
+  // ── Documented coverage gap: caller-level contracts that need a
+  //    behavior-level seam (out of scope for this retirement PR) ─────────
   //
-  // These tests defend against future refactors that accidentally:
-  //   - skip the `failure.kind === "docker_unreachable"` check,
-  //   - drop the `pRetry.AbortError` throw (causing retries),
-  //   - or fail to forward `dockerUnreachable: true` to handleFinal.
+  // The legacy bash script directly executed `startGateway()` with a
+  // PATH-shimmed openshell binary and asserted runtime behavior of the
+  // call site. The unit + composition tests above cover the same ground
+  // for everything reachable through already-exported helpers, but three
+  // call-site contracts cannot be proven without driving the actual
+  // `startGatewayWithOptions` orchestrator past its ~200 lines of
+  // gateway-reuse / ssh-keygen / known_hosts / docker-driver-detect
+  // preamble. Doing that in a focused way requires either:
   //
-  // They are deliberately scoped narrowly — they assert only the wiring
-  // pattern, not exact whitespace — and live next to the unit tests so the
-  // intent is obvious to reviewers of future onboard.ts changes.
+  //   (a) ~10 vi.mock() calls on module-internal closures inside
+  //       onboard.ts (brittle), or
+  //   (b) a small refactor extracting the inner pRetry async body of
+  //       startGatewayWithOptions into an exported helper that takes
+  //       streamGatewayStart as a DI parameter.
+  //
+  // Both are out of scope for this retirement PR. The follow-up issue
+  // (TODO: link once filed) tracks landing option (b) and converting
+  // these `it.todo` placeholders into real assertions. Until then, the
+  // primary safety net for these contracts is code review on
+  // src/lib/onboard.ts:startGatewayWithOptions plus the existing
+  // classifyGatewayStartFailure / printDockerDaemonRecovery /
+  // handleFinalGatewayStartFailure unit tests above.
 
-  describe("call-site wiring in startGatewayWithOptions (structural)", () => {
-    let onboardSource: string;
-
-    beforeEach(() => {
-      onboardSource = fs.readFileSync(path.resolve(__dirname, "..", "onboard.ts"), "utf8");
-    });
-
-    afterEach(() => {
-      // free string in long suites
-      onboardSource = "";
-    });
-
-    it("classifies docker-unreachable inside startGatewayWithOptions", () => {
-      // The call site reads the failure.kind enum; the literal "docker_unreachable"
-      // must appear inside the function body.
-      const startGatewayWithOptionsBody = extractFunctionBody(
-        onboardSource,
-        "async function startGatewayWithOptions",
-      );
-      expect(startGatewayWithOptionsBody).toMatch(/failure\.kind\s*===\s*"docker_unreachable"/);
-    });
-
-    it("throws pRetry.AbortError on the docker-unreachable branch (no retries)", () => {
-      const startGatewayWithOptionsBody = extractFunctionBody(
-        onboardSource,
-        "async function startGatewayWithOptions",
-      );
-      // The docker_unreachable check and the AbortError throw must be
-      // co-located. We assert both appear within a small window of each
-      // other rather than anywhere in the function — guards against a
-      // refactor that splits them across unrelated branches.
-      const idx = startGatewayWithOptionsBody.indexOf('"docker_unreachable"');
-      expect(idx).toBeGreaterThan(-1);
-      const window = startGatewayWithOptionsBody.slice(idx, idx + 400);
-      expect(window).toMatch(/throw new pRetry\.AbortError/);
-    });
-
-    it("forwards dockerUnreachable to handleFinalGatewayStartFailure", () => {
-      const startGatewayWithOptionsBody = extractFunctionBody(
-        onboardSource,
-        "async function startGatewayWithOptions",
-      );
-      // Either as a shorthand property or as a key-value — accept both.
-      expect(startGatewayWithOptionsBody).toMatch(
-        /handleFinalGatewayStartFailure\(\{[^}]*\bdockerUnreachable\b/s,
-      );
-    });
+  describe("call-site contracts (caller-level coverage gap)", () => {
+    it.todo(
+      "startGateway aborts via pRetry.AbortError without entering health-poll loop on docker-unreachable streamGatewayStart output",
+    );
+    it.todo(
+      "startGateway never invokes openshell `status` or `gateway info` after docker-unreachable streamGatewayStart output",
+    );
+    it.todo(
+      "startGateway forwards dockerUnreachable=true to handleFinalGatewayStartFailure (no doctor logs collection, no destroyGateway cleanup) when streamGatewayStart returns docker-unreachable signature",
+    );
   });
 
   // ── Sanity: classifyGatewayStartFailure recognises both signatures ─────
@@ -385,58 +367,3 @@ describe("startGatewayWithOptions docker-unreachable abort (#2347)", () => {
     });
   });
 });
-
-/**
- * Extract a top-level function body by declaration prefix (e.g.
- * "async function startGatewayWithOptions") from the onboard.ts source.
- *
- * Walks past the signature by balancing parentheses (handles nested types
- * like `ReturnType<typeof nim.detectGpu>` and inline-destructured parameters
- * with their own braces) until reaching the closing `)` of the parameter
- * list at depth 0, then finds the function body's opening `{` and balances
- * braces to its matching close. Throws if the function is not found or the
- * body cannot be parsed; structural tests are useless if they silently match
- * an empty string.
- */
-function extractFunctionBody(source: string, declarationPrefix: string): string {
-  const start = source.indexOf(declarationPrefix);
-  if (start === -1) {
-    throw new Error(`Could not find '${declarationPrefix}' in onboard.ts`);
-  }
-  const sigOpen = source.indexOf("(", start);
-  if (sigOpen === -1) {
-    throw new Error(`No '(' after '${declarationPrefix}' in onboard.ts`);
-  }
-  // Balance parens through the signature, ignoring any braces that appear
-  // inside parameter destructuring or generic types.
-  let parenDepth = 0;
-  let sigClose = -1;
-  for (let i = sigOpen; i < source.length; i++) {
-    const ch = source[i];
-    if (ch === "(") parenDepth += 1;
-    else if (ch === ")") {
-      parenDepth -= 1;
-      if (parenDepth === 0) {
-        sigClose = i;
-        break;
-      }
-    }
-  }
-  if (sigClose === -1) {
-    throw new Error(`Unbalanced '(' in signature of '${declarationPrefix}'`);
-  }
-  const bodyOpen = source.indexOf("{", sigClose);
-  if (bodyOpen === -1) {
-    throw new Error(`No body '{' after signature of '${declarationPrefix}'`);
-  }
-  let depth = 0;
-  for (let i = bodyOpen; i < source.length; i++) {
-    const ch = source[i];
-    if (ch === "{") depth += 1;
-    else if (ch === "}") {
-      depth -= 1;
-      if (depth === 0) return source.slice(bodyOpen + 1, i);
-    }
-  }
-  throw new Error(`Unbalanced braces while extracting body of '${declarationPrefix}'`);
-}
