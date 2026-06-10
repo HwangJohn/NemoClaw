@@ -101,7 +101,9 @@ async function exitForResumeConflicts(
     try {
       await deps.recordResumeConflict(conflict);
     } catch {
-      // diagnostic-only
+      // Conflict reporting is the enforcing source of truth here; the runtime
+      // diagnostic write is best-effort and must not hide the user-facing exit.
+      // Remove this suppression if recordResumeConflict becomes authoritative.
     }
     reportResumeConflict(conflict, deps);
   }

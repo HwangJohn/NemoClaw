@@ -155,6 +155,41 @@ describe("prepareOnboardSession", () => {
     expect(deps.exitProcess).toHaveBeenCalledWith(1);
   });
 
+  it("still exits on resume conflicts when diagnostic recording fails", async () => {
+    const conflict: ResumeConfigConflict = {
+      field: "sandbox",
+      requested: "new-box",
+      recorded: "old-box",
+    };
+    const { deps } = createDeps(createSession(), {
+      getResumeConfigConflicts: vi.fn(() => [conflict]),
+      recordResumeConflict: vi.fn(async () => {
+        throw new Error("diagnostic write failed");
+      }),
+    });
+
+    await expect(
+      prepareOnboardSession(
+        {
+          resume: true,
+          fresh: false,
+          requestedFromDockerfile: null,
+          requestedSandboxName: "new-box",
+          cannotPrompt: false,
+          nonInteractive: false,
+        },
+        deps,
+      ),
+    ).rejects.toThrow(ExitError);
+
+    expect(deps.recordResumeConflict).toHaveBeenCalledWith(conflict);
+    expect(deps.error).toHaveBeenCalledWith(
+      "  Resumable state belongs to sandbox 'old-box', not 'new-box'.",
+    );
+    expect(deps.exitProcess).toHaveBeenCalledWith(1);
+    expect(deps.updateSession).not.toHaveBeenCalled();
+  });
+
   it("rejects non-interactive resume when no sandbox name can be recovered", async () => {
     const { deps } = createDeps(createSession({ sandboxName: null }));
 
