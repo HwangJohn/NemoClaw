@@ -270,12 +270,13 @@
       "legacyScript": "test/e2e/test-docker-unreachable-gateway-start.sh",
       "domain": "sandbox-lifecycle",
       "ownerIssue": "#4355",
-      "status": "not-migrated",
+      "status": "retired",
       "targetVitestScenarios": [],
       "bridgeProbes": [],
-      "retiredReason": "",
-      "deletionReady": false,
-      "notes": "Retirement in flight on branch e2e-migrate/test-docker-unreachable-gateway-start (PR #5109). Migrating to a Vitest integration test at src/lib/onboard/gateway-start-failure-integration.test.ts rather than the e2e-scenario framework: the original script is a Node-process unit test of startGateway() with a PATH-shimmed openshell binary, not a sandbox-lifecycle e2e. Status stays 'not-migrated' until the same PR atomically flips to 'retired' with deletionReady=true and deletes the legacy script + the docker-unreachable-gateway-start-e2e job in regression-e2e.yaml. Existing unit-level coverage in src/lib/onboard/gateway-start-failure.test.ts and src/lib/onboard/docker-driver-gateway-failure.test.ts; unique regression target is the startGatewayWithOptions call-site contract that docker-unreachable classification short-circuits via pRetry.AbortError before any health-poll loop or post-start status/gateway-info probes."
+      "retiredReason": "Retired in PR #5109. The original script was structurally a Node-process unit test of startGateway() with a PATH-shimmed openshell binary, not a sandbox-lifecycle e2e (no real openshell, gateway, sandbox, or registry). Coverage moved to src/lib/onboard/gateway-start-failure-integration.test.ts, which proves the docker-unreachable abort contract through three layers: unit tests of printDockerDaemonRecovery and handleFinalGatewayStartFailure({dockerUnreachable:true}); composition tests running the same classify -> handleFinal -> exitProcess(1) sequence the call site uses for both macOS Colima and Linux dockerd signatures; and structural assertions on onboard.ts source proving the call-site wiring (docker_unreachable classification, co-located pRetry.AbortError throw that bypasses the health-poll loop, and dockerUnreachable forwarded to handleFinalGatewayStartFailure). The docker-unreachable-gateway-start-e2e job in regression-e2e.yaml was removed in the same PR. Refs: #2347, #4355.",
+      "deletionReady": true,
+      "deletionApprovalIssue": "#4357",
+      "notes": "Retired in PR #5109. Coverage moved to src/lib/onboard/gateway-start-failure-integration.test.ts. See retiredReason for the full retirement context (why retire vs migrate, three-layer coverage strategy, regression-e2e.yaml job removal). Refs: #2347, #4355."
     },
     {
       "legacyScript": "test/e2e/test-docs-validation.sh",
