@@ -310,7 +310,16 @@ function readNonNegativeNumberEnv(name: string, fallback: number): number {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
-function waitForRecoveredSandboxGateway(sandboxName: string): boolean {
+export function waitForRecoveredSandboxGateway(
+  sandboxName: string,
+  options: {
+    probeImpl?: (sandboxName: string) => boolean | null;
+    sleepImpl?: (seconds: number) => void;
+    quiet?: boolean;
+  } = {},
+): boolean {
+  const probe = options.probeImpl ?? isSandboxGatewayRunning;
+  const sleep = options.sleepImpl ?? sleepSeconds;
   const timeoutSeconds = readNonNegativeNumberEnv("NEMOCLAW_GATEWAY_RECOVERY_WAIT_SECONDS", 30);
   const intervalSeconds = readNonNegativeNumberEnv(
     "NEMOCLAW_GATEWAY_RECOVERY_POLL_INTERVAL_SECONDS",
@@ -322,14 +331,58 @@ function waitForRecoveredSandboxGateway(sandboxName: string): boolean {
       : Math.max(1, Math.floor(timeoutSeconds) + 1);
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    if (isSandboxGatewayRunning(sandboxName) === true) {
-      return true;
+    if (probe(sandboxName) === true) {
+      // #4710: a freshly relaunched gateway can serve for ~20s and then drop
+      // its HTTP listener while the process stays alive (a failed in-process
+      // restart triggered by a post-launch config write parks it deaf). One
+      // successful probe inside that window is not proof of recovery — wait
+      // out a settle window and require the gateway to still be serving.
+      // 0 disables the settle confirm.
+      const settleSeconds = readNonNegativeNumberEnv(
+        "NEMOCLAW_GATEWAY_RECOVERY_SETTLE_SECONDS",
+        25,
+      );
+      if (settleSeconds <= 0) {
+        return true;
+      }
+      if (!options.quiet) {
+        console.log(`  Confirming the gateway stays responsive (~${settleSeconds}s)...`);
+      }
+      sleep(settleSeconds);
+      return probe(sandboxName) === true;
     }
     if (attempt < attempts - 1) {
-      sleepSeconds(intervalSeconds);
+      sleep(intervalSeconds);
     }
   }
   return false;
+}
+
+/**
+ * Collect the #4710 wedge signature from the sandbox gateway log: the
+ * sequence a self-initiated in-process gateway restart leaves behind when it
+ * closes the HTTP listener and then fails, parking the process alive.
+ * Returns up to the last five matching lines, or [] when none match or the
+ * log cannot be read.
+ */
+export function collectGatewayWedgeDiagnostics(
+  sandboxName: string,
+  options: {
+    execImpl?: (sandboxName: string, command: string) => SandboxCommandResult | null;
+  } = {},
+): string[] {
+  const exec = options.execImpl ?? executeSandboxExecCommand;
+  const signature =
+    "config change requires gateway restart|gateway startup failed|Process will stay alive";
+  const command = `grep -E ${shellQuote(signature)} /tmp/gateway.log 2>/dev/null | tail -5`;
+  const result = exec(sandboxName, command);
+  if (!result || result.status !== 0) {
+    return [];
+  }
+  return result.stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 /**
@@ -489,9 +542,18 @@ export function checkAndRecoverSandboxProcesses(
   if (recovered) {
     // Wait for gateway to bind its HTTP port before declaring success. The
     // recovered process can be alive before the OpenAI-compatible API is ready.
-    if (!waitForRecoveredSandboxGateway(sandboxName)) {
+    if (!waitForRecoveredSandboxGateway(sandboxName, { quiet })) {
       if (!quiet) {
         console.error("  Gateway process started but is not responding.");
+        const wedgeLines = collectGatewayWedgeDiagnostics(sandboxName);
+        if (wedgeLines.length > 0) {
+          console.error(
+            "  The gateway served briefly and then dropped its HTTP listener (#4710 wedge signature):",
+          );
+          for (const line of wedgeLines) {
+            console.error(`    ${line}`);
+          }
+        }
         console.error("  Check /tmp/gateway.log inside the sandbox for details.");
         console.error("  Connect to the sandbox and run manually:");
         console.error(
