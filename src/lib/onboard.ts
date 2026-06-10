@@ -28,15 +28,11 @@ const {
 }: typeof import("./onboard/non-interactive-abort") = require("./onboard/non-interactive-abort");
 const { stopStaleDashboardListenersForSandbox } = require("./onboard/stale-gateway-cleanup");
 const extraPlaceholderKeysModule: typeof import("./onboard/extra-placeholder-keys") = require("./onboard/extra-placeholder-keys");
+const buildContextStage: typeof import("./onboard/build-context-stage") = require("./onboard/build-context-stage");
 const {
   ensureOllamaLoopbackSystemdOverride,
 }: typeof import("./onboard/ollama-systemd") = require("./onboard/ollama-systemd");
 const { bestEffortForwardStop } = require("./onboard/forward-cleanup");
-const {
-  CUSTOM_BUILD_CONTEXT_WARN_BYTES,
-  createCustomBuildContextFilter,
-  isInsideIgnoredCustomBuildContextPath,
-}: typeof import("./onboard/custom-build-context") = require("./onboard/custom-build-context");
 const {
   buildCompatibleEndpointSandboxSmokeCommand,
   buildCompatibleEndpointSandboxSmokeScript,
@@ -175,8 +171,6 @@ const {
   getStableGatewayImageRef,
   pullAndResolveBaseImageDigest,
 }: typeof import("./onboard/base-image") = require("./onboard/base-image");
-const errnoUtils: typeof import("./core/errno") = require("./core/errno");
-const { isErrnoException } = errnoUtils;
 const { requireValue }: typeof import("./core/require-value") = require("./core/require-value");
 const {
   logMissingNvidiaApiKeyHelp,
@@ -191,10 +185,6 @@ type RunnerOptions = {
   openshellBinary?: string;
 };
 
-const {
-  collectBuildContextStats,
-  stageOptimizedSandboxBuildContext,
-} = require("./sandbox/build-context");
 const { buildSubprocessEnv } = require("./subprocess-env");
 const {
   DASHBOARD_PORT,
@@ -2972,93 +2962,21 @@ async function createSandbox(
   // in env args, so it must not persist in /tmp after a failed sandbox create.
   // run() calls process.exit() on failure (bypassing normal control flow), so
   // we register a process 'exit' handler to guarantee cleanup in all cases.
-  let buildCtx: string, stagedDockerfile: string;
-  if (fromDockerfile) {
-    const fromResolved = path.resolve(fromDockerfile);
-    if (!fs.existsSync(fromResolved)) {
-      console.error(`  Custom Dockerfile not found: ${fromResolved}`);
-      process.exit(1);
-    }
-    if (!fs.statSync(fromResolved).isFile()) {
-      console.error(`  Custom Dockerfile path is not a file: ${fromResolved}`);
-      process.exit(1);
-    }
-    const buildContextDir = path.dirname(fromResolved);
-    if (isInsideIgnoredCustomBuildContextPath(buildContextDir)) {
-      console.error(
-        `  Custom Dockerfile is inside an ignored build-context path: ${buildContextDir}`,
-      );
-      console.error("  Move your Dockerfile to a dedicated directory and retry.");
-      process.exit(1);
-    }
-    console.log(`  Using custom Dockerfile: ${fromResolved}`);
-    console.log(`  Docker build context: ${buildContextDir}`);
-    const shouldIncludeCustomContextPath = createCustomBuildContextFilter(buildContextDir);
-    const buildContextStats = collectBuildContextStats(
-      buildContextDir,
-      shouldIncludeCustomContextPath,
-    );
-    if (buildContextStats.totalBytes > CUSTOM_BUILD_CONTEXT_WARN_BYTES) {
-      const sizeMb = (buildContextStats.totalBytes / 1_000_000).toFixed(1);
-      console.warn(
-        `  WARN: build context contains about ${sizeMb} MB across ${buildContextStats.fileCount} files.`,
-      );
-      console.warn(
-        "  The --from flag sends the Dockerfile's parent directory to Docker; use a dedicated directory if this is not intentional.",
-      );
-    }
-    buildCtx = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-build-"));
-    stagedDockerfile = path.join(buildCtx, "Dockerfile");
-    const cleanupCustomBuildCtx = (): void => {
-      try {
-        fs.rmSync(buildCtx, { recursive: true, force: true });
-      } catch {
-        // Best effort cleanup; the original error is more useful to the caller.
-      }
-    };
-    // Copy the entire parent directory as build context.
-    try {
-      fs.cpSync(buildContextDir, buildCtx, {
-        recursive: true,
-        filter: shouldIncludeCustomContextPath,
-      });
-      // If the caller pointed at a file not named "Dockerfile", copy it to the
-      // location openshell expects (buildCtx/Dockerfile).
-      if (path.basename(fromResolved) !== "Dockerfile") {
-        fs.copyFileSync(fromResolved, stagedDockerfile);
-      }
-    } catch (err) {
-      cleanupCustomBuildCtx();
-      const errorObject = typeof err === "object" && err !== null ? err : null;
-      if (isErrnoException(errorObject) && errorObject.code === "EACCES") {
-        console.error(`  Permission denied while copying build context from: ${buildContextDir}`);
-        console.error(
-          "  The --from flag uses the Dockerfile's parent directory as the Docker build context.",
-        );
-        console.error("  Move your Dockerfile to a dedicated directory and retry.");
-        process.exit(1);
-      }
-      throw err;
-    }
-  } else if (agent) {
-    const agentBuild = agentOnboard.createAgentSandbox(agent);
-    buildCtx = agentBuild.buildCtx;
-    stagedDockerfile = agentBuild.stagedDockerfile;
-  } else {
-    ({ buildCtx, stagedDockerfile } = stageOptimizedSandboxBuildContext(ROOT));
-  }
+  const { buildCtx, stagedDockerfile, cleanupBuildCtx } =
+    buildContextStage.stageCreateSandboxBuildContext({
+      root: ROOT,
+      fromDockerfile,
+      agent,
+      createAgentSandbox: agentOnboard.createAgentSandbox,
+      log: console.log,
+      warn: console.warn,
+      error: console.error,
+      exit: process.exit,
+    });
   // Returns true if the build context was fully removed, false otherwise.
   // The caller uses this to decide whether the process 'exit' safety net
   // can be deregistered — if inline cleanup fails, we leave the handler
   // armed so the temp dir is still removed on process exit.
-  const cleanupBuildCtx = (): boolean => {
-    try {
-      fs.rmSync(buildCtx, { recursive: true, force: true });
-      return true;
-    } catch {
-      return false;
-    }
-  };
   process.on("exit", cleanupBuildCtx);
 
   const defaultPolicyPath = path.join(
