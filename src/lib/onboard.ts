@@ -31,6 +31,7 @@ const extraPlaceholderKeysModule: typeof import("./onboard/extra-placeholder-key
 const buildContextStage: typeof import("./onboard/build-context-stage") = require("./onboard/build-context-stage");
 const sandboxBuildPatchConfig: typeof import("./onboard/sandbox-build-patch-config") = require("./onboard/sandbox-build-patch-config");
 const sandboxDockerfilePatchFlow: typeof import("./onboard/sandbox-dockerfile-patch-flow") = require("./onboard/sandbox-dockerfile-patch-flow");
+const sandboxCreatePlan: typeof import("./onboard/sandbox-create-plan") = require("./onboard/sandbox-create-plan");
 const sandboxCreateLaunch: typeof import("./onboard/sandbox-create-launch") = require("./onboard/sandbox-create-launch");
 const {
   ensureOllamaLoopbackSystemdOverride,
@@ -79,7 +80,6 @@ const {
 const {
   buildDirectGpuPolicyYaml,
   buildDirectSandboxGpuProofCommands,
-  prepareInitialSandboxCreatePolicy,
 }: typeof import("./onboard/initial-policy") = require("./onboard/initial-policy");
 const {
   getSelectionDrift,
@@ -554,7 +554,7 @@ import {
   stringSetsEqual,
 } from "./onboard/hermes-managed-tools";
 import { mergePolicyMessagingChannels } from "./onboard/messaging-policy-presets";
-import { filterEnabledChannelsByAgent, resolveQrSelectedChannels } from "./onboard/messaging-state";
+import { filterEnabledChannelsByAgent } from "./onboard/messaging-state";
 import { getValidatedMessagingTokenByEnvKey } from "./onboard/messaging-token";
 import { handleOllamaProbeFailure } from "./onboard/ollama-probe-failure";
 import { runOllamaStartupOrGate } from "./onboard/ollama-startup";
@@ -2984,44 +2984,44 @@ async function createSandbox(
     "openclaw-sandbox.yaml",
   );
   const basePolicyPath = (agent && agentOnboard.getAgentPolicyPath(agent)) || defaultPolicyPath;
-  const tokensByEnvKey = Object.fromEntries(
-    messagingTokenDefs.map(({ envKey, token }) => [envKey, token]),
-  );
-  const qrSelectedChannels = resolveQrSelectedChannels(
-    MESSAGING_CHANNELS,
+  const {
+    activeMessagingChannels,
+    initialSandboxPolicy,
+    createArgs,
+    messagingProviders,
+    useDockerGpuPatch,
+    sandboxGpuLogMessage,
+  } = sandboxCreatePlan.prepareSandboxCreatePlan({
+    basePolicyPath,
+    buildCtx,
+    sandboxName,
+    channels: MESSAGING_CHANNELS,
     enabledChannels,
     disabledChannelNames,
-  );
-  const activeMessagingChannels = [
-    ...new Set([
-      ...messagingTokenDefs
-        .filter(({ token }) => !!token)
-        .flatMap(({ envKey }) => {
-          const channel = getMessagingChannelForEnvKey(envKey);
-          if (channel) return [channel];
-          // SLACK_APP_TOKEN alone does not enable slack; bot token is required.
-          if (envKey === "SLACK_APP_TOKEN") {
-            return tokensByEnvKey["SLACK_BOT_TOKEN"] ? ["slack"] : [];
-          }
-          return [];
-        }),
-      ...reusableMessagingChannels,
-      ...qrSelectedChannels,
-    ]),
-  ];
-  const { useDockerGpuPatch, logMessage: sandboxGpuLogMessage } =
-    dockerGpuSandboxCreate.resolveDockerGpuSandboxCreatePlan(effectiveSandboxGpuConfig, {
-      dockerDriverGateway: isLinuxDockerDriverGatewayEnabled(),
-    });
-  const initialSandboxPolicy = prepareInitialSandboxCreatePolicy(
-    basePolicyPath,
-    activeMessagingChannels,
-    {
-      directGpu: effectiveSandboxGpuConfig.sandboxGpuEnabled,
-      dockerGpuPatch: useDockerGpuPatch,
-      additionalPresets: hermesToolGateways,
-    },
-  );
+    messagingTokenDefs,
+    reusableMessagingChannels,
+    reusableMessagingProviders,
+    hermesToolGateways,
+    sandboxGpuConfig: effectiveSandboxGpuConfig,
+    dockerDriverGateway: isLinuxDockerDriverGatewayEnabled(),
+    appendResourceFlags: (args) =>
+      appendResourceFlagsForProfile(args, resourceProfile, getOpenshellBinary(), {
+        isNonInteractive,
+        note,
+        prompt,
+        promptOrDefault,
+      }),
+    runProviderPreDeleteCleanup: () =>
+      runSandboxProviderPreDeleteCleanup(sandboxName, {
+        runOpenshell,
+        redact,
+        tolerateMissingSandbox: true,
+      }),
+    upsertMessagingProviders,
+    getMessagingChannelForEnvKey,
+    getHermesToolGatewayProviderName: (targetSandbox) =>
+      getHermesToolGatewayBroker().getHermesToolGatewayProviderName(targetSandbox),
+  });
   if (initialSandboxPolicy.cleanup) {
     process.on("exit", initialSandboxPolicy.cleanup);
   }
@@ -3031,42 +3031,6 @@ async function createSandbox(
     );
   }
   if (sandboxGpuLogMessage) console.log(sandboxGpuLogMessage);
-  const createArgs = [
-    "--from",
-    `${buildCtx}/Dockerfile`,
-    "--name",
-    sandboxName,
-    "--policy",
-    initialSandboxPolicy.policyPath,
-    ...buildSandboxGpuCreateArgs(effectiveSandboxGpuConfig, {
-      suppressGpuFlag: useDockerGpuPatch,
-    }),
-  ];
-
-  appendResourceFlagsForProfile(createArgs, resourceProfile, getOpenshellBinary(), {
-    isNonInteractive,
-    note,
-    prompt,
-    promptOrDefault,
-  });
-  runSandboxProviderPreDeleteCleanup(sandboxName, {
-    runOpenshell,
-    redact,
-    tolerateMissingSandbox: true,
-  });
-  const messagingProviders = [
-    ...new Set([
-      ...upsertMessagingProviders(messagingTokenDefs, { replaceExisting: true }),
-      ...reusableMessagingProviders,
-    ]),
-  ];
-  for (const p of messagingProviders) {
-    createArgs.push("--provider", p);
-  }
-  if (hermesToolGateways.length > 0) {
-    const hermesToolGateway = getHermesToolGatewayBroker();
-    createArgs.push("--provider", hermesToolGateway.getHermesToolGatewayProviderName(sandboxName));
-  }
 
   console.log(`  Creating sandbox '${sandboxName}' (this takes a few minutes on first run)...`);
   const {
