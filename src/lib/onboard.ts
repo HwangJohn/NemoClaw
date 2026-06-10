@@ -31,6 +31,7 @@ const extraPlaceholderKeysModule: typeof import("./onboard/extra-placeholder-key
 const buildContextStage: typeof import("./onboard/build-context-stage") = require("./onboard/build-context-stage");
 const sandboxBuildPatchConfig: typeof import("./onboard/sandbox-build-patch-config") = require("./onboard/sandbox-build-patch-config");
 const sandboxDockerfilePatchFlow: typeof import("./onboard/sandbox-dockerfile-patch-flow") = require("./onboard/sandbox-dockerfile-patch-flow");
+const sandboxMessagingPreflight: typeof import("./onboard/sandbox-messaging-preflight") = require("./onboard/sandbox-messaging-preflight");
 const sandboxCreatePlan: typeof import("./onboard/sandbox-create-plan") = require("./onboard/sandbox-create-plan");
 const sandboxCreateLaunch: typeof import("./onboard/sandbox-create-launch") = require("./onboard/sandbox-create-launch");
 const {
@@ -403,7 +404,6 @@ const {
   messagingChannelConfigsEqual,
   persistMessagingChannelConfigToSession,
 } = messagingConfig;
-const messagingPrep: typeof import("./onboard/messaging-prep") = require("./onboard/messaging-prep");
 const sandboxAgent: typeof import("./onboard/sandbox-agent") = require("./onboard/sandbox-agent");
 const sandboxLifecycle: typeof import("./onboard/sandbox-lifecycle") = require("./onboard/sandbox-lifecycle");
 const sandboxRegistryMetadata: typeof import("./onboard/sandbox-registry-metadata") = require("./onboard/sandbox-registry-metadata");
@@ -2575,67 +2575,6 @@ async function createSandbox(
   });
   const hermesDashboardState = hermesDashboardForwarding.resolveStateForPort(effectivePort);
 
-  // Check whether messaging providers will be needed — this must happen before
-  // the sandbox reuse decision so we can detect stale sandboxes that were created
-  // without provider attachments (security: prevents legacy raw-env-var leaks).
-
-  // Messaging channels like Telegram (getUpdates), Discord (gateway), and Slack
-  // (Socket Mode) enforce one consumer per channel credential. Two sandboxes
-  // sharing a credential silently break both bridges (see #1953). Warn before
-  // we commit.
-  //
-  // The compiled plan (written to env by setupMessagingChannels) is the source
-  // of truth: credential hashes and active-channel membership are read from
-  // plan.credentialBindings rather than from MESSAGING_CHANNELS constants.
-  // Validate sandbox identity before trusting the env plan: a stale plan from a
-  // prior run of a different sandbox must not gate or bypass conflict detection
-  // for the current sandbox creation.
-  const envPlan = readMessagingPlanFromEnv();
-  const currentPlan = envPlan?.sandboxName === sandboxName ? envPlan : null;
-  const hasPlanCredentials =
-    currentPlan?.credentialBindings.some((b) => b.credentialAvailable) ?? false;
-  if (hasPlanCredentials) {
-    const {
-      backfillMessagingChannels,
-      findChannelConflictsFromPlan,
-      createMessagingConflictProbe,
-    } = require("./messaging/applier") as typeof import("./messaging/applier");
-    const probe = createMessagingConflictProbe({
-      checkGatewayLiveness: () =>
-        runOpenshell(["sandbox", "list"], { ignoreError: true, suppressOutput: true }).status === 0,
-      providerExists: (name) => providerExistsInGateway(name),
-    });
-    backfillMessagingChannels(registry, probe);
-    const conflicts = findChannelConflictsFromPlan(sandboxName, currentPlan!, registry);
-    if (conflicts.length > 0) {
-      for (const { channel, sandbox, reason } of conflicts) {
-        const detail =
-          reason === "matching-token"
-            ? `uses the same ${channel} credential`
-            : `already has ${channel} enabled, but its credential hash is unavailable`;
-        console.log(
-          `  ⚠ Sandbox '${sandbox}' ${detail}. Shared channel credentials only allow one sandbox to poll/connect — continuing may break both bridges.`,
-        );
-      }
-      if (isNonInteractive()) {
-        console.error(
-          `  Aborting: resolve the messaging channel conflict above or run \`${cliName()} <sandbox> channels stop <channel>\` / \`${cliName()} <sandbox> channels remove <channel>\` on the other sandbox.`,
-        );
-        process.exit(1);
-      }
-      if (!(await promptYesNoOrDefault("  Continue anyway?", null, false))) {
-        console.log("  Aborting sandbox creation.");
-        process.exit(1);
-      }
-    }
-  }
-
-  // Drop channels the operator disabled via `nemoclaw <sandbox> channels stop`.
-  // Credentials stay in the keychain; the bridge simply isn't registered with
-  // the gateway on the next rebuild. `channels start` removes the entry and
-  // the bridge comes back.
-  const disabledChannels: string[] =
-    require("./onboard/channel-state").resolveDisabledChannels(sandboxName);
   const {
     disabledChannelNames,
     messagingTokenDefs,
@@ -2643,30 +2582,35 @@ async function createSandbox(
     hasMessagingTokens,
     reusableMessagingProviders,
     reusableMessagingChannels,
-    missingBraveApiKey,
-  } = messagingPrep.prepareCreateSandboxMessaging({
-    sandboxName,
-    channels: MESSAGING_CHANNELS,
-    enabledChannels,
     disabledChannels,
-    webSearchConfig,
-    env: process.env,
-    getValidatedMessagingTokenByEnvKey,
-    getCredential,
-    normalizeCredentialValue,
-    registerExtraPlaceholderProviders: extraPlaceholderKeysModule.registerExtraPlaceholderProviders,
-    getMessagingChannelForEnvKey,
-    providerExistsInGateway,
-  });
-  // Fail before any recreate/delete path runs: otherwise a missing key would
-  // destroy the existing sandbox first and only then surface the abort (#3626).
-  if (missingBraveApiKey) {
-    console.error("  Brave Search is enabled, but BRAVE_API_KEY is not available in this process.");
-    console.error(
-      "  Re-run with BRAVE_API_KEY set, or disable Brave Search before recreating the sandbox.",
-    );
-    process.exit(1);
-  }
+  } = await sandboxMessagingPreflight.prepareSandboxMessagingPreflight(
+    {
+      channels: MESSAGING_CHANNELS,
+      enabledChannels,
+      sandboxName,
+      webSearchConfig,
+      env: process.env,
+    },
+    {
+      readMessagingPlanFromEnv,
+      registry,
+      checkGatewayLiveness: () =>
+        runOpenshell(["sandbox", "list"], { ignoreError: true, suppressOutput: true }).status === 0,
+      providerExistsInGateway,
+      isNonInteractive,
+      promptYesNoOrDefault,
+      cliName,
+      log: (message) => console.log(message),
+      error: (message) => console.error(message),
+      exitProcess: (code) => process.exit(code),
+      getValidatedMessagingTokenByEnvKey,
+      getCredential,
+      normalizeCredentialValue,
+      registerExtraPlaceholderProviders:
+        extraPlaceholderKeysModule.registerExtraPlaceholderProviders,
+      getMessagingChannelForEnvKey,
+    },
+  );
 
   const existingRegistryEntryBeforePrune = registry.getSandbox(sandboxName);
 
