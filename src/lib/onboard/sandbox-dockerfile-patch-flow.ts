@@ -13,8 +13,6 @@ type ResolvedSandboxBaseImage = NonNullable<ReturnType<PullAndResolveBaseImageDi
 type EnforceDockerGpuPatchPreserveNetwork =
   typeof import("./docker-gpu-local-inference").enforceDockerGpuPatchPreserveNetwork;
 type PatchStagedDockerfile = typeof import("./dockerfile-patch").patchStagedDockerfile;
-const DEFAULT_SANDBOX_BASE_IMAGE = "ghcr.io/nvidia/nemoclaw/sandbox-base";
-const DEFAULT_SANDBOX_BASE_TAG = "latest";
 
 export type SandboxDockerfilePatchDeps = {
   pullAndResolveBaseImageDigest?: PullAndResolveBaseImageDigest;
@@ -22,14 +20,14 @@ export type SandboxDockerfilePatchDeps = {
   isLinuxDockerDriverGatewayEnabled?: () => boolean;
   enforceDockerGpuPatchPreserveNetwork?: EnforceDockerGpuPatchPreserveNetwork;
   patchStagedDockerfile?: PatchStagedDockerfile;
-  sandboxBaseImage?: string;
-  sandboxBaseTag?: string;
   now?: () => number;
 };
 
 export type PrepareSandboxDockerfilePatchInput = {
   agent: AgentDefinition | null | undefined;
   fromDockerfile: string | null;
+  sandboxBaseImage: string;
+  sandboxBaseTag: string;
   stagedDockerfile: string;
   model: string;
   chatUiUrl: string;
@@ -90,19 +88,11 @@ function patchStagedDockerfile(
   return impl(...args);
 }
 
-function getSandboxBaseImageRef(deps: SandboxDockerfilePatchDeps): {
-  image: string;
-  tag: string;
-} {
-  return {
-    image: deps.sandboxBaseImage ?? DEFAULT_SANDBOX_BASE_IMAGE,
-    tag: deps.sandboxBaseTag ?? DEFAULT_SANDBOX_BASE_TAG,
-  };
-}
-
 export async function prepareSandboxDockerfilePatch({
   agent,
   fromDockerfile,
+  sandboxBaseImage,
+  sandboxBaseTag,
   stagedDockerfile,
   model,
   chatUiUrl,
@@ -134,9 +124,8 @@ export async function prepareSandboxDockerfilePatch({
   } else if (resolved) {
     log(`  Using sandbox base image ${resolved.ref}`);
   } else if (shouldResolveBaseImage) {
-    const sandboxBase = getSandboxBaseImageRef(deps);
     const localCheck = (deps.dockerImageInspect ?? inspectDockerImage)(
-      `${sandboxBase.image}:${sandboxBase.tag}`,
+      `${sandboxBaseImage}:${sandboxBaseTag}`,
       {
         ignoreError: true,
         suppressOutput: true,
@@ -145,12 +134,10 @@ export async function prepareSandboxDockerfilePatch({
     if (localCheck.status === 0) {
       warn("  Warning: could not pull base image from registry; using cached :latest.");
     } else {
-      warn(
-        `  Warning: base image ${sandboxBase.image}:${sandboxBase.tag} is not available locally.`,
-      );
+      warn(`  Warning: base image ${sandboxBaseImage}:${sandboxBaseTag} is not available locally.`);
       warn("  The build will fail unless Docker can pull the image during build.");
       warn("  If offline, pull the image manually first:");
-      warn(`    docker pull ${sandboxBase.image}:${sandboxBase.tag}`);
+      warn(`    docker pull ${sandboxBaseImage}:${sandboxBaseTag}`);
     }
   }
 

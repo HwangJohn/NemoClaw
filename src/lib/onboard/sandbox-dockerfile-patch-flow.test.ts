@@ -23,6 +23,8 @@ describe("prepareSandboxDockerfilePatch", () => {
     const result = await prepareSandboxDockerfilePatch({
       agent: null,
       fromDockerfile: null,
+      sandboxBaseImage: "ghcr.io/nvidia/nemoclaw/sandbox-base",
+      sandboxBaseTag: "latest",
       stagedDockerfile: "/tmp/Dockerfile",
       model: "model-a",
       chatUiUrl: "http://127.0.0.1:7000",
@@ -93,6 +95,8 @@ describe("prepareSandboxDockerfilePatch", () => {
     const result = await prepareSandboxDockerfilePatch({
       agent: { name: "hermes" } as any,
       fromDockerfile: null,
+      sandboxBaseImage: "ghcr.io/nvidia/nemoclaw/sandbox-base",
+      sandboxBaseTag: "latest",
       stagedDockerfile: "/tmp/Dockerfile",
       model: "model-a",
       chatUiUrl: "http://127.0.0.1:7000",
@@ -127,6 +131,8 @@ describe("prepareSandboxDockerfilePatch", () => {
     await prepareSandboxDockerfilePatch({
       agent: null,
       fromDockerfile: null,
+      sandboxBaseImage: "ghcr.io/nvidia/nemoclaw/sandbox-base",
+      sandboxBaseTag: "latest",
       stagedDockerfile: "/tmp/Dockerfile",
       model: "model-a",
       chatUiUrl: "http://127.0.0.1:7000",
@@ -162,6 +168,8 @@ describe("prepareSandboxDockerfilePatch", () => {
     await prepareSandboxDockerfilePatch({
       agent: null,
       fromDockerfile: null,
+      sandboxBaseImage: "ghcr.io/nvidia/nemoclaw/sandbox-base",
+      sandboxBaseTag: "latest",
       stagedDockerfile: "/tmp/Dockerfile",
       model: "model-a",
       chatUiUrl: "http://127.0.0.1:7000",

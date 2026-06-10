@@ -3085,6 +3085,8 @@ async function createSandbox(
   const { buildId } = await sandboxDockerfilePatchFlow.prepareSandboxDockerfilePatch({
     agent,
     fromDockerfile,
+    sandboxBaseImage: SANDBOX_BASE_IMAGE,
+    sandboxBaseTag: SANDBOX_BASE_TAG,
     stagedDockerfile,
     model,
     chatUiUrl,
