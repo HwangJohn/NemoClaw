@@ -2885,28 +2885,21 @@ async function createSandbox(
                 "  Pass --recreate-sandbox or set NEMOCLAW_RECREATE_SANDBOX=1 to force recreation.",
               );
             }
-            const reusedPort = ensureDashboardForward(sandboxName, chatUiUrl);
-            chatUiUrl = `http://127.0.0.1:${reusedPort}`;
-            process.env.CHAT_UI_URL = chatUiUrl;
-            const reusedHermesDashboardState =
-              hermesDashboardForwarding.resolveStateForPort(reusedPort);
-            hermesDashboardForwarding.ensureForState(reusedHermesDashboardState, sandboxName);
-            updateReusedSandboxMetadata(
+            ({ chatUiUrl } = sandboxReuse.applyReusedSandboxDashboardState({
               sandboxName,
+              chatUiUrl,
+              env: process.env,
               agent,
               model,
               provider,
-              reusedPort,
-              !selectionDrift.unknown,
-              effectiveSandboxGpuConfig,
-            );
-            registry.updateSandbox(sandboxName, {
-              ...onboardHermesDashboard.getHermesDashboardRegistryFields(
-                reusedHermesDashboardState,
-              ),
+              selectionVerified: !selectionDrift.unknown,
+              sandboxGpuConfig: effectiveSandboxGpuConfig,
               gatewayName: GATEWAY_NAME,
               gatewayPort: GATEWAY_PORT,
-            });
+              ensureDashboardForward,
+              hermesDashboardForwarding,
+              updateReusedSandboxMetadata,
+            }));
             return sandboxName;
           }
         } else {
@@ -2934,28 +2927,21 @@ async function createSandbox(
           if (await promptYesNoOrDefault("  Reuse existing sandbox?", null, true)) {
             policyPresetCarry.seedReusedSandboxPolicyPresets(sandboxName, isNonInteractive());
             upsertMessagingProviders(messagingTokenDefs);
-            const reusedPort2 = ensureDashboardForward(sandboxName, chatUiUrl);
-            chatUiUrl = `http://127.0.0.1:${reusedPort2}`;
-            process.env.CHAT_UI_URL = chatUiUrl;
-            const reusedHermesDashboardState2 =
-              hermesDashboardForwarding.resolveStateForPort(reusedPort2);
-            hermesDashboardForwarding.ensureForState(reusedHermesDashboardState2, sandboxName);
-            updateReusedSandboxMetadata(
+            ({ chatUiUrl } = sandboxReuse.applyReusedSandboxDashboardState({
               sandboxName,
+              chatUiUrl,
+              env: process.env,
               agent,
               model,
               provider,
-              reusedPort2,
-              !selectionDrift.unknown,
-              effectiveSandboxGpuConfig,
-            );
-            registry.updateSandbox(sandboxName, {
-              ...onboardHermesDashboard.getHermesDashboardRegistryFields(
-                reusedHermesDashboardState2,
-              ),
+              selectionVerified: !selectionDrift.unknown,
+              sandboxGpuConfig: effectiveSandboxGpuConfig,
               gatewayName: GATEWAY_NAME,
               gatewayPort: GATEWAY_PORT,
-            });
+              ensureDashboardForward,
+              hermesDashboardForwarding,
+              updateReusedSandboxMetadata,
+            }));
             return sandboxName;
           }
         }
