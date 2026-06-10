@@ -4,6 +4,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { SandboxMessagingPlan } from "../../../messaging/manifest";
+import { hashCredential } from "../../../security/credential-hash";
 import { createSession, type Session, type SessionUpdates } from "../../../state/onboard-session";
 import { handleSandboxState, type SandboxStateOptions } from "./sandbox";
 
@@ -38,6 +39,41 @@ function makeMinimalPlan(
     stateUpdates: [],
     healthChecks: [],
   };
+}
+
+function withTelegramCredentialHash(
+  plan: SandboxMessagingPlan,
+  credentialHash: string | null,
+): SandboxMessagingPlan {
+  return {
+    ...plan,
+    credentialBindings: [
+      {
+        channelId: "telegram",
+        credentialId: "bot-token",
+        sourceInput: "botToken",
+        providerName: `${plan.sandboxName}-telegram-bridge`,
+        providerEnvKey: "TELEGRAM_BOT_TOKEN",
+        placeholder: "openshell:resolve:env:TELEGRAM_BOT_TOKEN",
+        credentialAvailable: true,
+        ...(credentialHash ? { credentialHash } : {}),
+      },
+    ],
+  };
+}
+
+async function withEnv<T>(key: string, value: string, run: () => Promise<T>): Promise<T> {
+  const previous = process.env[key];
+  process.env[key] = value;
+  try {
+    return await run();
+  } finally {
+    if (previous === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = previous;
+    }
+  }
 }
 
 type Gpu = { type: string } | null;
@@ -470,6 +506,45 @@ describe("handleSandboxState", () => {
       active: false,
       disabled: true,
     });
+  });
+
+  it("refreshes credential hashes when reusing an env-staged rebuild plan", async () => {
+    const oldHash = hashCredential("telegram-token-a");
+    const newHash = hashCredential("telegram-token-b");
+    const rebuiltPlan = withTelegramCredentialHash(
+      makeMinimalPlan("my-assistant", "openclaw", ["telegram"]),
+      oldHash,
+    );
+    const session = createSession({ sandboxName: "my-assistant", messagingPlan: rebuiltPlan });
+    const getRecordedMessagingChannelsForResume = vi.fn(() => ["telegram"]);
+    const writePlanToEnv = vi.fn();
+    const { deps, calls, getSession } = createDeps({
+      getRecordedMessagingChannelsForResume,
+      writePlanToEnv,
+      readMessagingPlanFromEnv: () => rebuiltPlan,
+      getRegistrySandboxMessagingPlan: () => null,
+    });
+
+    await withEnv("TELEGRAM_BOT_TOKEN", "telegram-token-b", async () => {
+      await handleSandboxState({
+        ...baseOptions(deps, session),
+        resume: true,
+        sandboxName: "my-assistant",
+      });
+    });
+
+    expect(calls.setupMessaging).not.toHaveBeenCalled();
+    expect(writePlanToEnv).toHaveBeenCalledWith(
+      expect.objectContaining({
+        credentialBindings: [
+          expect.objectContaining({
+            providerEnvKey: "TELEGRAM_BOT_TOKEN",
+            credentialHash: newHash,
+          }),
+        ],
+      }),
+    );
+    expect(getSession().messagingPlan?.credentialBindings[0]?.credentialHash).toBe(newHash);
   });
 
   it("preserves an empty env-staged rebuild plan instead of rediscovering token-backed channels", async () => {

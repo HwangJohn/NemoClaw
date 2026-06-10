@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { SandboxMessagingPlan } from "../../../messaging/manifest";
+import { hashCredential } from "../../../security/credential-hash";
 import type { Session, SessionUpdates } from "../../../state/onboard-session";
 import { getActiveChannelsFromPlan, getChannelsFromPlan } from "../../messaging-plan-session";
 import { withSandboxPhaseTrace } from "../../tracing";
@@ -141,6 +142,22 @@ export interface SandboxStateResult<WebSearchConfig> {
 
 function sameEffectiveTelegramRequireMention(left: boolean | null, right: boolean | null): boolean {
   return (left ?? false) === (right ?? false);
+}
+
+function refreshCredentialHashesFromEnv(plan: SandboxMessagingPlan): {
+  plan: SandboxMessagingPlan;
+  changed: boolean;
+} {
+  let changed = false;
+  const credentialBindings = plan.credentialBindings.map((binding) => {
+    if (binding.credentialAvailable !== true) return binding;
+    const credentialHash = hashCredential(process.env[binding.providerEnvKey]);
+    if (!credentialHash || credentialHash === binding.credentialHash) return binding;
+    changed = true;
+    return { ...binding, credentialHash };
+  });
+
+  return changed ? { plan: { ...plan, credentialBindings }, changed } : { plan, changed };
 }
 
 export async function handleSandboxState<
@@ -323,12 +340,15 @@ export async function handleSandboxState<
     if (recordedMessagingChannels) {
       selectedMessagingChannels = recordedMessagingChannels;
       if (envMessagingPlan) {
-        messagingPlan = envMessagingPlan;
-        selectedMessagingChannels = getActiveChannelsFromPlan(envMessagingPlan) ?? [];
+        const refreshed = refreshCredentialHashesFromEnv(envMessagingPlan);
+        messagingPlan = refreshed.plan;
+        if (refreshed.changed) deps.writePlanToEnv(refreshed.plan);
+        selectedMessagingChannels = getActiveChannelsFromPlan(messagingPlan) ?? [];
       } else if (registryMessagingPlan) {
-        deps.writePlanToEnv(registryMessagingPlan);
-        messagingPlan = registryMessagingPlan;
-        selectedMessagingChannels = getActiveChannelsFromPlan(registryMessagingPlan) ?? [];
+        const refreshed = refreshCredentialHashesFromEnv(registryMessagingPlan);
+        deps.writePlanToEnv(refreshed.plan);
+        messagingPlan = refreshed.plan;
+        selectedMessagingChannels = getActiveChannelsFromPlan(messagingPlan) ?? [];
       }
       if (selectedMessagingChannels.length > 0) {
         deps.note(
@@ -336,12 +356,15 @@ export async function handleSandboxState<
         );
       }
     } else if (envMessagingPlan) {
-      messagingPlan = envMessagingPlan;
-      selectedMessagingChannels = getActiveChannelsFromPlan(envMessagingPlan) ?? [];
+      const refreshed = refreshCredentialHashesFromEnv(envMessagingPlan);
+      messagingPlan = refreshed.plan;
+      if (refreshed.changed) deps.writePlanToEnv(refreshed.plan);
+      selectedMessagingChannels = getActiveChannelsFromPlan(messagingPlan) ?? [];
     } else if (registryMessagingPlan) {
-      deps.writePlanToEnv(registryMessagingPlan);
-      messagingPlan = registryMessagingPlan;
-      selectedMessagingChannels = getActiveChannelsFromPlan(registryMessagingPlan) ?? [];
+      const refreshed = refreshCredentialHashesFromEnv(registryMessagingPlan);
+      deps.writePlanToEnv(refreshed.plan);
+      messagingPlan = refreshed.plan;
+      selectedMessagingChannels = getActiveChannelsFromPlan(messagingPlan) ?? [];
     } else {
       const existing = getChannelsFromPlan(session?.messagingPlan);
       selectedMessagingChannels = await deps.setupMessagingChannels(agent, existing, sandboxName);
