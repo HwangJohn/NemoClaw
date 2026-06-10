@@ -475,8 +475,11 @@ const policyPresetCarry: typeof import("./onboard/policy-preset-persistence") = 
 const tiers: typeof import("./policy/tiers") = require("./policy/tiers");
 const policyTierEnv: typeof import("./onboard/policy-tier-env") = require("./onboard/policy-tier-env");
 const { ensureUsageNoticeConsent } = require("./onboard/usage-notice");
-const { findAvailableDashboardPort, preflightDashboardPortRangeAvailability } =
-  require("./onboard/dashboard-port") as typeof import("./onboard/dashboard-port");
+const {
+  findAvailableDashboardPort,
+  preflightDashboardPortRangeAvailability,
+  resolveCreateSandboxDashboardPort,
+} = require("./onboard/dashboard-port") as typeof import("./onboard/dashboard-port");
 const { tryCleanupOrphanedDashboardForward } =
   require("./onboard/orphaned-dashboard-forward") as typeof import("./onboard/orphaned-dashboard-forward");
 const { destroyGatewayForReuse } =
@@ -2565,46 +2568,16 @@ async function createSandbox(
   const effectiveSandboxGpuConfig =
     sandboxGpuConfig ?? resolveSandboxGpuConfig(gpu, { flag: null, device: null });
 
-  // Port priority: --control-ui-port > CHAT_UI_URL env > registry (resume) > agent.forwardPort > default
-  // Pre-resolve port availability so CHAT_UI_URL baked into the Dockerfile,
-  // the sandbox env, and the readiness probe all use the final forwarded port.
-  const persistedPort = registry.getSandbox(sandboxName)?.dashboardPort ?? null;
-  // When CHAT_UI_URL is set, extract its port so the allocator and the URL stay in sync.
-  let envPort: number | null = null;
-  if (process.env.CHAT_UI_URL) {
-    try {
-      const u = new URL(
-        process.env.CHAT_UI_URL.includes("://")
-          ? process.env.CHAT_UI_URL
-          : `http://${process.env.CHAT_UI_URL}`,
-      );
-      const p = Number(u.port);
-      if (p > 0) envPort = p;
-    } catch {
-      /* malformed URL — ignore */
-    }
-  }
-  const preferredPort =
-    controlUiPort ?? envPort ?? persistedPort ?? (agent ? agent.forwardPort : DASHBOARD_PORT);
-  const earlyForwards = runCaptureOpenshell(["forward", "list"], { ignoreError: true });
-  const effectivePort = findAvailableDashboardPort(sandboxName, preferredPort, earlyForwards);
-  if (effectivePort !== preferredPort) {
-    console.warn(`  ! Port ${preferredPort} is taken. Using port ${effectivePort} instead.`);
-  }
-  // Build chatUiUrl: preserve the hostname from CHAT_UI_URL when set, but
-  // always use effectivePort so the Dockerfile, env, and readiness probe agree.
-  let chatUiUrl: string;
-  if (process.env.CHAT_UI_URL && controlUiPort == null) {
-    const parsed = new URL(
-      process.env.CHAT_UI_URL.includes("://")
-        ? process.env.CHAT_UI_URL
-        : `http://${process.env.CHAT_UI_URL}`,
-    );
-    parsed.port = String(effectivePort);
-    chatUiUrl = parsed.toString().replace(/\/$/, "");
-  } else {
-    chatUiUrl = `http://127.0.0.1:${effectivePort}`;
-  }
+  let { effectivePort, chatUiUrl } = resolveCreateSandboxDashboardPort({
+    sandboxName,
+    controlUiPort,
+    chatUiUrlEnv: process.env.CHAT_UI_URL,
+    persistedPort: registry.getSandbox(sandboxName)?.dashboardPort ?? null,
+    agentForwardPort: agent?.forwardPort,
+    defaultPort: DASHBOARD_PORT,
+    forwardListOutput: runCaptureOpenshell(["forward", "list"], { ignoreError: true }),
+    warn: (message) => console.warn(message),
+  });
   const hermesDashboardForwarding = onboardHermesDashboard.createHermesDashboardOnboardForwarding({
     agentName: agent?.name,
     env: process.env,
