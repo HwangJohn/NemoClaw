@@ -116,4 +116,68 @@ describe("prepareCreateSandboxMessaging", () => {
       result.messagingTokenDefs,
     );
   });
+
+  it("removes both Slack bot and app token definitions when Slack is disabled", () => {
+    const result = prepareCreateSandboxMessaging(
+      createInput({
+        disabledChannels: ["slack"],
+        getValidatedMessagingTokenByEnvKey: (_channels, envKey) =>
+          envKey === "SLACK_BOT_TOKEN" || envKey === "SLACK_APP_TOKEN" ? `${envKey}-value` : null,
+      }),
+    );
+
+    expect(result.disabledChannelNames.has("slack")).toBe(true);
+    expect(result.messagingTokenDefs.map(({ envKey }) => envKey)).not.toContain("SLACK_BOT_TOKEN");
+    expect(result.messagingTokenDefs.map(({ envKey }) => envKey)).not.toContain("SLACK_APP_TOKEN");
+  });
+
+  it("includes all static token-backed channels by default without probing reusable providers", () => {
+    const providerExistsInGateway = vi.fn(() => true);
+
+    const result = prepareCreateSandboxMessaging(
+      createInput({
+        enabledChannels: null,
+        providerExistsInGateway,
+      }),
+    );
+
+    expect(result.messagingTokenDefs.map(({ envKey }) => envKey)).toEqual([
+      "DISCORD_BOT_TOKEN",
+      "SLACK_BOT_TOKEN",
+      "SLACK_APP_TOKEN",
+      "TELEGRAM_BOT_TOKEN",
+      "WECHAT_BOT_TOKEN",
+    ]);
+    expect(result.reusableMessagingProviders).toEqual([]);
+    expect(result.reusableMessagingChannels).toEqual([]);
+    expect(providerExistsInGateway).not.toHaveBeenCalled();
+  });
+
+  it("uses BRAVE_API_KEY from host env when the credential store has no value", () => {
+    const result = prepareCreateSandboxMessaging(
+      createInput({
+        webSearchConfig: { fetchEnabled: true },
+        env: { [BRAVE_API_KEY_ENV]: "  brv-host  " },
+      }),
+    );
+
+    expect(result.missingBraveApiKey).toBe(false);
+    expect(result.messagingTokenDefs).toContainEqual({
+      name: "demo-brave-search",
+      envKey: BRAVE_API_KEY_ENV,
+      token: "brv-host",
+      providerType: "brave",
+    });
+  });
+
+  it("does not create static token definitions for tokenless QR channels", () => {
+    const result = prepareCreateSandboxMessaging(
+      createInput({
+        enabledChannels: ["whatsapp"],
+      }),
+    );
+
+    expect(result.messagingTokenDefs).toEqual([]);
+    expect(result.hasMessagingTokens).toBe(false);
+  });
 });
