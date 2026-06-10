@@ -134,7 +134,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
     // if NVIDIA_API_KEY is unset (correct behavior under workflow_dispatch
     // without the secret wired in).
     const apiKey = secrets.required("NVIDIA_API_KEY");
-    expect(apiKey).toMatch(/^nvapi-/);
+    expect(apiKey.startsWith("nvapi-"), "NVIDIA_API_KEY must start with nvapi-").toBe(true);
 
     // ──────────────────────────────────────────────────────────────────
     // Phase 0 (deferred): pre-cleanup of leftover sandbox/session state.
