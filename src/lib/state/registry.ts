@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { isErrnoException } from "../core/errno";
 import type { SandboxMessagingPlan } from "../messaging/manifest";
+import { getDisabledChannelIdsFromMessagingState } from "../messaging/utils";
 import type { MessagingChannelConfig } from "../messaging-channel-config";
 import { ensureConfigDir, readConfigFile, writeConfigFile } from "./config-io";
 
@@ -498,7 +499,7 @@ export function removeCustomPolicyByName(name: string, presetName: string): bool
 
 export function getDisabledChannels(name: string): string[] {
   const data = load();
-  return data.sandboxes[name]?.disabledChannels ?? [];
+  return getDisabledChannelIdsFromMessagingState(data.sandboxes[name]);
 }
 
 export function setChannelDisabled(name: string, channel: string, disabled: boolean): boolean {

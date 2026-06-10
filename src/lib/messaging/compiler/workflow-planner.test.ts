@@ -651,17 +651,71 @@ describe("MessagingWorkflowPlanner", () => {
     );
   });
 
-  it("does not compile a rebuild plan when the sandbox entry has no stored plan", async () => {
+  it("compiles a rebuild plan from legacy sandbox fields when no stored plan exists", async () => {
     const rebuilt = await planner().buildRebuildPlanFromSandboxEntry({
       sandboxName: "demo",
       agent: "openclaw",
       sandboxEntry: {
         name: "demo",
         messagingChannels: ["telegram"],
+        messagingChannelConfig: {
+          TELEGRAM_REQUIRE_MENTION: "1",
+        },
+        disabledChannels: ["telegram"],
       },
     });
 
-    expect(rebuilt).toBeNull();
+    expect(rebuilt?.workflow).toBe("rebuild");
+    expect(rebuilt?.disabledChannels).toEqual(["telegram"]);
+    expect(rebuilt?.channels.find((channel) => channel.channelId === "telegram")).toMatchObject({
+      active: false,
+      configured: true,
+      disabled: true,
+    });
+    expect(
+      rebuilt?.channels
+        .find((channel) => channel.channelId === "telegram")
+        ?.inputs.find((input) => input.inputId === "requireMention"),
+    ).toMatchObject({
+      value: "1",
+    });
+    expect(
+      rebuilt?.credentialBindings.find(
+        (binding) => binding.providerEnvKey === "TELEGRAM_BOT_TOKEN",
+      ),
+    ).toMatchObject({
+      credentialAvailable: true,
+    });
+    expect(
+      rebuilt?.credentialBindings.find((binding) => binding.providerEnvKey === "TELEGRAM_BOT_TOKEN")
+        ?.credentialHash,
+    ).toBeUndefined();
+  });
+
+  it("merges channel adds with legacy sandbox fields when no stored plan exists", async () => {
+    const plan = await planner().buildChannelAddPlanFromSandboxEntry({
+      sandboxName: "demo",
+      agent: "openclaw",
+      sandboxEntry: {
+        name: "demo",
+        messagingChannels: ["telegram"],
+        disabledChannels: [],
+      },
+      channelId: "whatsapp",
+      isInteractive: false,
+      supportedChannelIds: ["telegram", "whatsapp"],
+    });
+
+    expect(plan.workflow).toBe("add-channel");
+    expect(plan.channels.map((channel) => channel.channelId)).toEqual(["telegram", "whatsapp"]);
+    expect(plan.channels.find((channel) => channel.channelId === "telegram")).toMatchObject({
+      active: true,
+      configured: true,
+    });
+    expect(plan.channels.find((channel) => channel.channelId === "whatsapp")).toMatchObject({
+      active: true,
+      configured: true,
+    });
   });
 
   it("reports unsupported channels deterministically before compiling", async () => {

@@ -1,6 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  getConfiguredChannelIdsFromPlan,
+  getMessagingChannelConfigFromPlan,
+} from "../../../messaging";
 import type { SandboxMessagingPlan } from "../../../messaging/manifest";
 import type { Session, SessionUpdates } from "../../../state/onboard-session";
 import { withSandboxPhaseTrace } from "../../tracing";
@@ -248,7 +252,8 @@ export async function handleSandboxState<
   if (resumeSandbox) {
     if (webSearchConfig)
       deps.note("  [resume] Reusing Brave Search configuration already baked into the sandbox.");
-    selectedMessagingChannels = session?.messagingChannels ?? [];
+    selectedMessagingChannels =
+      getConfiguredChannelIdsFromPlan(session?.messagingPlan) ?? session?.messagingChannels ?? [];
     deps.skippedStepMessage("sandbox", sandboxName);
     await deps.recordStateSkipped("sandbox", { reason: "resume", sandboxName });
   } else {
@@ -353,12 +358,19 @@ export async function handleSandboxState<
       }
     } else {
       const existing = sandboxName
-        ? (deps.getSandboxMessagingChannels(sandboxName) ?? session?.messagingChannels ?? null)
-        : (session?.messagingChannels ?? null);
+        ? (deps.getSandboxMessagingChannels(sandboxName) ??
+          getConfiguredChannelIdsFromPlan(session?.messagingPlan) ??
+          session?.messagingChannels ??
+          null)
+        : (getConfiguredChannelIdsFromPlan(session?.messagingPlan) ??
+          session?.messagingChannels ??
+          null);
       selectedMessagingChannels = await deps.setupMessagingChannels(agent, existing, sandboxName);
       messagingPlan = deps.readMessagingPlanFromEnv();
     }
-    const messagingChannelConfig = deps.readMessagingChannelConfigFromEnv();
+    const messagingChannelConfig =
+      deps.readMessagingChannelConfigFromEnv() ??
+      (getMessagingChannelConfigFromPlan(messagingPlan) as MessagingChannelConfig | null);
     session = deps.updateSession((current) => {
       current.messagingChannels = selectedMessagingChannels;
       current.messagingChannelConfig = messagingChannelConfig as Session["messagingChannelConfig"];

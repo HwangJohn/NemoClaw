@@ -1,8 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  getConfiguredChannelIdsFromMessagingState,
+  getDisabledChannelIdsFromMessagingState,
+  type MessagingPlanStateLike,
+} from "../messaging";
+
 type MessagingChannel = { name: string; envKey: string };
-type SandboxEntry = { messagingChannels?: string[] | null } | null | undefined;
+type SandboxEntry = MessagingPlanStateLike | null | undefined;
 
 export function getMessagingProviderNamesForChannel(
   sandboxName: string,
@@ -48,11 +54,15 @@ export function getNonInteractiveStoredMessagingChannels(
     return null;
   }
 
+  const sandboxEntry = getSandbox(sandboxName);
   const configuredChannels = getKnownMessagingChannels(
-    getSandbox(sandboxName)?.messagingChannels,
+    getConfiguredChannelIdsFromMessagingState(sandboxEntry),
     messagingChannels,
   );
-  const disabledChannels = new Set(getDisabledChannels(sandboxName));
+  const disabledChannels = new Set(getDisabledChannelIdsFromMessagingState(sandboxEntry));
+  if (!sandboxEntry?.messaging?.plan) {
+    for (const channel of getDisabledChannels(sandboxName)) disabledChannels.add(channel);
+  }
   const reusableChannels = configuredChannels.filter((channel) => {
     if (disabledChannels.has(channel)) return false;
     const providers = getMessagingProviderNamesForChannel(sandboxName, channel);

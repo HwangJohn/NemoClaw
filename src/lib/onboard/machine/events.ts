@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { JsonObject, JsonValue } from "../../core/json-types";
+import { getConfiguredChannelIdsFromPlan } from "../../messaging";
 import { redactSensitiveText, redactUrl } from "../../security/redact";
 import type { HermesAuthMethod, Session } from "../../state/onboard-session";
 import {
@@ -128,7 +129,9 @@ export function buildOnboardMachineContext(session: Session): OnboardMachineCont
     hermesAuthMethod: hermesAuthMethod(session.hermesAuthMethod),
     hermesToolGateways: stringArray(session.hermesToolGateways),
     policyPresets: stringArray(session.policyPresets),
-    messagingChannels: stringArray(session.messagingChannels),
+    messagingChannels: stringArray(
+      getConfiguredChannelIdsFromPlan(session.messagingPlan) ?? session.messagingChannels,
+    ),
     gpuPassthrough: booleanValue(session.gpuPassthrough),
   };
 }

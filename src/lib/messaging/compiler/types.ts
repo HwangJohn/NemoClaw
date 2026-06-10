@@ -16,4 +16,6 @@ export interface ManifestCompilerContext {
   readonly disabledChannels?: readonly MessagingChannelId[];
   readonly supportedChannelIds?: readonly MessagingChannelId[];
   readonly credentialAvailability?: MessagingCompilerCredentialAvailability;
+  /** Non-secret config input values keyed by env var name. */
+  readonly configValues?: Readonly<Record<string, string>>;
 }

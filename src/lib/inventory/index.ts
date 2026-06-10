@@ -3,6 +3,8 @@
 
 import { CLI_NAME } from "../cli/branding";
 import type { GatewayInference } from "../inference/config";
+import { getConfiguredChannelIdsFromMessagingState } from "../messaging";
+import type { SandboxMessagingPlan } from "../messaging/manifest";
 import { redactFull } from "../security/redact";
 import { resolveDefaultSandboxName } from "../tunnel/service-command";
 
@@ -19,6 +21,7 @@ export interface SandboxEntry {
   openshellVersion?: string | null;
   policies?: string[] | null;
   messagingChannels?: string[] | null;
+  messaging?: { plan?: SandboxMessagingPlan | null } | null;
   agent?: string | null;
   dashboardPort?: number | null;
 }
@@ -494,8 +497,8 @@ export function showStatusCommand(deps: ShowStatusCommandDeps): void {
     // and the original `sandboxes` snapshot is stale.
     const refreshed = deps.listSandboxes().sandboxes;
     const defaultEntry = refreshed.find((sb) => sb.name === resolvedDefault);
-    const channels = defaultEntry?.messagingChannels;
-    if (Array.isArray(channels) && channels.length > 0) {
+    const channels = getConfiguredChannelIdsFromMessagingState(defaultEntry);
+    if (channels.length > 0) {
       const degraded = deps.checkMessagingBridgeHealth(resolvedDefault, channels);
       if (degraded.length > 0) {
         log("");

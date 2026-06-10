@@ -7,6 +7,10 @@ import {
   resolveMessagingChannelConfigEnvValue,
   sanitizeMessagingChannelConfig,
 } from "../messaging-channel-config";
+import {
+  getMessagingChannelConfigFromMessagingState,
+  getMessagingChannelConfigFromPlan,
+} from "../messaging";
 import type { Session } from "../state/onboard-session";
 import * as onboardSession from "../state/onboard-session";
 import * as registry from "../state/registry";
@@ -106,13 +110,18 @@ export function getStoredMessagingChannelConfig(
   sandboxName: string | null,
   session: Session | null,
 ): MessagingChannelConfig | null {
+  const registryEntry = sandboxName ? registry.getSandbox(sandboxName) : null;
   const registryConfig = sandboxName
-    ? sanitizeMessagingChannelConfig(registry.getSandbox(sandboxName)?.messagingChannelConfig)
+    ? sanitizeMessagingChannelConfig(getMessagingChannelConfigFromMessagingState(registryEntry))
     : null;
   const sessionMatchesSandbox =
     !session?.sandboxName || !sandboxName || session.sandboxName === sandboxName;
   const sessionConfig = sessionMatchesSandbox
-    ? sanitizeMessagingChannelConfig(session?.messagingChannelConfig)
+    ? sanitizeMessagingChannelConfig(
+        session?.messagingPlan
+          ? getMessagingChannelConfigFromPlan(session.messagingPlan)
+          : session?.messagingChannelConfig,
+      )
     : null;
   return mergeMessagingChannelConfigs(registryConfig, sessionConfig);
 }

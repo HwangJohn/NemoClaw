@@ -12,6 +12,9 @@ import {
   type ChannelManifest,
   createBuiltInChannelManifestRegistry,
   createBuiltInMessagingHookRegistry,
+  getConfiguredChannelIdsFromMessagingState,
+  getMessagingChannelConfigFromMessagingState,
+  getMessagingChannelConfigFromPlan,
   getMessagingManifestAvailabilityContext,
   MessagingHostStateApplier,
   MessagingSetupApplier,
@@ -511,7 +514,7 @@ async function applyChannelAddToGatewayAndRegistry(
   // tokens on disk.
   const entry = registry.getSandbox(sandboxName);
   if (entry) {
-    const enabled = new Set(entry.messagingChannels || []);
+    const enabled = new Set(getConfiguredChannelIdsFromMessagingState(entry));
     enabled.add(channelName);
     const disabled = (entry.disabledChannels || []).filter((c: string) => c !== channelName);
     registry.updateSandbox(sandboxName, {
@@ -626,7 +629,9 @@ async function applyChannelRemoveToGatewayAndRegistry(
 
   const entry = registry.getSandbox(sandboxName);
   if (entry) {
-    const enabled = (entry.messagingChannels || []).filter((c: string) => c !== channelName);
+    const enabled = getConfiguredChannelIdsFromMessagingState(entry).filter(
+      (c: string) => c !== channelName,
+    );
     registry.updateSandbox(sandboxName, { messagingChannels: enabled });
   }
 
@@ -936,14 +941,22 @@ function persistManifestMessagingConfig(sandboxName: string, manifest: ChannelMa
   if (!config) return;
 
   const entry = registry.getSandbox(sandboxName);
-  const mergedRegistryConfig = mergeMessagingChannelConfigs(entry?.messagingChannelConfig, config);
+  const mergedRegistryConfig = mergeMessagingChannelConfigs(
+    getMessagingChannelConfigFromMessagingState(entry),
+    config,
+  );
   if (entry && mergedRegistryConfig) {
     registry.updateSandbox(sandboxName, { messagingChannelConfig: mergedRegistryConfig });
   }
 
   const session = safeLoadOnboardSession();
   if (session?.sandboxName !== sandboxName) return;
-  const mergedSessionConfig = mergeMessagingChannelConfigs(session.messagingChannelConfig, config);
+  const mergedSessionConfig = mergeMessagingChannelConfigs(
+    session.messagingPlan
+      ? getMessagingChannelConfigFromPlan(session.messagingPlan)
+      : session.messagingChannelConfig,
+    config,
+  );
   if (!mergedSessionConfig) return;
   try {
     onboardSession.updateSession((current) => {
@@ -1098,9 +1111,7 @@ export async function addSandboxChannel(
     process.exit(1);
   }
   const priorEntry = registry.getSandbox(sandboxName);
-  const priorMessagingChannels: string[] = priorEntry?.messagingChannels
-    ? [...priorEntry.messagingChannels]
-    : [];
+  const priorMessagingChannels: string[] = getConfiguredChannelIdsFromMessagingState(priorEntry);
   const wasAlreadyEnabled = priorMessagingChannels.includes(canonical);
   const channelTokenKeys = getChannelTokenKeys(channelDef);
   const priorCreds: Record<string, string> = {};
@@ -1402,7 +1413,7 @@ export async function removeSandboxChannel(
       ? sessionForSandbox.policyPresets
       : [];
   const hasChannelResidue =
-    (registryEntry?.messagingChannels || []).includes(canonical) ||
+    getConfiguredChannelIdsFromMessagingState(registryEntry).includes(canonical) ||
     (registryEntry?.policies || []).includes(canonical) ||
     sessionPolicyPresets.includes(canonical) ||
     policies.getAppliedPresets(sandboxName).includes(canonical);

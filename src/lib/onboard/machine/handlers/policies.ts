@@ -1,6 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  getConfiguredChannelIdsFromMessagingState,
+  getConfiguredChannelIdsFromPlan,
+  getDisabledChannelIdsFromMessagingState,
+} from "../../../messaging";
+import type { SandboxMessagingPlan } from "../../../messaging/manifest";
 import type { Session, SessionUpdates } from "../../../state/onboard-session";
 import { advanceTo, type OnboardStateTransitionResult } from "../result";
 
@@ -12,6 +18,27 @@ function normalizeAgentName(name: string | null | undefined): string {
   return trimmed && trimmed !== "openclaw" ? trimmed : "openclaw";
 }
 
+function getActiveSandboxMessagingChannels(
+  activeSandbox: ActiveSandboxPolicyState | null | undefined,
+): string[] | null {
+  if (!activeSandbox) return null;
+  if (activeSandbox.messaging?.plan)
+    return getConfiguredChannelIdsFromMessagingState(activeSandbox);
+  return Array.isArray(activeSandbox.messagingChannels)
+    ? getConfiguredChannelIdsFromMessagingState(activeSandbox)
+    : null;
+}
+
+function getActiveSandboxDisabledChannels(
+  activeSandbox: ActiveSandboxPolicyState | null | undefined,
+): string[] | null {
+  if (!activeSandbox) return null;
+  if (activeSandbox.messaging?.plan) return getDisabledChannelIdsFromMessagingState(activeSandbox);
+  return Array.isArray(activeSandbox.disabledChannels)
+    ? getDisabledChannelIdsFromMessagingState(activeSandbox)
+    : null;
+}
+
 export interface PolicyPresetEntry {
   name: string;
   [key: string]: unknown;
@@ -19,6 +46,7 @@ export interface PolicyPresetEntry {
 
 export interface ActiveSandboxPolicyState {
   messagingChannels?: string[] | null;
+  messaging?: { plan?: SandboxMessagingPlan | null } | null;
   disabledChannels?: string[] | null;
 }
 
@@ -133,15 +161,17 @@ export async function handlePoliciesState<Agent, WebSearchConfig>({
   const recordedPolicyPresets = Array.isArray(latestSession?.policyPresets)
     ? latestSession.policyPresets
     : null;
-  const recordedMessagingChannels = Array.isArray(latestSession?.messagingChannels)
-    ? latestSession.messagingChannels
-    : [];
+  const recordedMessagingChannels =
+    getConfiguredChannelIdsFromPlan(latestSession?.messagingPlan) ??
+    (Array.isArray(latestSession?.messagingChannels) ? latestSession.messagingChannels : []);
   const activeSandbox = deps.getActiveSandbox(sandboxName);
+  const activeSandboxMessagingChannels = getActiveSandboxMessagingChannels(activeSandbox);
+  const activeSandboxDisabledChannels = getActiveSandboxDisabledChannels(activeSandbox);
   const policyMessagingChannels = deps.mergePolicyMessagingChannels(
     selectedMessagingChannels,
     recordedMessagingChannels,
-    activeSandbox?.messagingChannels,
-    activeSandbox?.disabledChannels,
+    activeSandboxMessagingChannels,
+    activeSandboxDisabledChannels,
   );
   deps.verifyCompatibleEndpointSandboxSmoke({
     sandboxName,
@@ -155,7 +185,7 @@ export async function handlePoliciesState<Agent, WebSearchConfig>({
 
   const policyResumeSelection = deps.preparePolicyPresetResumeSelection(sandboxName, {
     recordedPolicyPresets,
-    disabledChannels: activeSandbox?.disabledChannels,
+    disabledChannels: activeSandboxDisabledChannels,
     enabledChannels: policyMessagingChannels,
     hermesToolGateways,
     agent: normalizeAgentName((agent as { name?: string } | null)?.name),
@@ -210,7 +240,7 @@ export async function handlePoliciesState<Agent, WebSearchConfig>({
         ? recordedPolicyPresetsForSupport
         : null,
       enabledChannels: policyMessagingChannels,
-      disabledChannels: activeSandbox?.disabledChannels,
+      disabledChannels: activeSandboxDisabledChannels,
       webSearchConfig,
       provider,
       // selectOnboardAgent returns null for the default OpenClaw path (no

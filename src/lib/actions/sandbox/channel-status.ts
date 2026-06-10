@@ -14,6 +14,10 @@
 import { loadAgent, type AgentDefinition } from "../../agent/defs";
 import { CLI_DISPLAY_NAME, CLI_NAME } from "../../cli/branding";
 import { B, D, G, R, RD, YW } from "../../cli/terminal-style";
+import {
+  getConfiguredChannelIdsFromMessagingState,
+  getDisabledChannelIdsFromMessagingState,
+} from "../../messaging";
 import * as policies from "../../policy";
 import { KNOWN_CHANNELS, knownChannelNames } from "../../sandbox/channels";
 import {
@@ -353,7 +357,8 @@ function buildWhatsappProbeInput(
   }
 
   const entry = deps.getSandbox(sandboxName);
-  const channelEnabledInRegistry = (entry?.messagingChannels ?? []).includes("whatsapp");
+  const channelEnabledInRegistry =
+    getConfiguredChannelIdsFromMessagingState(entry).includes("whatsapp");
 
   const appliedPresets = deps.getAppliedPresets(sandboxName);
   const presetInRegistry = appliedPresets.includes("whatsapp");
@@ -440,8 +445,8 @@ function buildBasicChannelReport(
   deps: Required<StatusDeps>,
 ): ChannelStatusReport {
   const entry = deps.getSandbox(sandboxName);
-  const enabled = (entry?.messagingChannels ?? []).includes(channelName);
-  const disabled = (entry?.disabledChannels ?? []).includes(channelName);
+  const enabled = getConfiguredChannelIdsFromMessagingState(entry).includes(channelName);
+  const disabled = getDisabledChannelIdsFromMessagingState(entry).includes(channelName);
   const appliedPresets = deps.getAppliedPresets(sandboxName);
   const presetInRegistry = appliedPresets.includes(channelName);
   const signals: DiagnosticSignal[] = [];
@@ -523,11 +528,12 @@ export async function showSandboxChannelStatus(
 
   let channelName = channelArg;
   if (!channelName) {
-    const enabled = (entry.messagingChannels ?? []).filter((name: string) => name === "whatsapp");
+    const configuredChannels = getConfiguredChannelIdsFromMessagingState(entry);
+    const enabled = configuredChannels.filter((name: string) => name === "whatsapp");
     if (enabled.length > 0) {
       channelName = "whatsapp";
-    } else if ((entry.messagingChannels ?? []).length > 0) {
-      channelName = entry.messagingChannels?.[0];
+    } else if (configuredChannels.length > 0) {
+      channelName = configuredChannels[0];
     } else {
       channelName = "whatsapp";
     }
@@ -551,7 +557,7 @@ export async function showSandboxChannelStatus(
 
   const agent = deps.loadAgent(entry.agent || "openclaw");
 
-  const disabledChannels = new Set(entry.disabledChannels ?? []);
+  const disabledChannels = new Set(getDisabledChannelIdsFromMessagingState(entry));
   const channelIsPaused = disabledChannels.has(channelName);
 
   let report: ChannelStatusReport;

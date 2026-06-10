@@ -7,6 +7,7 @@ import type {
   ChannelManifestAvailabilityContext,
   MessagingAgentId,
   MessagingChannelId,
+  SandboxMessagingPlan,
 } from "./manifest";
 
 export interface MessagingAgentDescriptor {
@@ -66,6 +67,110 @@ export function hasMessagingManifestRequiredInputs(
   });
 }
 
+export function getConfiguredChannelIdsFromPlan(
+  plan: SandboxMessagingPlan | null | undefined,
+): string[] | null {
+  if (!plan) return null;
+  return plan.channels.map((channel) => channel.channelId);
+}
+
+export function getActiveChannelIdsFromMessagingPlan(
+  plan: SandboxMessagingPlan | null | undefined,
+): string[] | null {
+  if (!plan) return null;
+  const disabled = new Set(plan.disabledChannels);
+  const active = plan.channels
+    .filter((channel) => channel.active && !channel.disabled && !disabled.has(channel.channelId))
+    .map((channel) => channel.channelId);
+  return active.length > 0 ? active : [];
+}
+
+export function getDisabledChannelIdsFromPlan(
+  plan: SandboxMessagingPlan | null | undefined,
+): string[] | null {
+  if (!plan) return null;
+  return plan.disabledChannels.length > 0 ? [...plan.disabledChannels] : [];
+}
+
+export interface MessagingPlanStateLike {
+  readonly messaging?: {
+    readonly plan?: SandboxMessagingPlan | null;
+  } | null;
+  readonly messagingChannels?: readonly string[] | null;
+  readonly disabledChannels?: readonly string[] | null;
+  readonly messagingChannelConfig?: Readonly<Record<string, string>> | null;
+}
+
+export function getConfiguredChannelIdsFromMessagingState(
+  state: MessagingPlanStateLike | null | undefined,
+): string[] {
+  return (
+    getConfiguredChannelIdsFromPlan(state?.messaging?.plan) ??
+    uniqueStringArray(state?.messagingChannels)
+  );
+}
+
+export function getActiveChannelIdsFromMessagingState(
+  state: MessagingPlanStateLike | null | undefined,
+): string[] {
+  const fromPlan = getActiveChannelIdsFromMessagingPlan(state?.messaging?.plan);
+  if (fromPlan) return fromPlan;
+  const disabled = new Set(uniqueStringArray(state?.disabledChannels));
+  return uniqueStringArray(state?.messagingChannels).filter(
+    (channelId) => !disabled.has(channelId),
+  );
+}
+
+export function getDisabledChannelIdsFromMessagingState(
+  state: MessagingPlanStateLike | null | undefined,
+): string[] {
+  return (
+    getDisabledChannelIdsFromPlan(state?.messaging?.plan) ??
+    uniqueStringArray(state?.disabledChannels)
+  );
+}
+
+export function getMessagingChannelConfigFromPlan(
+  plan: SandboxMessagingPlan | null | undefined,
+): Record<string, string> | null {
+  if (!plan) return null;
+  const config: Record<string, string> = {};
+  for (const channel of plan.channels) {
+    for (const input of channel.inputs) {
+      if (
+        input.kind === "config" &&
+        input.sourceEnv &&
+        typeof input.value === "string" &&
+        input.value.length > 0
+      ) {
+        config[input.sourceEnv] = input.value;
+      }
+    }
+  }
+  return Object.keys(config).length > 0 ? config : null;
+}
+
+export function getMessagingChannelConfigFromMessagingState(
+  state: MessagingPlanStateLike | null | undefined,
+): Record<string, string> | null {
+  if (state?.messaging?.plan) return getMessagingChannelConfigFromPlan(state.messaging.plan);
+  return sanitizeStringRecord(state?.messagingChannelConfig);
+}
+
 function hasResolvedInputValue(value: string | null): boolean {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function uniqueStringArray(values: readonly string[] | null | undefined): string[] {
+  if (!Array.isArray(values)) return [];
+  return [...new Set(values.filter((value): value is string => typeof value === "string"))];
+}
+
+function sanitizeStringRecord(value: unknown): Record<string, string> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof key === "string" && typeof entry === "string") record[key] = entry;
+  }
+  return Object.keys(record).length > 0 ? record : null;
 }

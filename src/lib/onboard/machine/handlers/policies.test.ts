@@ -3,11 +3,42 @@
 
 import { describe, expect, it, vi } from "vitest";
 
+import type { SandboxMessagingPlan } from "../../../messaging/manifest";
 import { createSession, type Session, type SessionUpdates } from "../../../state/onboard-session";
 import { handlePoliciesState, type PoliciesStateOptions } from "./policies";
 
 type Agent = { name: string } | null;
 type WebSearchConfig = { fetchEnabled: true };
+
+function makePlan(
+  channels: readonly string[],
+  disabledChannels: readonly string[] = [],
+): SandboxMessagingPlan {
+  return {
+    schemaVersion: 1,
+    sandboxName: "my-assistant",
+    agent: "openclaw",
+    workflow: "rebuild",
+    channels: channels.map((channelId) => ({
+      channelId,
+      displayName: channelId,
+      authMode: "none",
+      active: !disabledChannels.includes(channelId),
+      selected: true,
+      configured: true,
+      disabled: disabledChannels.includes(channelId),
+      inputs: [],
+      hooks: [],
+    })),
+    disabledChannels,
+    credentialBindings: [],
+    networkPolicy: { presets: [], entries: [] },
+    agentRender: [],
+    buildSteps: [],
+    stateUpdates: [],
+    healthChecks: [],
+  };
+}
 
 function createDeps(overrides: Partial<PoliciesStateOptions<Agent, WebSearchConfig>["deps"]> = {}) {
   let session = createSession();
@@ -147,6 +178,47 @@ describe("handlePoliciesState", () => {
     expect(calls.setupPolicies).toHaveBeenCalledWith(
       "my-assistant",
       expect.objectContaining({ enabledChannels: ["slack"] }),
+    );
+  });
+
+  it("prefers recorded messaging plan channels over stale session legacy fields", async () => {
+    const session = createSession({
+      messagingChannels: ["slack"],
+      messagingPlan: makePlan(["telegram"]),
+    });
+    const { deps, calls, setSession } = createDeps({
+      getActiveSandbox: vi.fn(() => ({ messagingChannels: null, disabledChannels: null })),
+    });
+    setSession(session);
+
+    await handlePoliciesState(baseOptions(deps));
+
+    expect(calls.setupPolicies).toHaveBeenCalledWith(
+      "my-assistant",
+      expect.objectContaining({ enabledChannels: ["telegram"] }),
+    );
+  });
+
+  it("prefers active sandbox messaging plan state over stale registry legacy fields", async () => {
+    const { deps, calls } = createDeps({
+      getActiveSandbox: vi.fn(() => ({
+        messagingChannels: ["slack"],
+        disabledChannels: [],
+        messaging: {
+          plan: makePlan(["telegram"], ["telegram"]),
+        },
+      })),
+    });
+
+    await handlePoliciesState(baseOptions(deps));
+
+    expect(calls.mergeChannels).toHaveBeenCalledWith([], [], ["telegram"], ["telegram"]);
+    expect(calls.prepareResume).toHaveBeenCalledWith(
+      "my-assistant",
+      expect.objectContaining({
+        enabledChannels: ["telegram"],
+        disabledChannels: ["telegram"],
+      }),
     );
   });
 

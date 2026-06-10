@@ -26,6 +26,7 @@ vi.mock("./process-recovery", () => ({
 }));
 
 import type { AgentDefinition } from "../../agent/defs";
+import type { SandboxMessagingPlan } from "../../messaging/manifest";
 import type { SandboxEntry } from "../../state/registry";
 import { showSandboxChannelStatus } from "./channel-status";
 
@@ -114,6 +115,36 @@ function entry(
     messagingChannels,
     disabledChannels,
   } as SandboxEntry;
+}
+
+function makePlan(
+  channels: readonly string[],
+  disabledChannels: readonly string[] = [],
+): SandboxMessagingPlan {
+  return {
+    schemaVersion: 1,
+    sandboxName: "alpha",
+    agent: "openclaw",
+    workflow: "rebuild",
+    channels: channels.map((channelId) => ({
+      channelId,
+      displayName: channelId,
+      authMode: "none",
+      active: !disabledChannels.includes(channelId),
+      selected: true,
+      configured: true,
+      disabled: disabledChannels.includes(channelId),
+      inputs: [],
+      hooks: [],
+    })),
+    disabledChannels,
+    credentialBindings: [],
+    networkPolicy: { presets: [], entries: [] },
+    agentRender: [],
+    buildSteps: [],
+    stateUpdates: [],
+    healthChecks: [],
+  };
 }
 
 function makeDeps(opts: {
@@ -450,6 +481,27 @@ describe("showSandboxChannelStatus (whatsapp)", () => {
     expect(result && "verdict" in result && result.verdict).toBe("info");
     const dump = out_lines.join("\n");
     expect(dump).toMatch(/registered but currently paused/);
+  });
+
+  it("prefers messaging plan state over stale legacy channel fields", async () => {
+    const execSpy = vi.fn(() => ({ status: 0, stdout: "", stderr: "" }));
+    const { deps, out_lines } = makeDeps({
+      exec: () => ({ status: 0, stdout: "", stderr: "" }),
+      sandbox: {
+        ...entry(["discord"], ["discord"]),
+        messaging: {
+          schemaVersion: 1,
+          plan: makePlan(["whatsapp"], ["whatsapp"]),
+        },
+      } as SandboxEntry,
+    });
+    deps.execSandbox = execSpy as unknown as typeof deps.execSandbox;
+
+    const result = await showSandboxChannelStatus("alpha", { deps });
+
+    expect(execSpy).not.toHaveBeenCalled();
+    expect(result && "channel" in result && result.channel).toBe("whatsapp");
+    expect(out_lines.join("\n")).toMatch(/whatsapp registered but currently paused/);
   });
 
   it("emits a basic per-channel report for non-whatsapp channels", async () => {

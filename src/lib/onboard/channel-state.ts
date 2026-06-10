@@ -3,8 +3,13 @@
 
 import * as onboardSession from "../state/onboard-session";
 import * as registry from "../state/registry";
+import { getDisabledChannelIdsFromPlan } from "../messaging";
+import type { SandboxMessagingPlan } from "../messaging/manifest";
 
-type DisabledChannelsSession = Pick<onboardSession.Session, "disabledChannels">;
+type DisabledChannelsSession = {
+  disabledChannels?: string[] | null;
+  messagingPlan?: SandboxMessagingPlan | null;
+};
 
 export type DisabledChannelsDeps = {
   loadSession: () => DisabledChannelsSession | null;
@@ -17,8 +22,9 @@ export function resolveDisabledChannels(
 ): string[] {
   // `rebuild` destroys the registry entry before `onboard --resume` reaches
   // createSandbox, so the session mirror is authoritative when present.
-  const sessionDisabledChannels = (deps?.loadSession ?? onboardSession.loadSession)()
-    ?.disabledChannels;
+  const session = (deps?.loadSession ?? onboardSession.loadSession)();
+  const sessionDisabledChannels =
+    getDisabledChannelIdsFromPlan(session?.messagingPlan) ?? session?.disabledChannels;
   if (Array.isArray(sessionDisabledChannels)) {
     return sessionDisabledChannels;
   }

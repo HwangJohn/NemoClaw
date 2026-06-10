@@ -17,6 +17,11 @@ import { GATEWAY_PORT, OLLAMA_PORT } from "../../core/ports";
 import { recoverNamedGatewayRuntime } from "../../gateway-runtime-action";
 import { parseGatewayInference } from "../../inference/config";
 import { type ProviderHealthStatus, probeProviderHealth } from "../../inference/health";
+import {
+  getActiveChannelIdsFromMessagingState,
+  getConfiguredChannelIdsFromMessagingState,
+  getDisabledChannelIdsFromMessagingState,
+} from "../../messaging";
 import { isLinuxDockerDriverGatewayEnabled } from "../../onboard/docker-driver-platform";
 import { executeSandboxCommandForVerification } from "../../onboard/sandbox-verification-exec";
 import { ROOT } from "../../runner";
@@ -423,9 +428,9 @@ function channelRuntimeDoctorCheck(
 }
 
 function messagingDoctorCheck(sandboxName: string, sb: SandboxEntry): DoctorCheck {
-  const registeredChannels = Array.isArray(sb.messagingChannels) ? sb.messagingChannels : [];
-  const disabledChannels = new Set(Array.isArray(sb.disabledChannels) ? sb.disabledChannels : []);
-  const channels = registeredChannels.filter((channel: string) => !disabledChannels.has(channel));
+  const registeredChannels = getConfiguredChannelIdsFromMessagingState(sb);
+  const disabledChannels = new Set(getDisabledChannelIdsFromMessagingState(sb));
+  const channels = getActiveChannelIdsFromMessagingState(sb);
   const pausedChannels = registeredChannels.filter((channel: string) =>
     disabledChannels.has(channel),
   );
@@ -783,13 +788,7 @@ export async function runSandboxDoctor(
     // #4156: bridge the gap between "configured" and "runtime-visible" — the
     // existing messaging check above probes provider attachment, not whether
     // OpenClaw's runtime config actually surfaces each enabled channel.
-    const registeredChannels = Array.isArray(sb.messagingChannels) ? sb.messagingChannels : [];
-    const disabledChannelsSet = new Set(
-      Array.isArray(sb.disabledChannels) ? sb.disabledChannels : [],
-    );
-    const enabledChannels = registeredChannels.filter(
-      (channel: string) => !disabledChannelsSet.has(channel),
-    );
+    const enabledChannels = getActiveChannelIdsFromMessagingState(sb);
     const runtimeCheck = channelRuntimeDoctorCheck(sandboxName, enabledChannels);
     if (runtimeCheck) checks.push(runtimeCheck);
   }

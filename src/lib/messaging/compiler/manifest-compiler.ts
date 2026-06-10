@@ -180,7 +180,7 @@ async function resolveChannelInputs(
 }> {
   let inputs = manifest.inputs.map((input) => resolveChannelInput(manifest, input, context));
   inputs = applyCredentialAvailability(manifest, inputs, context);
-  let hookInputs = buildCompilerHookInputs(manifest, inputs);
+  let hookInputs = buildCompilerHookInputs(manifest, inputs, context);
   const enrollmentHooks = options.runEnrollment
     ? manifest.hooks
         .filter((hook) => isHookForAgent(hook, context.agent))
@@ -250,7 +250,7 @@ function resolveChannelInput(
   context: ManifestCompilerContext,
 ): SandboxMessagingInputReference {
   const base = inputReferenceBase(manifest, input);
-  const envValue = readInputEnvValue(input);
+  const envValue = readInputEnvValue(input, context);
   if (envValue !== undefined) {
     return input.kind === "secret"
       ? { ...base, credentialAvailable: true }
@@ -278,9 +278,14 @@ function inputReferenceBase(
   };
 }
 
-function readInputEnvValue(input: ChannelInputSpec): MessagingSerializableValue | undefined {
+function readInputEnvValue(
+  input: ChannelInputSpec,
+  context: ManifestCompilerContext,
+): MessagingSerializableValue | undefined {
   if (!input.envKey) return undefined;
   if (input.kind === "config") {
+    const configuredValue = context.configValues?.[input.envKey];
+    if (configuredValue && configuredValue.trim().length > 0) return configuredValue;
     const resolved = resolveMessagingChannelConfigEnvValue(input.envKey, process.env);
     if (resolved.value) return resolved.value;
   }
@@ -375,12 +380,13 @@ function isHookOutputAvailable(
 function buildCompilerHookInputs(
   manifest: ChannelManifest,
   inputs: readonly SandboxMessagingInputReference[],
+  context: ManifestCompilerContext,
 ): Record<string, MessagingSerializableValue> {
   const inputSpecs = new Map(manifest.inputs.map((input) => [input.id, input]));
   const entries: Array<[string, MessagingSerializableValue]> = [];
   for (const input of inputs) {
     const spec = inputSpecs.get(input.inputId);
-    const value = input.value ?? (spec ? readInputEnvValue(spec) : undefined);
+    const value = input.value ?? (spec ? readInputEnvValue(spec, context) : undefined);
     if (value === undefined) continue;
     entries.push([input.inputId, value]);
     if (input.statePath) entries.push([input.statePath, value]);
