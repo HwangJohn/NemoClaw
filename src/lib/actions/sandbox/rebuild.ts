@@ -200,12 +200,16 @@ async function stageMessagingManifestPlanForRebuild(
     sandboxEntry,
     supportedChannelIds: agent.messagingPlatforms,
   });
-  if (!plan || plan.channels.length === 0) {
+  if (!plan) {
     MessagingSetupApplier.clearPlanEnv();
     log("Messaging manifest rebuild plan: no configured channels");
     return null;
   }
   MessagingSetupApplier.writePlanToEnv(plan);
+  if (plan.channels.length === 0) {
+    log("Messaging manifest rebuild plan staged: no configured channels");
+    return plan;
+  }
   log(
     `Messaging manifest rebuild plan staged: ${plan.channels
       .map((channel) => channel.channelId)

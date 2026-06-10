@@ -472,6 +472,32 @@ describe("handleSandboxState", () => {
     });
   });
 
+  it("preserves an empty env-staged rebuild plan instead of rediscovering token-backed channels", async () => {
+    const emptyRebuildPlan = makeMinimalPlan("my-assistant");
+    const session = createSession({ sandboxName: "my-assistant", messagingPlan: emptyRebuildPlan });
+    const getRecordedMessagingChannelsForResume = vi.fn(() => null);
+    const writePlanToEnv = vi.fn();
+    const { deps, calls, getSession } = createDeps({
+      getRecordedMessagingChannelsForResume,
+      writePlanToEnv,
+      readMessagingPlanFromEnv: () => emptyRebuildPlan,
+      getRegistrySandboxMessagingPlan: () => emptyRebuildPlan,
+    });
+
+    const result = await handleSandboxState({
+      ...baseOptions(deps, session),
+      resume: true,
+      sandboxName: "my-assistant",
+    });
+
+    expect(calls.setupMessaging).not.toHaveBeenCalled();
+    expect(writePlanToEnv).not.toHaveBeenCalled();
+    expect(result.selectedMessagingChannels).toEqual([]);
+    const createSandboxCall = calls.createSandbox.mock.calls[0] as unknown[];
+    expect(createSandboxCall[6]).toEqual([]);
+    expect(getSession().messagingPlan).toEqual(emptyRebuildPlan);
+  });
+
   it("does not restore plan to env when registry has no entry", async () => {
     const session = createSession({
       sandboxName: "my-assistant",
