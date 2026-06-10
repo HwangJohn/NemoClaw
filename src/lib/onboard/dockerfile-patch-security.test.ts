@@ -82,4 +82,26 @@ describe("dockerfile patch security guards", () => {
     ).toThrow(/Refusing to patch Dockerfile through a symlink/);
     expect(fs.readFileSync(swappedTarget, "utf-8")).toBe("ARG NEMOCLAW_MODEL=swapped\n");
   });
+
+  it("refuses a non-regular staged Dockerfile swapped in before write without truncating", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dockerfile-dir-swap-test-"));
+    tmpRoots.push(dir);
+    const dockerfilePath = path.join(dir, "Dockerfile");
+    fs.writeFileSync(dockerfilePath, "ARG NEMOCLAW_MODEL=old\n", "utf-8");
+
+    const readFileSync = fs.readFileSync.bind(fs);
+    vi.spyOn(fs, "readFileSync").mockImplementationOnce((file, options) => {
+      const content = readFileSync(file as Parameters<typeof fs.readFileSync>[0], options as never);
+      fs.unlinkSync(dockerfilePath);
+      fs.mkdirSync(dockerfilePath);
+      return content;
+    });
+    const truncateSpy = vi.spyOn(fs, "ftruncateSync");
+
+    expect(() =>
+      patchStagedDockerfile(dockerfilePath, "custom-model", "https://chat.example"),
+    ).toThrow();
+    expect(truncateSpy).not.toHaveBeenCalled();
+    expect(fs.statSync(dockerfilePath).isDirectory()).toBe(true);
+  });
 });

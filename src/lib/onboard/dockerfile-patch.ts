@@ -54,11 +54,9 @@ function readExistingDockerfileNoFollow(dockerfilePath: string): string {
 }
 
 function writeExistingDockerfileNoFollow(dockerfilePath: string, dockerfile: string): void {
-  const fd = openExistingRegularDockerfileNoFollow(
-    dockerfilePath,
-    fs.constants.O_WRONLY | fs.constants.O_TRUNC,
-  );
+  const fd = openExistingRegularDockerfileNoFollow(dockerfilePath, fs.constants.O_WRONLY);
   try {
+    fs.ftruncateSync(fd, 0);
     fs.writeFileSync(fd, dockerfile, { encoding: "utf8" });
   } finally {
     fs.closeSync(fd);

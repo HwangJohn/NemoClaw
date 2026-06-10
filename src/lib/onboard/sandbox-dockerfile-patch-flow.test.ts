@@ -126,6 +126,54 @@ describe("prepareSandboxDockerfilePatch", () => {
     expect(dockerImageInspect).not.toHaveBeenCalled();
   });
 
+  it("resolves the base image when an agent uses a custom Dockerfile", async () => {
+    const pullAndResolveBaseImageDigest = vi.fn(() => ({
+      digest: "sha256:customagent",
+      ref: "ghcr.io/nvidia/nemoclaw/sandbox-base@sha256:customagent",
+    }));
+    const patchStagedDockerfile = vi.fn();
+
+    const result = await prepareSandboxDockerfilePatch({
+      agent: { name: "hermes" } as any,
+      fromDockerfile: "/repo/Containerfile",
+      sandboxBaseImage: "ghcr.io/nvidia/nemoclaw/sandbox-base",
+      sandboxBaseTag: "latest",
+      stagedDockerfile: "/tmp/Dockerfile",
+      model: "model-a",
+      chatUiUrl: "http://127.0.0.1:7000",
+      provider: null,
+      preferredInferenceApi: null,
+      webSearchConfig: null,
+      activeMessagingChannels: [],
+      messagingAllowedIds: {},
+      discordGuilds: {},
+      telegramConfig: {},
+      wechatConfig: {},
+      hermesToolGateways: [],
+      slackConfig: {},
+      sandboxGpuConfig,
+      log: vi.fn(),
+      deps: {
+        isLinuxDockerDriverGatewayEnabled: vi.fn(() => false),
+        pullAndResolveBaseImageDigest,
+        enforceDockerGpuPatchPreserveNetwork: vi.fn(async () => false),
+        patchStagedDockerfile,
+        now: () => 1,
+      },
+    });
+
+    expect(result.resolvedBaseImage).toEqual({
+      digest: "sha256:customagent",
+      ref: "ghcr.io/nvidia/nemoclaw/sandbox-base@sha256:customagent",
+    });
+    expect(pullAndResolveBaseImageDigest).toHaveBeenCalledWith({
+      requireOpenshellSandboxAbi: false,
+    });
+    expect(patchStagedDockerfile.mock.calls[0]?.[10]).toBe(
+      "ghcr.io/nvidia/nemoclaw/sandbox-base@sha256:customagent",
+    );
+  });
+
   it("warns when the base image cannot be resolved but cached latest exists", async () => {
     const warn = vi.fn();
     await prepareSandboxDockerfilePatch({
