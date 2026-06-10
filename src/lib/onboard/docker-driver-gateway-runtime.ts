@@ -18,6 +18,14 @@ export type DockerDriverGatewayRuntimeDrift = { reason: string };
 type RunCapture = (args: string[], opts?: { ignoreError?: boolean }) => string;
 type DockerDriverGatewayEnvModule = typeof import("./docker-driver-gateway-env");
 
+// Source boundary: OpenShell does not currently expose an authoritative local
+// host-gateway identity/drift endpoint for the Docker-driver runtime NemoClaw
+// started for this port/configuration. Until that exists, reuse must fail
+// closed here for missing binaries or PID files, dead or foreign PIDs,
+// unreadable Linux /proc env/exe state, replaced gateway executables, stale
+// runtime markers, non-matching port owners, and macOS VM-driver children still
+// attached to a Docker-driver gateway. These heuristics can be retired when
+// OpenShell owns and reports the same runtime identity fields directly.
 export interface DockerDriverGatewayRuntimeDeps {
   gatewayPort: number;
   getCachedOpenshellBinary(): string | null;
