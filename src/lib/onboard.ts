@@ -29,6 +29,7 @@ const {
 const { stopStaleDashboardListenersForSandbox } = require("./onboard/stale-gateway-cleanup");
 const extraPlaceholderKeysModule: typeof import("./onboard/extra-placeholder-keys") = require("./onboard/extra-placeholder-keys");
 const buildContextStage: typeof import("./onboard/build-context-stage") = require("./onboard/build-context-stage");
+const sandboxBuildPatchConfig: typeof import("./onboard/sandbox-build-patch-config") = require("./onboard/sandbox-build-patch-config");
 const sandboxCreateLaunch: typeof import("./onboard/sandbox-create-launch") = require("./onboard/sandbox-create-launch");
 const {
   ensureOllamaLoopbackSystemdOverride,
@@ -99,7 +100,7 @@ const {
 }: typeof import("./onboard/e2e-failure-injection") = require("./onboard/e2e-failure-injection");
 const onboardTracing: typeof import("./onboard/tracing") = require("./onboard/tracing");
 const sandboxReadinessTracing: typeof import("./onboard/sandbox-readiness-tracing") = require("./onboard/sandbox-readiness-tracing");
-const { gatherWechatConfig, hasWechatConfigDrift, toSessionWechatConfig } =
+const { hasWechatConfigDrift } =
   require("./onboard/wechat-config") as typeof import("./onboard/wechat-config");
 const {
   setupMessagingChannels: setupMessagingChannelsImpl,
@@ -397,7 +398,6 @@ const {
   getRecordedMessagingChannelsForResume: getRecordedMessagingChannelsForResumeFromState,
 }: typeof import("./onboard/messaging-credentials") = require("./onboard/messaging-credentials");
 const {
-  collectMessagingBuildConfig,
   computeTelegramRequireMention,
   getStoredMessagingChannelConfig,
   messagingChannelConfigsEqual,
@@ -3069,38 +3069,18 @@ async function createSandbox(
   }
 
   console.log(`  Creating sandbox '${sandboxName}' (this takes a few minutes on first run)...`);
-  const messagingChannelConfig = readMessagingChannelConfigFromEnv();
-  const enabledTokenEnvKeys = new Set(messagingTokenDefs.map(({ envKey }) => envKey));
-  const activeChannelNames = new Set(activeMessagingChannels);
-  const { messagingAllowedIds, discordGuilds, slackConfig } = collectMessagingBuildConfig({
+  const {
+    messagingAllowedIds,
+    discordGuilds,
+    slackConfig,
+    telegramConfig,
+    wechatConfig,
+    messagingChannelConfig,
+  } = sandboxBuildPatchConfig.prepareSandboxBuildPatchConfig({
     channels: MESSAGING_CHANNELS,
-    activeChannelNames,
-    enabledTokenEnvKeys,
+    activeMessagingChannels,
+    messagingTokenDefs,
     discordSnowflakeRe: onboardProviders.DISCORD_SNOWFLAKE_RE,
-  });
-  // Telegram mention-only mode — parity with Discord's requireMention.
-  // Off by default so existing sandboxes behave the same; opt-in via
-  // TELEGRAM_REQUIRE_MENTION=1 or the interactive prompt. See #1737.
-  const telegramConfig: { requireMention?: boolean } = {};
-  if (enabledTokenEnvKeys.has("TELEGRAM_BOT_TOKEN")) {
-    const telegramRequireMention = computeTelegramRequireMention();
-    if (telegramRequireMention !== null) {
-      telegramConfig.requireMention = telegramRequireMention;
-    }
-  }
-  const wechatConfig = gatherWechatConfig(onboardSession.loadSession());
-  // Persist the effective Telegram config into the session so a later resume
-  // can detect drift (TELEGRAM_REQUIRE_MENTION changed since last build) and
-  // force a sandbox recreate — otherwise the old groupPolicy would stay baked
-  // in. Mirrors the pattern used for webSearchConfig. See CodeRabbit on #2417.
-  onboardSession.updateSession((current) => {
-    current.telegramConfig =
-      typeof telegramConfig.requireMention === "boolean"
-        ? { requireMention: telegramConfig.requireMention as boolean }
-        : null;
-    current.wechatConfig = toSessionWechatConfig(wechatConfig);
-    current.messagingChannelConfig = messagingChannelConfig;
-    return current;
   });
   // Pull the base image and resolve its digest so the Dockerfile is pinned to
   // exactly what we just fetched. This prevents stale :latest tags from
