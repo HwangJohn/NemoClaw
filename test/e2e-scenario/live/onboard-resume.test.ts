@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import { validateSandboxName } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { shouldRunLiveE2EScenarios } from "../fixtures/live-project-gate.ts";
 
@@ -29,6 +30,7 @@ const CLI_ENTRYPOINT = path.join(REPO_ROOT, "bin", "nemoclaw.js");
 const SESSION_FILE = path.join(os.homedir(), ".nemoclaw", "onboard-session.json");
 const REGISTRY_FILE = path.join(os.homedir(), ".nemoclaw", "sandboxes.json");
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-resume";
+validateSandboxName(SANDBOX_NAME);
 
 // 15 minutes per onboard run; matches NEMOCLAW_E2E_DEFAULT_TIMEOUT in the
 // legacy bash test (`export NEMOCLAW_E2E_DEFAULT_TIMEOUT=600` is per-step;
@@ -76,6 +78,17 @@ function completeSessionSummary(session: SessionStateComplete): Record<string, u
       Object.entries(session.steps).map(([step, value]) => [step, value.status]),
     ),
   };
+}
+
+function containsExactJsonToken(value: unknown, token: string): boolean {
+  if (typeof value === "string") return value === token;
+  if (Array.isArray(value)) return value.some((item) => containsExactJsonToken(item, token));
+  if (value && typeof value === "object") {
+    return Object.entries(value).some(
+      ([key, item]) => key === token || containsExactJsonToken(item, token),
+    );
+  }
+  return false;
 }
 
 // Gate the test on NEMOCLAW_RUN_E2E_SCENARIOS=1 so accidental cli-test-shard
@@ -200,6 +213,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
         NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
         NEMOCLAW_RECREATE_SANDBOX: "1",
         NEMOCLAW_POLICY_MODE: "suggested",
+        NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
         NEMOCLAW_E2E_FAILURE_INJECTION: "1",
         NEMOCLAW_E2E_FORCE_FAIL_AT_STEP: "policies",
       },
@@ -258,6 +272,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
           ...buildAvailabilityProbeEnv(),
           NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
           NEMOCLAW_POLICY_MODE: "skip",
+          NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
         },
         redactionValues: [apiKey],
         timeoutMs: ONBOARD_TIMEOUT_MS,
@@ -315,6 +330,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
 
     // Assertion: registry-has-sandbox.
     expect(fs.existsSync(REGISTRY_FILE)).toBe(true);
-    expect(fs.readFileSync(REGISTRY_FILE, "utf8")).toContain(SANDBOX_NAME);
+    const registry = JSON.parse(fs.readFileSync(REGISTRY_FILE, "utf8")) as unknown;
+    expect(containsExactJsonToken(registry, SANDBOX_NAME)).toBe(true);
   },
 );
