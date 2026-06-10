@@ -53,7 +53,8 @@ interface SessionStateComplete {
     | "provider_selection"
     | "inference"
     | "openclaw"
-    | "policies",
+    | "policies"
+    | "agent_setup",
     { status: "complete" }
   >;
 }
@@ -289,15 +290,15 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
     expect(resumeText).toContain(`[resume] Skipping sandbox (${SANDBOX_NAME})`);
 
     // Assertion: resume-no-{preflight,gateway,sandbox}-rerun.
-    expect(resumeText).not.toContain("[1/7] Preflight checks");
-    expect(resumeText).not.toContain("[2/7] Starting OpenShell gateway");
-    expect(resumeText).not.toContain("[5/7] Creating sandbox");
+    expect(resumeText).not.toContain("[1/8] Preflight checks");
+    expect(resumeText).not.toContain("[2/8] Starting OpenShell gateway");
+    expect(resumeText).not.toContain("[6/8] Creating sandbox");
 
     // Assertion: resume-inference-handled — first onboard completed through
-    // openclaw (step 7) before failing at policies (step 8). Inference was
-    // already configured during that run, so the resume path either re-runs
-    // it or detects readiness and skips. Both are valid.
-    const ranInference = resumeText.includes("[4/7] Setting up inference provider");
+    // openclaw before failing at policies. Inference was already configured
+    // during that run, so the resume path either re-runs it or detects
+    // readiness and skips. Both are valid.
+    const ranInference = resumeText.includes("[4/8] Setting up inference provider");
     const skippedInference =
       resumeText.includes("[resume] Skipping inference") ||
       resumeText.includes("[reuse] Skipping inference");
@@ -324,6 +325,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
       "inference",
       "openclaw",
       "policies",
+      "agent_setup",
     ] as const) {
       expect(complete.steps[step]?.status, `step ${step}`).toBe("complete");
     }
