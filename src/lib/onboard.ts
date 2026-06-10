@@ -414,7 +414,7 @@ const {
 } = messagingConfig;
 const messagingPlanSession: typeof import("./onboard/messaging-plan-session") =
   require("./onboard/messaging-plan-session");
-const { getActiveChannelsFromPlan, getChannelsFromPlan } = messagingPlanSession;
+const { getChannelsFromPlan } = messagingPlanSession;
 const sandboxAgent: typeof import("./onboard/sandbox-agent") = require("./onboard/sandbox-agent");
 const sandboxLifecycle: typeof import("./onboard/sandbox-lifecycle") = require("./onboard/sandbox-lifecycle");
 const sandboxRegistryMetadata: typeof import("./onboard/sandbox-registry-metadata") = require("./onboard/sandbox-registry-metadata");
