@@ -266,6 +266,13 @@ export function getRegistrySandboxMessagingPlan(sandboxName: string): SandboxMes
   return registry.getSandbox(sandboxName)?.messaging?.plan ?? null;
 }
 
+export function readMessagingPlanStateFromEnvForSandbox(
+  sandboxName: string,
+): registry.SandboxMessagingState | undefined {
+  const state = MessagingHostStateApplier.readPlanStateFromEnv();
+  return state?.plan.sandboxName === sandboxName ? state : undefined;
+}
+
 function resolveMessagingSetupSandboxName(options: SetupSelectedMessagingChannelsOptions): string {
   const explicitName = normalizeSandboxName(options.sandboxName);
   if (explicitName) return explicitName;

@@ -8,12 +8,17 @@ import {
   sanitizeMessagingChannelConfig,
 } from "../messaging-channel-config";
 import {
+  getConfiguredChannelIdsFromMessagingState,
+  getConfiguredChannelIdsFromPlan,
+  getDisabledChannelIdsFromPlan,
   getMessagingChannelConfigFromMessagingState,
   getMessagingChannelConfigFromPlan,
+  MessagingSetupApplier,
 } from "../messaging";
 import type { Session } from "../state/onboard-session";
 import * as onboardSession from "../state/onboard-session";
 import * as registry from "../state/registry";
+import type { SandboxEntry, SandboxMessagingState } from "../state/registry";
 
 type EnvLike = Record<string, string | undefined>;
 
@@ -35,6 +40,19 @@ export type CollectMessagingBuildConfigOptions = {
   env?: EnvLike;
   discordSnowflakeRe: RegExp;
   warn?: (message: string) => void;
+};
+
+type SandboxRegistrationMessagingField = Pick<
+  SandboxEntry,
+  "messagingChannels" | "messagingChannelConfig" | "messaging" | "disabledChannels"
+>;
+
+export type SandboxRegistrationMessagingFieldOptions = {
+  messagingState?: SandboxMessagingState;
+  messagingChannelConfig: MessagingChannelConfig | null;
+  enabledChannels?: readonly string[] | null;
+  activeMessagingChannels: readonly string[];
+  disabledChannels: readonly string[];
 };
 
 // Read TELEGRAM_REQUIRE_MENTION (set either by the interactive mention prompt
@@ -104,6 +122,61 @@ export function collectMessagingBuildConfig({
   }
 
   return { messagingAllowedIds, discordGuilds, slackConfig };
+}
+
+export function getEffectiveMessagingChannelConfigForSandbox(
+  sandboxName: string,
+  fallbackConfig: MessagingChannelConfig | null,
+): MessagingChannelConfig | null {
+  const plan = MessagingSetupApplier.readPlanFromEnv();
+  return (
+    getMessagingChannelConfigFromPlan(plan?.sandboxName === sandboxName ? plan : null) ??
+    fallbackConfig
+  );
+}
+
+export function setSessionMessagingConfig(
+  session: Session,
+  sandboxName: string,
+  fallbackConfig: MessagingChannelConfig | null,
+): void {
+  session.messagingChannelConfig = getEffectiveMessagingChannelConfigForSandbox(
+    sandboxName,
+    fallbackConfig,
+  );
+}
+
+export function getSessionMessagingChannelsForResume(
+  session: Session | null,
+): string[] | null | undefined {
+  return getConfiguredChannelIdsFromPlan(session?.messagingPlan) ?? session?.messagingChannels;
+}
+
+export function getSandboxMessagingChannelsFromRegistry(sandboxName: string): string[] | null {
+  const entry = registry.getSandbox(sandboxName);
+  return entry ? getConfiguredChannelIdsFromMessagingState(entry) : null;
+}
+
+export function getSandboxRegistrationMessagingFields({
+  messagingState,
+  messagingChannelConfig,
+  enabledChannels,
+  activeMessagingChannels,
+  disabledChannels,
+}: SandboxRegistrationMessagingFieldOptions): SandboxRegistrationMessagingField {
+  const plannedMessagingChannels = getConfiguredChannelIdsFromPlan(messagingState?.plan);
+  const plannedDisabledChannels = getDisabledChannelIdsFromPlan(messagingState?.plan);
+  const plannedMessagingChannelConfig = getMessagingChannelConfigFromPlan(messagingState?.plan);
+  const effectiveDisabledChannels = plannedDisabledChannels ?? disabledChannels;
+  return {
+    messagingChannels:
+      plannedMessagingChannels ??
+      (enabledChannels != null ? [...new Set(enabledChannels)] : [...activeMessagingChannels]),
+    messagingChannelConfig: plannedMessagingChannelConfig ?? messagingChannelConfig ?? undefined,
+    messaging: messagingState,
+    disabledChannels:
+      effectiveDisabledChannels.length > 0 ? [...effectiveDisabledChannels] : undefined,
+  };
 }
 
 export function getStoredMessagingChannelConfig(

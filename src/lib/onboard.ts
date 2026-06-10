@@ -109,14 +109,8 @@ const {
   readMessagingPlanFromEnv,
   writePlanToEnv,
   getRegistrySandboxMessagingPlan,
-  MessagingHostStateApplier,
+  readMessagingPlanStateFromEnvForSandbox,
 } = require("./onboard/messaging-channel-setup") as typeof import("./onboard/messaging-channel-setup");
-const {
-  getConfiguredChannelIdsFromMessagingState,
-  getConfiguredChannelIdsFromPlan,
-  getDisabledChannelIdsFromPlan,
-  getMessagingChannelConfigFromPlan,
-} = require("./messaging") as typeof import("./messaging");
 const {
   clearAgentScopedResumeState,
 }: typeof import("./onboard/agent-resume-state") = require("./onboard/agent-resume-state");
@@ -3548,11 +3542,6 @@ async function createSandbox(
 
   console.log(`  Creating sandbox '${sandboxName}' (this takes a few minutes on first run)...`);
   const messagingChannelConfig = readMessagingChannelConfigFromEnv();
-  const envMessagingPlan = readMessagingPlanFromEnv();
-  const effectiveMessagingChannelConfig =
-    getMessagingChannelConfigFromPlan(
-      envMessagingPlan?.sandboxName === sandboxName ? envMessagingPlan : null,
-    ) ?? messagingChannelConfig;
   const enabledTokenEnvKeys = new Set(messagingTokenDefs.map(({ envKey }) => envKey));
   const activeChannelNames = new Set(activeMessagingChannels);
   const { messagingAllowedIds, discordGuilds, slackConfig } = collectMessagingBuildConfig({
@@ -3582,7 +3571,7 @@ async function createSandbox(
         ? { requireMention: telegramConfig.requireMention as boolean }
         : null;
     current.wechatConfig = toSessionWechatConfig(wechatConfig);
-    current.messagingChannelConfig = effectiveMessagingChannelConfig;
+    messagingConfig.setSessionMessagingConfig(current, sandboxName, messagingChannelConfig);
     return current;
   });
   // Pull the base image and resolve its digest so the Dockerfile is pinned to
@@ -3890,12 +3879,7 @@ async function createSandbox(
   const resolvedImageTag = resolveSandboxImageTagFromCreateOutput(createResult.output, buildId);
 
   const sandboxRuntimeFields = getSandboxRuntimeRegistryFields(effectiveSandboxGpuConfig);
-  const plannedMessagingState = MessagingHostStateApplier.readPlanStateFromEnv();
-  const messagingState =
-    plannedMessagingState?.plan.sandboxName === sandboxName ? plannedMessagingState : undefined;
-  const plannedMessagingChannels = getConfiguredChannelIdsFromPlan(messagingState?.plan);
-  const plannedDisabledChannels = getDisabledChannelIdsFromPlan(messagingState?.plan);
-  const plannedMessagingChannelConfig = getMessagingChannelConfigFromPlan(messagingState?.plan);
+  const messagingState = readMessagingPlanStateFromEnvForSandbox(sandboxName);
   registry.registerSandbox({
     name: sandboxName,
     model: model || null,
@@ -3909,15 +3893,13 @@ async function createSandbox(
     // X, but X is still configured — losing it here means a later `channels start
     // X` has nothing to re-enable (the next rebuild sees an empty channel set and
     // never reattaches the gateway bridge). See #3381.
-    messagingChannels:
-      plannedMessagingChannels ??
-      (enabledChannels != null ? [...new Set(enabledChannels)] : activeMessagingChannels),
-    messagingChannelConfig: plannedMessagingChannelConfig ?? messagingChannelConfig ?? undefined,
-    messaging: messagingState,
-    disabledChannels:
-      (plannedDisabledChannels ?? disabledChannels).length > 0
-        ? [...(plannedDisabledChannels ?? disabledChannels)]
-        : undefined,
+    ...messagingConfig.getSandboxRegistrationMessagingFields({
+      messagingState,
+      messagingChannelConfig,
+      enabledChannels,
+      activeMessagingChannels,
+      disabledChannels,
+    }),
     hermesToolGateways: hermesToolGateways.length > 0 ? [...hermesToolGateways] : undefined,
     ...onboardHermesDashboard.getHermesDashboardRegistryFields(finalHermesDashboardState),
     dashboardPort: actualDashboardPort,
@@ -5445,8 +5427,7 @@ function getRecordedMessagingChannelsForResume(
 ): string[] | null {
   return getRecordedMessagingChannelsForResumeFromState({
     resume,
-    sessionMessagingChannels:
-      getConfiguredChannelIdsFromPlan(session?.messagingPlan) ?? session?.messagingChannels,
+    sessionMessagingChannels: messagingConfig.getSessionMessagingChannelsForResume(session),
     sandboxName,
     channels: MESSAGING_CHANNELS,
     getCredential,
@@ -6648,10 +6629,7 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
           configureWebSearch,
           startRecordedStep,
           getRecordedMessagingChannelsForResume,
-          getSandboxMessagingChannels: (name) => {
-            const entry = registry.getSandbox(name);
-            return entry ? getConfiguredChannelIdsFromMessagingState(entry) : null;
-          },
+          getSandboxMessagingChannels: messagingConfig.getSandboxMessagingChannelsFromRegistry,
           setupMessagingChannels,
           readMessagingChannelConfigFromEnv,
           readMessagingPlanFromEnv,
