@@ -418,6 +418,8 @@ const sandboxAgent: typeof import("./onboard/sandbox-agent") = require("./onboar
 const sandboxLifecycle: typeof import("./onboard/sandbox-lifecycle") = require("./onboard/sandbox-lifecycle");
 const sandboxRegistryMetadata: typeof import("./onboard/sandbox-registry-metadata") = require("./onboard/sandbox-registry-metadata");
 const sandboxReuse: typeof import("./onboard/sandbox-reuse") = require("./onboard/sandbox-reuse");
+const sandboxRegistration: typeof import("./onboard/sandbox-registration") =
+  require("./onboard/sandbox-registration");
 const {
   RESERVED_SANDBOX_NAMES,
   formatSandboxAgentName,
@@ -3550,29 +3552,27 @@ async function createSandbox(
   const resolvedImageTag = resolveSandboxImageTagFromCreateOutput(createResult.output, buildId);
 
   const sandboxRuntimeFields = getSandboxRuntimeRegistryFields(effectiveSandboxGpuConfig);
-  const plannedMessagingState = MessagingHostStateApplier.readPlanStateFromEnv();
-  const messagingState =
-    plannedMessagingState?.plan.sandboxName === sandboxName ? plannedMessagingState : undefined;
-  registry.registerSandbox({
-    name: sandboxName,
-    model: model || null,
-    provider: provider || null,
-    ...sandboxRuntimeFields,
-    ...getSandboxAgentRegistryFields(agent, !fromDockerfile),
+  sandboxRegistration.registerCreatedSandbox({
+    sandboxName,
+    model,
+    provider,
+    runtimeFields: sandboxRuntimeFields,
+    agent,
+    agentVersionKnown: !fromDockerfile,
     imageTag: resolvedImageTag,
-    policies: initialSandboxPolicy.appliedPresets,
+    appliedPolicies: initialSandboxPolicy.appliedPresets,
     // Persist the operator's configured channel set, not the post-disabled-filter
     // active set. After `channels stop X` + rebuild, activeMessagingChannels drops
     // X, but X is still configured — losing it here means a later `channels start
     // X` has nothing to re-enable (the next rebuild sees an empty channel set and
     // never reattaches the gateway bridge). See #3381.
-    messagingChannels:
-      enabledChannels != null ? [...new Set(enabledChannels)] : activeMessagingChannels,
-    messagingChannelConfig: messagingChannelConfig || undefined,
-    messaging: messagingState,
-    disabledChannels: disabledChannels.length > 0 ? [...disabledChannels] : undefined,
-    hermesToolGateways: hermesToolGateways.length > 0 ? [...hermesToolGateways] : undefined,
-    ...onboardHermesDashboard.getHermesDashboardRegistryFields(finalHermesDashboardState),
+    configuredMessagingChannels: enabledChannels,
+    activeMessagingChannels,
+    messagingChannelConfig,
+    plannedMessagingState: MessagingHostStateApplier.readPlanStateFromEnv(),
+    disabledChannels,
+    hermesToolGateways,
+    hermesDashboardState: finalHermesDashboardState,
     dashboardPort: actualDashboardPort,
     gatewayName: GATEWAY_NAME,
     gatewayPort: GATEWAY_PORT,
