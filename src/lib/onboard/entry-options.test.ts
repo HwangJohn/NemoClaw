@@ -133,6 +133,9 @@ describe("resolveOnboardEntryOptions", () => {
     expect(deps.error).toHaveBeenCalledWith(
       "  Choose a different sandbox name (passed via --name) to avoid routing conflicts.",
     );
+    expect(deps.error).not.toHaveBeenCalledWith("  Use lowercase letters, numbers, and hyphens.");
+    expect(deps.getNameValidationGuidance).not.toHaveBeenCalled();
+    expect(deps.exitProcess).toHaveBeenCalledTimes(1);
   });
 
   it("prints validation guidance for invalid sandbox names", () => {

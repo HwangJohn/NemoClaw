@@ -65,16 +65,9 @@ export function resolveOnboardEntryOptions(
     }
   }
   if (requestedSandboxName) {
+    let validated: string;
     try {
-      const validated = deps.validateName(requestedSandboxName, "sandbox name");
-      if (deps.reservedSandboxNames.has(validated)) {
-        deps.error(`  Reserved name: '${validated}' is a ${deps.cliDisplayName()} CLI command.`);
-        deps.error(
-          `  Choose a different sandbox name (passed via ${requestedSandboxSource}) to avoid routing conflicts.`,
-        );
-        deps.exitProcess(1);
-      }
-      requestedSandboxName = validated;
+      validated = deps.validateName(requestedSandboxName, "sandbox name");
     } catch (error) {
       deps.error(`  ${error instanceof Error ? error.message : String(error)}`);
       for (const line of deps.getNameValidationGuidance("sandbox name", requestedSandboxName, {
@@ -84,6 +77,14 @@ export function resolveOnboardEntryOptions(
       }
       deps.exitProcess(1);
     }
+    if (deps.reservedSandboxNames.has(validated)) {
+      deps.error(`  Reserved name: '${validated}' is a ${deps.cliDisplayName()} CLI command.`);
+      deps.error(
+        `  Choose a different sandbox name (passed via ${requestedSandboxSource}) to avoid routing conflicts.`,
+      );
+      deps.exitProcess(1);
+    }
+    requestedSandboxName = validated;
   }
   if (cannotPrompt && !resume && requestedFromDockerfile && !requestedSandboxName) {
     deps.error(
