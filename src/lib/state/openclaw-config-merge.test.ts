@@ -75,4 +75,24 @@ describe("mergeOpenClawRestoredConfig", () => {
     });
     expect((merged as { channels: Record<string, unknown> }).channels.telegram).toBeUndefined();
   });
+
+  it("documents provider and plugin behavior when current generated maps are absent", () => {
+    const merged = mergeOpenClawRestoredConfig(
+      {
+        models: { providers: { custom: { models: [{ id: "custom-model" }] } } },
+        plugins: { entries: { customPlugin: { enabled: true } } },
+      },
+      {
+        gateway: { auth: { token: "fresh-token" } },
+        models: { mode: "merge" },
+        plugins: { mode: "auto" },
+      },
+    );
+
+    expect(merged).toMatchObject({
+      gateway: { auth: { token: "fresh-token" } },
+      models: { mode: "merge", providers: { custom: { models: [{ id: "custom-model" }] } } },
+      plugins: { mode: "auto", entries: { customPlugin: { enabled: true } } },
+    });
+  });
 });

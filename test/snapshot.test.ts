@@ -4,7 +4,6 @@
 // Tests for snapshot versioning and naming added alongside the --name flag:
 //   - validateSnapshotName accepts/rejects names
 //   - listBackups computes virtual v<N> versions by timestamp-ascending position
-//   - findBackup resolves selectors (v<N>, name, exact timestamp)
 
 import fs from "node:fs";
 import os from "node:os";
@@ -447,7 +446,7 @@ if (cmd.includes("[ -d ")) {
   process.exit(0);
 }
 if (cmd.includes("find ")) {
-  process.exit(0);
+  process.exit(cmd.includes("openclaw.json") ? 2 : 0);
 }
 if (cmd.includes("tar -cf -")) {
   const r = spawnSync("tar", ["-cf", "-", "-C", ${JSON.stringify(openclawDir)}, ...existingDirs], {
@@ -517,7 +516,7 @@ if (cmd.includes("[ -d ")) {
   process.exit(0);
 }
 if (cmd.includes("find ")) {
-  process.exit(0);
+  process.exit(cmd.includes("openclaw.json") ? 2 : 0);
 }
 if (cmd.includes("tar -cf -")) {
   const r = spawnSync("tar", ["-cf", "-", "-C", ${JSON.stringify(openclawDir)}, ...existingDirs], {
