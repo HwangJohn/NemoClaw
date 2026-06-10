@@ -3,6 +3,7 @@
 
 import type { SandboxMessagingPlan } from "../../../messaging/manifest";
 import type { Session, SessionUpdates } from "../../../state/onboard-session";
+import { getActiveChannelsFromPlan, getChannelsFromPlan } from "../../messaging-plan-session";
 import { withSandboxPhaseTrace } from "../../tracing";
 import { branchTo, type OnboardStateTransitionResult } from "../result";
 
@@ -52,7 +53,6 @@ export interface SandboxStateOptions<
       left: MessagingChannelConfig | null,
       right: MessagingChannelConfig | null,
     ): boolean;
-    persistMessagingChannelConfigToSession(config: MessagingChannelConfig | null): void;
     getSandboxReuseState(sandboxName: string | null): string;
     computeTelegramRequireMention(): boolean | null;
     hasSandboxGpuDrift(sandboxName: string, config: SandboxGpuConfig): boolean;
@@ -78,13 +78,11 @@ export interface SandboxStateOptions<
       session: Session | null,
       sandboxName: string | null,
     ): string[] | null;
-    getSandboxMessagingChannels(sandboxName: string): string[] | null | undefined;
     setupMessagingChannels(
       agent: Agent,
       existingChannels: string[] | null,
       sandboxName: string,
     ): Promise<string[]>;
-    readMessagingChannelConfigFromEnv(): MessagingChannelConfig | null;
     readMessagingPlanFromEnv(): SandboxMessagingPlan | null;
     writePlanToEnv(plan: SandboxMessagingPlan): void;
     getRegistrySandboxMessagingPlan(sandboxName: string): SandboxMessagingPlan | null;
@@ -203,12 +201,6 @@ export async function handleSandboxState<
     effectiveMessagingChannelConfig,
     storedMessagingChannelConfig,
   );
-  if (effectiveMessagingChannelConfig) {
-    deps.persistMessagingChannelConfigToSession(effectiveMessagingChannelConfig);
-    if (session)
-      session.messagingChannelConfig =
-        effectiveMessagingChannelConfig as Session["messagingChannelConfig"];
-  }
 
   const sandboxReuseState = deps.getSandboxReuseState(sandboxName);
   const webSearchConfigChanged =
@@ -248,7 +240,7 @@ export async function handleSandboxState<
   if (resumeSandbox) {
     if (webSearchConfig)
       deps.note("  [resume] Reusing Brave Search configuration already baked into the sandbox.");
-    selectedMessagingChannels = session?.messagingChannels ?? [];
+    selectedMessagingChannels = getActiveChannelsFromPlan(session?.messagingPlan) ?? [];
     deps.skippedStepMessage("sandbox", sandboxName);
     await deps.recordStateSkipped("sandbox", { reason: "resume", sandboxName });
   } else {
@@ -352,16 +344,13 @@ export async function handleSandboxState<
         }
       }
     } else {
-      const existing = sandboxName
-        ? (deps.getSandboxMessagingChannels(sandboxName) ?? session?.messagingChannels ?? null)
-        : (session?.messagingChannels ?? null);
+      const registryPlan = sandboxName ? deps.getRegistrySandboxMessagingPlan(sandboxName) : null;
+      const existing =
+        getChannelsFromPlan(registryPlan) ?? getChannelsFromPlan(session?.messagingPlan);
       selectedMessagingChannels = await deps.setupMessagingChannels(agent, existing, sandboxName);
       messagingPlan = deps.readMessagingPlanFromEnv();
     }
-    const messagingChannelConfig = deps.readMessagingChannelConfigFromEnv();
     session = deps.updateSession((current) => {
-      current.messagingChannels = selectedMessagingChannels;
-      current.messagingChannelConfig = messagingChannelConfig as Session["messagingChannelConfig"];
       current.messagingPlan = messagingPlan;
       return current;
     });
@@ -411,7 +400,7 @@ export async function handleSandboxState<
         model,
         nimContainer,
         webSearchConfig,
-        messagingChannelConfig,
+        messagingPlan,
         hermesToolGateways,
       }),
     );
