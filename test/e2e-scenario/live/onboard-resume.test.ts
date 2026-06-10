@@ -9,22 +9,20 @@ import { buildAvailabilityProbeEnv } from "../framework/availability-env.ts";
 import { expect, test } from "../framework/e2e-test.ts";
 import { shouldRunLiveE2EScenarios } from "../framework/live-project-gate.ts";
 
-// Migrated from test/e2e/test-onboard-resume.sh — regression for #446.
+// Adds focused Vitest live coverage for test/e2e/test-onboard-resume.sh's
+// disruption-recovery contract — regression for #446.
 //
-// Disruption-recovery shape: drives the real `nemoclaw onboard` CLI through
-// the deterministic E2E failure-injection hook
-// (NEMOCLAW_E2E_FAILURE_INJECTION + NEMOCLAW_E2E_FORCE_FAIL_AT_STEP), then
-// invokes `nemoclaw onboard --resume --non-interactive` with NVIDIA_API_KEY
-// stripped from the environment to prove the credential is hydrated from the
-// onboard session file.
+// Shape: drive the real `nemoclaw onboard` CLI through the deterministic E2E
+// failure-injection hook (NEMOCLAW_E2E_FAILURE_INJECTION +
+// NEMOCLAW_E2E_FORCE_FAIL_AT_STEP), then invoke
+// `nemoclaw onboard --resume --non-interactive` with NVIDIA_API_KEY stripped
+// from the environment to prove the credential is hydrated from the onboard
+// session file.
 //
-// Free-standing per #5049/#5107 precedent: the steady-state expected-state
-// probe model in expected-states.ts does not capture log-grep contracts
-// ("[resume] Skipping preflight (cached)") or the JSON-shape of an interrupted
-// onboard session. Asserts inline, helpers-not-bridges.
-//
-// The legacy bash workflow (`onboard-resume-e2e` in nightly-e2e.yaml) is kept
-// untouched per epic #5098 suite-separation rule until typed coverage soaks.
+// This stays as a simple live Vitest test: assertions are inline, no registry,
+// no migration ledger, no new shared helper, and no workflow replacement. The
+// legacy bash workflow (`onboard-resume-e2e` in nightly-e2e.yaml) remains until
+// a later retirement PR deletes/replaces that lane explicitly.
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
 const CLI_ENTRYPOINT = path.join(REPO_ROOT, "bin", "nemoclaw.js");
@@ -62,14 +60,28 @@ function readSession<T>(file: string): T {
   return JSON.parse(fs.readFileSync(file, "utf8")) as T;
 }
 
-// Gate the test on NEMOCLAW_RUN_E2E_SCENARIOS=1 so it only runs under the
-// `e2e-scenarios-live` Vitest project (dispatched by the
-// onboard-resume-vitest workflow job). The `cli` project's glob
-// `test/**/*.test.{js,ts}` would otherwise pick this file up in cli-test-shards
-// where there's no real `openshell` CLI, no Docker daemon, and no
-// NVIDIA_API_KEY — producing a guaranteed ENOENT/skip noise. Mirrors the
-// gate enforced by the `e2e-scenarios-live` project's `include:` glob in
-// vitest.config.ts; live-only tests opt in to that gate explicitly.
+function interruptedSessionSummary(session: SessionStateInterrupted): Record<string, unknown> {
+  return {
+    status: session.status,
+    lastCompletedStep: session.lastCompletedStep,
+    failureStep: session.failure?.step,
+  };
+}
+
+function completeSessionSummary(session: SessionStateComplete): Record<string, unknown> {
+  return {
+    status: session.status,
+    provider: session.provider,
+    stepStatuses: Object.fromEntries(
+      Object.entries(session.steps).map(([step, value]) => [step, value.status]),
+    ),
+  };
+}
+
+// Gate the test on NEMOCLAW_RUN_E2E_SCENARIOS=1 so accidental cli-test-shard
+// discovery does not run it without real `openshell`, Docker, or NVIDIA_API_KEY.
+// Live-only tests opt in to the same gate used by the `e2e-scenarios-live`
+// project include glob in vitest.config.ts.
 test.skipIf(!shouldRunLiveE2EScenarios())(
   "onboard-resume: interrupted onboard then --resume completes without redoing cached steps",
   async ({ artifacts, cleanup, host, sandbox, secrets }) => {
@@ -83,9 +95,9 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
       `bin/nemoclaw.js missing — ensure the workflow runs npm ci + npm run build:cli before this test`,
     ).toBe(true);
 
-    // Assertion: docker-running — `docker info` exits 0. Pass framework
-    // allowlist env (includes PATH, HOME, etc.) so spawn can locate `docker`.
-    // The shell-probe boundary defaults to no env inheritance; framework spawns
+    // Assertion: docker-running — `docker info` exits 0. Pass fixture allowlist
+    // env (includes PATH, HOME, etc.) so spawn can locate `docker`.
+    // The shell-probe boundary defaults to no env inheritance; fixture spawns
     // must opt in via buildAvailabilityProbeEnv() to keep secret-passthrough
     // explicit (NVIDIA_API_KEY is NOT in the allowlist; we layer it explicitly
     // in Phase 2 below).
@@ -97,7 +109,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
     expect(dockerInfo.exitCode, dockerInfo.stderr).toBe(0);
 
     // Assertion: openshell-installed — openshell CLI is on PATH (installed by
-    // the workflow's `bash install.sh` step before this test runs).
+    // the live validation setup before this test runs).
     const openshellVersion = await host.command("openshell", ["--version"], {
       artifactName: "prereq-openshell-version",
       env: buildAvailabilityProbeEnv(),
@@ -164,6 +176,17 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
         timeoutMs: 60_000,
       });
       fs.rmSync(SESSION_FILE, { force: true });
+
+      const sandboxAfterCleanup = await sandbox.openshell(["sandbox", "get", SANDBOX_NAME], {
+        artifactName: "cleanup-openshell-sandbox-get-after-delete",
+        env: cleanupEnv,
+        timeoutMs: 30_000,
+      });
+      expect(
+        sandboxAfterCleanup.exitCode,
+        `sandbox ${SANDBOX_NAME} still exists after cleanup`,
+      ).not.toBe(0);
+      expect(fs.existsSync(SESSION_FILE), `${SESSION_FILE} still exists after cleanup`).toBe(false);
     });
 
     // ──────────────────────────────────────────────────────────────────
@@ -195,18 +218,24 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
     expect(firstText).toContain("[e2e] Forced onboarding failure at step 'policies'.");
 
     // Assertion: sandbox-exists-after-interrupt — `openshell sandbox get` exits 0.
-    // Pass framework env so the spawn can locate `openshell` on PATH; the
-    // SandboxClient threads options through to ShellProbe but does not
-    // auto-supply env (mirrors HostCliClient — callers stay explicit about the
-    // env boundary).
-    expect(await sandbox.exists(SANDBOX_NAME, { env: buildAvailabilityProbeEnv() })).toBe(true);
+    // Keep this check local to the test instead of adding a shared helper for a
+    // single assertion.
+    const sandboxAfterInterrupt = await sandbox.openshell(["sandbox", "get", SANDBOX_NAME], {
+      artifactName: "phase-2-openshell-sandbox-get",
+      env: buildAvailabilityProbeEnv(),
+      timeoutMs: 30_000,
+    });
+    expect(sandboxAfterInterrupt.exitCode, sandboxAfterInterrupt.stderr).toBe(0);
 
     // Assertion: session-file-present.
     expect(fs.existsSync(SESSION_FILE)).toBe(true);
 
     // Assertion: session-file-interrupted-state.
     const interrupted = readSession<SessionStateInterrupted>(SESSION_FILE);
-    await artifacts.writeJson("phase-2-session-state.json", interrupted);
+    await artifacts.writeJson(
+      "phase-2-session-summary.json",
+      interruptedSessionSummary(interrupted),
+    );
     expect(interrupted.status).toBe("failed");
     expect(interrupted.lastCompletedStep).toBe("openclaw");
     expect(interrupted.failure?.step).toBe("policies");
@@ -221,10 +250,10 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
       {
         artifactName: "phase-3-onboard-resume",
         // buildAvailabilityProbeEnv() does NOT pass NVIDIA_API_KEY through —
-        // it's outside the framework allowlist. Resume must hydrate the
+        // it's outside the fixture env allowlist. Resume must hydrate the
         // credential from the session file. This is exactly the bash test's
-        // `env -u NVIDIA_API_KEY` invariant, expressed via the framework's
-        // explicit secret-passthrough rule.
+        // `env -u NVIDIA_API_KEY` invariant, expressed via explicit
+        // secret-passthrough.
         env: {
           ...buildAvailabilityProbeEnv(),
           NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
@@ -269,7 +298,7 @@ test.skipIf(!shouldRunLiveE2EScenarios())(
 
     // Assertion: session-file-complete-state.
     const complete = readSession<SessionStateComplete>(SESSION_FILE);
-    await artifacts.writeJson("phase-3-session-state.json", complete);
+    await artifacts.writeJson("phase-3-session-summary.json", completeSessionSummary(complete));
     expect(complete.status).toBe("complete");
     expect(complete.provider).toBe("nvidia-prod");
     for (const step of [

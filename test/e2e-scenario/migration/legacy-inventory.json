@@ -523,17 +523,12 @@
       "legacyScript": "test/e2e/test-onboard-resume.sh",
       "domain": "smoke-onboarding",
       "ownerIssue": "#4348",
-      "status": "covered",
-      "targetVitestScenarios": ["test/e2e-scenario/live/onboard-resume.test.ts"],
+      "status": "not-migrated",
+      "targetVitestScenarios": [],
       "bridgeProbes": [],
       "retiredReason": "",
       "deletionReady": false,
-      "notes": "Covered by free-standing live test (PR #5147). Disruption-recovery shape: drives `nemoclaw onboard` via NEMOCLAW_E2E_FAILURE_INJECTION to fail at policies, then `nemoclaw onboard --resume --non-interactive` with NVIDIA_API_KEY stripped from env to prove credential hydration from the session file. 22 assertions translated 1:1 from the bash script (regression for #446). Not registry-driven; dispatched as the discrete onboard-resume-vitest job in e2e-vitest-scenarios.yaml. Bash guard retained in nightly-e2e.yaml under onboard-resume-e2e; deletion is a follow-up PR with #4357 approval.",
-      "convergenceEvidence": {
-        "redRunUrl": "https://github.com/NVIDIA/NemoClaw/actions/runs/27283289318",
-        "greenRunUrl": "https://github.com/NVIDIA/NemoClaw/actions/runs/27285136703",
-        "verificationRunUrl": "https://github.com/NVIDIA/NemoClaw/actions/runs/27285846914"
-      }
+      "notes": "Initial completeness row; classify detailed coverage and deletion evidence in the owning migration issue before deleting."
     },
     {
       "legacyScript": "test/e2e/test-openclaw-discord-pairing.sh",
