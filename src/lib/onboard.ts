@@ -5131,9 +5131,9 @@ async function onboard(opts: OnboardOptions = {}): Promise<void> {
       // createSandbox succeeds). Falling through would silently default to
       // the agent's `my-assistant` instead of the user's original --name.
       // Use `cannotPrompt` so non-TTY runs without explicit --non-interactive
-      // are also caught, and `requestedSandboxName` (already env-var-resolved
-      // and trimmed above, lines 8302-8308) so whitespace-only env values
-      // can't satisfy the guard.
+      // are also caught, and `requestedSandboxName` from
+      // resolveOnboardEntryOptions so whitespace-only env values can't satisfy
+      // the guard.
       const sandboxStepCompleted = session?.steps?.sandbox?.status === "complete";
       const recoveredSandboxName =
         requestedSandboxName || (sandboxStepCompleted ? session?.sandboxName || null : null);
