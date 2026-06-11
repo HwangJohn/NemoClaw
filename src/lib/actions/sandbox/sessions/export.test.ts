@@ -57,7 +57,8 @@ describe("buildSandboxTarArgv", () => {
       "-C",
       "/sandbox/.openclaw/agents/main/sessions",
       "--exclude=*.trajectory.jsonl",
-      ".",
+      "--",
+      "./",
     ]);
   });
 
@@ -69,10 +70,18 @@ describe("buildSandboxTarArgv", () => {
         resolvedFiles: null,
         includeTrajectory: true,
       }),
-    ).toEqual(["tar", "-czf", "/tmp/x.tgz", "-C", "/sandbox/.openclaw/agents/main/sessions", "."]);
+    ).toEqual([
+      "tar",
+      "-czf",
+      "/tmp/x.tgz",
+      "-C",
+      "/sandbox/.openclaw/agents/main/sessions",
+      "--",
+      "./",
+    ]);
   });
 
-  it("passes resolved files verbatim when keys filter the bundle", () => {
+  it("isolates resolved files behind `--` and prefixes each with './' so a leading-dash filename cannot be reinterpreted as a tar option", () => {
     expect(
       buildSandboxTarArgv({
         sourceDir: "/sandbox/.openclaw/agents/main/sessions",
@@ -86,8 +95,9 @@ describe("buildSandboxTarArgv", () => {
       "/tmp/x.tgz",
       "-C",
       "/sandbox/.openclaw/agents/main/sessions",
-      "sid-1.jsonl",
-      "sid-2.jsonl",
+      "--",
+      "./sid-1.jsonl",
+      "./sid-2.jsonl",
     ]);
   });
 });
@@ -133,8 +143,13 @@ describe("exportSandboxSessions", () => {
     expect(runMock).toHaveBeenCalledTimes(2);
     const tarCall = runMock.mock.calls[0]?.[0] as string[];
     expect(tarCall.slice(0, 5)).toEqual(["sandbox", "exec", "--name", "alpha", "--"]);
-    expect(tarCall).toContain("--exclude=*.trajectory.jsonl");
-    expect(tarCall.at(-1)).toBe(".");
+    // The tar command is wrapped in `sh -c "umask 077 && tar ... && chmod 600 ..."`
+    // so a concurrent sandbox user cannot read the staged session JSONL.
+    expect(tarCall.slice(5, 7)).toEqual(["sh", "-c"]);
+    const shellCommand = tarCall[7] as string;
+    expect(shellCommand).toMatch(/^umask 077 && tar -czf /);
+    expect(shellCommand).toMatch(/--exclude=\*\.trajectory\.jsonl/);
+    expect(shellCommand).toMatch(/&& chmod 600 /);
 
     expect(downloadMock).toHaveBeenCalledTimes(1);
     expect(downloadMock.mock.calls[0]?.[0]).toMatchObject({
@@ -164,9 +179,9 @@ describe("exportSandboxSessions", () => {
     });
 
     const tarCall = runMock.mock.calls[0]?.[0] as string[];
-    expect(tarCall).toContain("sid-2.jsonl");
-    expect(tarCall).toContain("sid-2.trajectory.jsonl");
-    expect(tarCall).not.toContain("sid-1.jsonl");
+    const shellCommand = tarCall[7] as string;
+    expect(shellCommand).toMatch(/-- \.\/sid-2\.jsonl \.\/sid-2\.trajectory\.jsonl/);
+    expect(shellCommand).not.toMatch(/sid-1\.jsonl/);
     expect(result.selectedKeys).toEqual(["agent:main:telegram:t-1"]);
     expect(result.resolvedFiles).toEqual(["sid-2.jsonl", "sid-2.trajectory.jsonl"]);
   });
@@ -187,7 +202,7 @@ describe("exportSandboxSessions", () => {
     expect(captureCall).toContain("--agent");
     expect(captureCall).toContain("work");
     const tarCall = runMock.mock.calls[0]?.[0] as string[];
-    expect(tarCall).toContain("sid-9.jsonl");
+    expect(tarCall[7]).toMatch(/sid-9\.jsonl/);
   });
 
   it("refuses canonical keys whose agent disagrees with --agent", async () => {
@@ -212,11 +227,40 @@ describe("exportSandboxSessions", () => {
     expect(runMock).not.toHaveBeenCalled();
   });
 
+  it("refuses to tar when a resolved session id starts with '-' (would be interpreted as a tar option)", async () => {
+    captureMock.mockReturnValueOnce(
+      makeCapture(
+        JSON.stringify([{ key: "agent:main:main", sessionId: "--checkpoint-action=exec=sh" }]),
+      ),
+    );
+    await expect(
+      exportSandboxSessions({
+        sandboxName: "alpha",
+        keys: ["agent:main:main"],
+      }),
+    ).rejects.toThrow(/contains unsafe characters or starts with '-'/);
+    expect(runMock).not.toHaveBeenCalled();
+  });
+
   it("cleans up the staging tarball after the host download succeeds", async () => {
     await exportSandboxSessions({
       sandboxName: "alpha",
       out: "./out.tgz",
     });
+    const cleanupCall = runMock.mock.calls.at(-1);
+    expect(cleanupCall?.[0]).toContain("rm");
+    expect(cleanupCall?.[0]).toContain("-f");
+    expect(cleanupCall?.[1]).toMatchObject({ ignoreError: true });
+  });
+
+  it("still cleans up the staging tarball when the host download throws", async () => {
+    downloadMock.mockRejectedValueOnce(new Error("openshell download exited 1"));
+    await expect(
+      exportSandboxSessions({
+        sandboxName: "alpha",
+        out: "./out.tgz",
+      }),
+    ).rejects.toThrow(/openshell download exited 1/);
     const cleanupCall = runMock.mock.calls.at(-1);
     expect(cleanupCall?.[0]).toContain("rm");
     expect(cleanupCall?.[0]).toContain("-f");

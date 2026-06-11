@@ -53,12 +53,22 @@ export default class SandboxSessionsExportCommand extends NemoClawCommand {
       this.failWithLines([`  Usage: ${SandboxSessionsExportCommand.usage[0]}`], 2);
       return;
     }
-    const keys = rest.filter((token) => !token.startsWith("-"));
+    const stray = rest.filter((token) => token.startsWith("-"));
+    if (stray.length > 0) {
+      this.failWithLines(
+        [
+          `  Unknown flag or option-shaped key: ${stray.join(", ")}`,
+          "  Session keys must not start with '-'. Place flags after the sandbox name.",
+        ],
+        2,
+      );
+      return;
+    }
     try {
       await exportSandboxSessions({
         sandboxName,
         agent: flags.agent,
-        keys,
+        keys: rest,
         out: flags.out,
         includeTrajectory: flags["include-trajectory"],
         json: flags.json,
