@@ -41,53 +41,17 @@ afterEach(() => {
   consoleLogSpy.mockRestore();
 });
 
+function makeCapture(output: string, status = 0) {
+  return { status, output, error: undefined as Error | undefined };
+}
+
 describe("buildSandboxTarArgv", () => {
-  it("tars the whole agent sessions dir and excludes trajectory by default", () => {
-    expect(
-      buildSandboxTarArgv({
-        sourceDir: "/sandbox/.openclaw/agents/main/sessions",
-        tarballRemote: "/tmp/x.tgz",
-        resolvedFiles: null,
-        includeTrajectory: false,
-      }),
-    ).toEqual([
-      "tar",
-      "-czf",
-      "/tmp/x.tgz",
-      "-C",
-      "/sandbox/.openclaw/agents/main/sessions",
-      "--exclude=*.trajectory.jsonl",
-      "--",
-      "./",
-    ]);
-  });
-
-  it("keeps trajectory files when includeTrajectory=true and no key filter", () => {
-    expect(
-      buildSandboxTarArgv({
-        sourceDir: "/sandbox/.openclaw/agents/main/sessions",
-        tarballRemote: "/tmp/x.tgz",
-        resolvedFiles: null,
-        includeTrajectory: true,
-      }),
-    ).toEqual([
-      "tar",
-      "-czf",
-      "/tmp/x.tgz",
-      "-C",
-      "/sandbox/.openclaw/agents/main/sessions",
-      "--",
-      "./",
-    ]);
-  });
-
   it("isolates resolved files behind `--` and prefixes each with './' so a leading-dash filename cannot be reinterpreted as a tar option", () => {
     expect(
       buildSandboxTarArgv({
         sourceDir: "/sandbox/.openclaw/agents/main/sessions",
         tarballRemote: "/tmp/x.tgz",
         resolvedFiles: ["sid-1.jsonl", "sid-2.jsonl"],
-        includeTrajectory: false,
       }),
     ).toEqual([
       "tar",
@@ -129,36 +93,63 @@ describe("parseSessionIndex", () => {
 });
 
 describe("exportSandboxSessions", () => {
-  function makeCapture(output: string, status = 0) {
-    return { status, output, error: undefined as Error | undefined };
-  }
+  it("enumerates every session via openclaw sessions list when no keys are supplied and tars only the resolved files", async () => {
+    captureMock.mockReturnValueOnce(
+      makeCapture(
+        JSON.stringify([
+          { key: "agent:main:main", sessionId: "sid-a" },
+          { key: "agent:main:telegram:t-1", sessionId: "sid-b" },
+        ]),
+      ),
+    );
 
-  it("tars all sessions when no keys are supplied and downloads via the wrapper", async () => {
     const result = await exportSandboxSessions({
       sandboxName: "alpha",
       out: "./out.tgz",
     });
 
-    expect(captureMock).not.toHaveBeenCalled();
-    expect(runMock).toHaveBeenCalledTimes(2);
+    expect(captureMock).toHaveBeenCalledTimes(1);
+    const captureCall = captureMock.mock.calls[0]?.[0] as string[];
+    expect(captureCall).toContain("openclaw");
+    expect(captureCall).toContain("sessions");
+    expect(captureCall).toContain("list");
+    expect(captureCall).toContain("--agent");
+    expect(captureCall).toContain("main");
+
     const tarCall = runMock.mock.calls[0]?.[0] as string[];
-    expect(tarCall.slice(0, 5)).toEqual(["sandbox", "exec", "--name", "alpha", "--"]);
-    // The tar command is wrapped in `sh -c "umask 077 && tar ... && chmod 600 ..."`
-    // so a concurrent sandbox user cannot read the staged session JSONL.
-    expect(tarCall.slice(5, 7)).toEqual(["sh", "-c"]);
+    expect(tarCall.slice(0, 7)).toEqual(["sandbox", "exec", "--name", "alpha", "--", "sh", "-c"]);
     const shellCommand = tarCall[7] as string;
     expect(shellCommand).toMatch(/^umask 077 && tar -czf /);
-    expect(shellCommand).toMatch(/--exclude=\*\.trajectory\.jsonl/);
+    expect(shellCommand).toMatch(/-- \.\/sid-a\.jsonl \.\/sid-b\.jsonl/);
     expect(shellCommand).toMatch(/&& chmod 600 /);
+    expect(shellCommand).not.toMatch(/sid-a\.trajectory\.jsonl/);
 
-    expect(downloadMock).toHaveBeenCalledTimes(1);
-    expect(downloadMock.mock.calls[0]?.[0]).toMatchObject({
-      sandboxName: "alpha",
-      hostDest: "./out.tgz",
-    });
     expect(result.selectedKeys).toBe("all");
-    expect(result.resolvedFiles).toBe("all");
-    expect(result.agent).toBe("main");
+    expect(result.resolvedFiles).toEqual(["sid-a.jsonl", "sid-b.jsonl"]);
+  });
+
+  it("includes trajectory files for every session when --include-trajectory is set and no keys filter", async () => {
+    captureMock.mockReturnValueOnce(
+      makeCapture(
+        JSON.stringify([
+          { key: "agent:main:main", sessionId: "sid-a" },
+          { key: "agent:main:telegram:t-1", sessionId: "sid-b" },
+        ]),
+      ),
+    );
+
+    const result = await exportSandboxSessions({
+      sandboxName: "alpha",
+      out: "./out.tgz",
+      includeTrajectory: true,
+    });
+
+    expect(result.resolvedFiles).toEqual([
+      "sid-a.jsonl",
+      "sid-a.trajectory.jsonl",
+      "sid-b.jsonl",
+      "sid-b.trajectory.jsonl",
+    ]);
   });
 
   it("resolves canonical keys to filenames via openclaw sessions list", async () => {
@@ -227,6 +218,17 @@ describe("exportSandboxSessions", () => {
     expect(runMock).not.toHaveBeenCalled();
   });
 
+  it("refuses to export when the agent has no sessions at all", async () => {
+    captureMock.mockReturnValueOnce(makeCapture(JSON.stringify([])));
+    await expect(
+      exportSandboxSessions({
+        sandboxName: "alpha",
+        out: "./out.tgz",
+      }),
+    ).rejects.toThrow(/agent 'main' has no sessions to bundle/);
+    expect(runMock).not.toHaveBeenCalled();
+  });
+
   it("refuses to tar when a resolved session id starts with '-' (would be interpreted as a tar option)", async () => {
     captureMock.mockReturnValueOnce(
       makeCapture(
@@ -243,6 +245,9 @@ describe("exportSandboxSessions", () => {
   });
 
   it("cleans up the staging tarball after the host download succeeds", async () => {
+    captureMock.mockReturnValueOnce(
+      makeCapture(JSON.stringify([{ key: "agent:main:main", sessionId: "sid-a" }])),
+    );
     await exportSandboxSessions({
       sandboxName: "alpha",
       out: "./out.tgz",
@@ -254,6 +259,9 @@ describe("exportSandboxSessions", () => {
   });
 
   it("still cleans up the staging tarball when the host download throws", async () => {
+    captureMock.mockReturnValueOnce(
+      makeCapture(JSON.stringify([{ key: "agent:main:main", sessionId: "sid-a" }])),
+    );
     downloadMock.mockRejectedValueOnce(new Error("openshell download exited 1"));
     await expect(
       exportSandboxSessions({
@@ -268,6 +276,9 @@ describe("exportSandboxSessions", () => {
   });
 
   it("emits a JSON manifest when --json is set", async () => {
+    captureMock.mockReturnValueOnce(
+      makeCapture(JSON.stringify([{ key: "agent:main:main", sessionId: "sid-a" }])),
+    );
     await exportSandboxSessions({
       sandboxName: "alpha",
       out: "./out.tgz",
@@ -279,6 +290,7 @@ describe("exportSandboxSessions", () => {
       sandboxName: "alpha",
       agent: "main",
       selectedKeys: "all",
+      resolvedFiles: ["sid-a.jsonl"],
       hostDest: "./out.tgz",
     });
   });

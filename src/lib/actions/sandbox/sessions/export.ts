@@ -65,7 +65,7 @@ export interface SessionsExportResult {
   sandboxName: string;
   agent: string;
   selectedKeys: string[] | "all";
-  resolvedFiles: string[] | "all";
+  resolvedFiles: string[];
   tarballRemote: string;
   hostDest: string;
 }
@@ -92,16 +92,26 @@ export async function exportSandboxSessions(
   const sourceDir = `/sandbox/.openclaw/agents/${agent}/sessions`;
   const tarballRemote = stagingTarballPath(agent);
 
-  const resolvedFiles =
-    trimmedKeys.length > 0
-      ? resolveSelectedFiles(opts.sandboxName, agent, trimmedKeys, opts.includeTrajectory ?? false)
-      : null;
+  // Always enumerate sessions through the in-sandbox `openclaw sessions list`
+  // index, even with no key filter, so the tarball contains exactly the
+  // matching `<sessionId>.jsonl` (+ optional trajectory) files and never
+  // picks up `sessions.json`, stale `.jsonl.lock` files, or other store
+  // bookkeeping.
+  const resolvedFiles = resolveSelectedFiles(
+    opts.sandboxName,
+    agent,
+    trimmedKeys,
+    opts.includeTrajectory ?? false,
+  );
+
+  if (resolvedFiles.length === 0) {
+    throw new Error(`Refusing to export: agent '${agent}' has no sessions to bundle.`);
+  }
 
   const tarArgv = buildSandboxTarArgv({
     sourceDir,
     tarballRemote,
     resolvedFiles,
-    includeTrajectory: opts.includeTrajectory ?? false,
   });
 
   const hostDest = resolveHostDestination(opts.out, opts.sandboxName, agent);
@@ -138,7 +148,7 @@ export async function exportSandboxSessions(
     sandboxName: opts.sandboxName,
     agent,
     selectedKeys: trimmedKeys.length > 0 ? trimmedKeys : "all",
-    resolvedFiles: resolvedFiles ?? "all",
+    resolvedFiles,
     tarballRemote,
     hostDest,
   };
@@ -149,7 +159,7 @@ export async function exportSandboxSessions(
     const scope =
       trimmedKeys.length > 0
         ? `${trimmedKeys.length} key(s) on agent '${agent}'`
-        : `all sessions for agent '${agent}'`;
+        : `all sessions for agent '${agent}' (${resolvedFiles.length} file(s))`;
     console.error(`  Exported ${scope} to ${hostDest}`);
   }
 
@@ -159,20 +169,13 @@ export async function exportSandboxSessions(
 export function buildSandboxTarArgv(input: {
   sourceDir: string;
   tarballRemote: string;
-  resolvedFiles: string[] | null;
-  includeTrajectory: boolean;
+  resolvedFiles: readonly string[];
 }): string[] {
-  // `--` separates tar options from operands so any future file name that
-  // happens to start with `-` (even though SAFE_TOKEN_RE forbids that today)
-  // cannot be reinterpreted as a tar option.
-  const argv: string[] = ["tar", "-czf", input.tarballRemote, "-C", input.sourceDir];
-  if (input.resolvedFiles && input.resolvedFiles.length > 0) {
-    argv.push("--");
-    for (const file of input.resolvedFiles) argv.push(`./${file}`);
-    return argv;
-  }
-  if (!input.includeTrajectory) argv.push("--exclude=*.trajectory.jsonl");
-  argv.push("--", "./");
+  // `--` separates tar options from operands so any file name that happens
+  // to start with `-` (even though SAFE_TOKEN_RE forbids that today) cannot
+  // be reinterpreted as a tar option.
+  const argv: string[] = ["tar", "-czf", input.tarballRemote, "-C", input.sourceDir, "--"];
+  for (const file of input.resolvedFiles) argv.push(`./${file}`);
   return argv;
 }
 
@@ -221,14 +224,28 @@ function resolveSelectedFiles(
   const byKey = new Map<string, string>();
   for (const entry of index) byKey.set(entry.key, entry.sessionId);
 
-  const missing: string[] = [];
-  const files: string[] = [];
-  for (const key of keys) {
-    const sessionId = byKey.get(key) ?? byKey.get(normaliseToCanonical(agent, key)) ?? null;
-    if (!sessionId) {
-      missing.push(key);
-      continue;
+  const entries: { key: string; sessionId: string }[] = [];
+  if (keys.length === 0) {
+    for (const entry of index) entries.push(entry);
+  } else {
+    const missing: string[] = [];
+    for (const key of keys) {
+      const sessionId = byKey.get(key) ?? byKey.get(normaliseToCanonical(agent, key)) ?? null;
+      if (!sessionId) {
+        missing.push(key);
+        continue;
+      }
+      entries.push({ key, sessionId });
     }
+    if (missing.length > 0) {
+      throw new Error(
+        `Refusing to export: no entries found in agent '${agent}' for key(s): ${missing.join(", ")}.`,
+      );
+    }
+  }
+
+  const files: string[] = [];
+  for (const { key, sessionId } of entries) {
     if (!SAFE_TOKEN_RE.test(sessionId)) {
       throw new Error(
         `Refusing to tar: session id '${sessionId}' resolved for key '${key}' contains unsafe characters or starts with '-'.`,
@@ -236,11 +253,6 @@ function resolveSelectedFiles(
     }
     files.push(`${sessionId}.jsonl`);
     if (includeTrajectory) files.push(`${sessionId}.trajectory.jsonl`);
-  }
-  if (missing.length > 0) {
-    throw new Error(
-      `Refusing to export: no entries found in agent '${agent}' for key(s): ${missing.join(", ")}.`,
-    );
   }
   return files;
 }

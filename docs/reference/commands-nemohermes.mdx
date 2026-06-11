@@ -1034,9 +1034,9 @@ nemohermes my-assistant sessions delete agent:main:slack:c-9 --json
 
 Bundle the OpenClaw session JSONL from a running sandbox and download the tarball to the host, replacing the two-hop `docker exec kubectl cp` plus `docker cp` workaround.
 
-The command tars `/sandbox/.openclaw/agents/<agent>/sessions/` inside the sandbox via `openshell sandbox exec`, downloads the resulting tarball through `openshell sandbox download`, and best-effort removes the staging artifact even when the export fails partway.
+The command always enumerates the session store through `openclaw sessions list --agent <id> --json` and tars only the matching `<sessionId>.jsonl` (plus optional `<sessionId>.trajectory.jsonl`) files, so the bundle never picks up `sessions.json`, stale `.jsonl.lock` files, or other store bookkeeping.
 With no positional keys every session for the agent is exported; pass one or more keys (alias or canonical `agent:<id>:<rest>`) to filter.
-The session keys are resolved to on-disk file names through `openclaw sessions list --agent <id> --json`, so OpenClaw owns the key-to-file mapping.
+The bundle is built inside the sandbox via `openshell sandbox exec`, downloaded through `openshell sandbox download`, and the staging artifact is removed by a best-effort cleanup that runs even when the export fails partway.
 
 ```bash
 nemohermes my-assistant sessions export

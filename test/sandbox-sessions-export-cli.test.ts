@@ -35,12 +35,19 @@ function buildStubOpenshell(home: string, logFile: string, sessionListJson: stri
 }
 
 describe("sandbox sessions export CLI", () => {
-  it("tars the whole agent sessions dir, downloads, and cleans up when no keys are supplied", () => {
+  it("enumerates every session via openclaw sessions list when no keys are supplied and tars only the resolved files", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-cli-sessions-export-all-"));
     try {
       writeSandboxRegistry(home);
       const openshellLog = path.join(home, "openshell-calls.log");
-      const localBin = buildStubOpenshell(home, openshellLog, "[]");
+      const localBin = buildStubOpenshell(
+        home,
+        openshellLog,
+        JSON.stringify([
+          { key: "agent:main:main", sessionId: "sid-a" },
+          { key: "agent:main:telegram:t-1", sessionId: "sid-b" },
+        ]),
+      );
 
       const out = path.join(home, "bundle.tgz");
       const result = runWithEnv(`alpha sessions export --out ${out} --json 2>&1`, {
@@ -50,12 +57,16 @@ describe("sandbox sessions export CLI", () => {
       expect(result.code).toBe(0);
 
       const calls = fs.readFileSync(openshellLog, "utf8").split("\n");
+      const listLine = calls.find((line) => line.includes("openclaw sessions list"));
       const tarLine = calls.find((line) => line.includes("-- sh -c") && line.includes("umask 077"));
       const downloadLine = calls.find((line) => line.startsWith("sandbox download"));
       const cleanupLine = calls.find((line) => line.includes("-- rm -f"));
+      expect(listLine).toBeDefined();
       expect(tarLine).toBeDefined();
       expect(tarLine).toContain("/sandbox/.openclaw/agents/main/sessions");
-      expect(tarLine).toContain("--exclude=*.trajectory.jsonl");
+      expect(tarLine).toContain("./sid-a.jsonl");
+      expect(tarLine).toContain("./sid-b.jsonl");
+      expect(tarLine).not.toContain("trajectory.jsonl");
       expect(tarLine).toContain("chmod 600");
       expect(downloadLine).toContain("alpha");
       expect(downloadLine).toContain(out);
@@ -67,7 +78,7 @@ describe("sandbox sessions export CLI", () => {
         sandboxName: "alpha",
         agent: "main",
         selectedKeys: "all",
-        resolvedFiles: "all",
+        resolvedFiles: ["sid-a.jsonl", "sid-b.jsonl"],
         hostDest: out,
       });
     } finally {
@@ -105,7 +116,6 @@ describe("sandbox sessions export CLI", () => {
       expect(tarLine).toContain("./sid-b.jsonl");
       expect(tarLine).toContain("./sid-b.trajectory.jsonl");
       expect(tarLine).not.toContain("sid-a.jsonl");
-      expect(tarLine).not.toContain("--exclude=*.trajectory.jsonl");
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
@@ -153,6 +163,28 @@ describe("sandbox sessions export CLI", () => {
       });
       expect(result.code).toBe(1);
       expect(result.out).toMatch(/scoped to agent 'main', not 'work'/);
+
+      const calls = fs.existsSync(openshellLog) ? fs.readFileSync(openshellLog, "utf8") : "";
+      expect(calls).not.toMatch(/-- sh -c/);
+      expect(calls).not.toMatch(/sandbox download/);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to export when the agent has no sessions to bundle", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-cli-sessions-export-empty-"));
+    try {
+      writeSandboxRegistry(home);
+      const openshellLog = path.join(home, "openshell-calls.log");
+      const localBin = buildStubOpenshell(home, openshellLog, "[]");
+
+      const result = runWithEnv("alpha sessions export 2>&1", {
+        HOME: home,
+        PATH: `${localBin}:${process.env.PATH || ""}`,
+      });
+      expect(result.code).toBe(1);
+      expect(result.out).toMatch(/agent 'main' has no sessions to bundle/);
 
       const calls = fs.existsSync(openshellLog) ? fs.readFileSync(openshellLog, "utf8") : "";
       expect(calls).not.toMatch(/-- sh -c/);
