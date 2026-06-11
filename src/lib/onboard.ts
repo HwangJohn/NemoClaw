@@ -407,7 +407,6 @@ const {
   getRecordedMessagingChannelsForResume: getRecordedMessagingChannelsForResumeFromState,
 }: typeof import("./onboard/messaging-credentials") = require("./onboard/messaging-credentials");
 const {
-  collectMessagingBuildConfig,
   computeTelegramRequireMention,
   getStoredMessagingChannelConfig,
   messagingChannelConfigsEqual,
@@ -1902,7 +1901,7 @@ async function preflight(
     !sandboxGpuConfig.sandboxGpuEnabled;
   assertCdiNvidiaGpuSpecPresent(host, optedOutGpuPassthrough, sandboxGpuConfig.hostGpuPlatform);
 
-  assertDockerBridgeAndContainerDnsHealthy(host);
+  assertDockerBridgeAndContainerDnsHealthy(host, isNonInteractive());
 
   if (host.runtime !== "unknown") {
     console.log(`  ✓ Container runtime: ${host.runtime}`);
@@ -2922,34 +2921,32 @@ async function createSandbox(
   // for the current sandbox creation.
   const envPlan = readMessagingPlanFromEnv();
   const currentPlan = envPlan?.sandboxName === sandboxName ? envPlan : null;
-  const hasPlanCredentials =
-    currentPlan?.credentialBindings.some((b) => b.credentialAvailable) ?? false;
-  if (hasPlanCredentials) {
-    const { findChannelConflictsFromPlan } =
-      require("./messaging/applier") as typeof import("./messaging/applier");
-    const conflicts = findChannelConflictsFromPlan(sandboxName, currentPlan!, registry);
-    if (conflicts.length > 0) {
-      for (const { channel, sandbox, reason } of conflicts) {
-        const detail =
-          reason === "matching-token"
-            ? `uses the same ${channel} credential`
-            : `already has ${channel} enabled, but its credential hash is unavailable`;
-        console.log(
-          `  ⚠ Sandbox '${sandbox}' ${detail}. Shared channel credentials only allow one sandbox to poll/connect — continuing may break both bridges.`,
-        );
-      }
-      if (isNonInteractive()) {
-        console.error(
-          `  Aborting: resolve the messaging channel conflict above or run \`${cliName()} <sandbox> channels stop <channel>\` / \`${cliName()} <sandbox> channels remove <channel>\` on the other sandbox.`,
-        );
-        process.exit(1);
-      }
-      if (!(await promptYesNoOrDefault("  Continue anyway?", null, false))) {
-        console.log("  Aborting sandbox creation.");
-        process.exit(1);
-      }
-    }
-  }
+  // Drop channels the operator disabled via `nemoclaw <sandbox> channels stop`.
+  // Credentials stay in the keychain; the bridge simply isn't registered with
+  // the gateway on the next rebuild. `channels start` removes the entry and
+  // the bridge comes back. Resolved before conflict detection so a *stopped*
+  // channel on this sandbox is not treated as an active consumer (a stopped
+  // Slack bridge must not block a second sandbox on the same gateway).
+  const disabledChannels: string[] =
+    require("./onboard/channel-state").resolveDisabledChannels(sandboxName);
+  const disabledChannelNames = new Set(disabledChannels);
+  const { enforceMessagingChannelConflicts } =
+    require("./onboard/messaging-conflict-guard") as typeof import("./onboard/messaging-conflict-guard");
+  await enforceMessagingChannelConflicts({
+    sandboxName,
+    gatewayName: GATEWAY_NAME,
+    currentPlan,
+    currentSandboxDisabledChannels: disabledChannels,
+    registry,
+    checkGatewayLiveness: () =>
+      runOpenshell(["sandbox", "list"], { ignoreError: true, suppressOutput: true }).status === 0,
+    providerExists: (name) => providerExistsInGateway(name),
+    isNonInteractive,
+    promptContinue: () => promptYesNoOrDefault("  Continue anyway?", null, false),
+    cliName,
+    log: (message) => console.log(message),
+    error: (message) => console.error(message),
+  });
 
   // When enabledChannels is provided (from the toggle picker), only include
   // channels the user selected. When null (backward compat), include all.
@@ -2962,13 +2959,6 @@ async function createSandbox(
         )
       : null;
 
-  // Drop channels the operator disabled via `nemoclaw <sandbox> channels stop`.
-  // Credentials stay in the keychain; the bridge simply isn't registered with
-  // the gateway on the next rebuild. `channels start` removes the entry and
-  // the bridge comes back.
-  const disabledChannels: string[] =
-    require("./onboard/channel-state").resolveDisabledChannels(sandboxName);
-  const disabledChannelNames = new Set(disabledChannels);
   const disabledEnvKeys = new Set(
     MESSAGING_CHANNELS.filter((c) => disabledChannelNames.has(c.name)).flatMap((c) =>
       getChannelTokenKeys(c),
@@ -3534,19 +3524,13 @@ async function createSandbox(
   }
 
   console.log(`  Creating sandbox '${sandboxName}' (this takes a few minutes on first run)...`);
-  const enabledTokenEnvKeys = new Set(messagingTokenDefs.map(({ envKey }) => envKey));
-  const activeChannelNames = new Set(activeMessagingChannels);
-  const { messagingAllowedIds, discordGuilds, slackConfig } = collectMessagingBuildConfig({
-    channels: MESSAGING_CHANNELS,
-    activeChannelNames,
-    enabledTokenEnvKeys,
-    discordSnowflakeRe: onboardProviders.DISCORD_SNOWFLAKE_RE,
-  });
   // Telegram mention-only mode — parity with Discord's requireMention.
   // Off by default so existing sandboxes behave the same; opt-in via
   // TELEGRAM_REQUIRE_MENTION=1 or the interactive prompt. See #1737.
   const telegramConfig: { requireMention?: boolean } = {};
-  if (enabledTokenEnvKeys.has("TELEGRAM_BOT_TOKEN")) {
+  const configuredMessagingChannels =
+    enabledChannels != null ? [...new Set(enabledChannels)] : activeMessagingChannels;
+  if (configuredMessagingChannels.includes("telegram")) {
     const telegramRequireMention = computeTelegramRequireMention();
     if (telegramRequireMention !== null) {
       telegramConfig.requireMention = telegramRequireMention;
@@ -3620,18 +3604,12 @@ async function createSandbox(
     provider,
     preferredInferenceApi,
     webSearchConfig,
-    activeMessagingChannels,
-    messagingAllowedIds,
-    discordGuilds,
     resolved ? resolved.ref : null,
-    telegramConfig,
-    wechatConfig as Record<string, unknown>,
     // Docker-on-Colima uses normal container ownership; keep the old VM chmod
     // compatibility path disabled unless a future VM-specific flow opts in.
     false,
     sandboxInferenceBaseUrlOverride,
     hermesToolGateways,
-    slackConfig,
   );
   // Only pass non-sensitive env vars to the sandbox. Credentials flow through
   // OpenShell providers — the gateway injects them as placeholders and the L7
@@ -3866,6 +3844,14 @@ async function createSandbox(
     hermesDashboardForwarding.resolveStateForPort(actualDashboardPort);
   hermesDashboardForwarding.ensureForState(finalHermesDashboardState, sandboxName, true);
 
+  // Register only after confirmed ready — prevents phantom entries
+  const providerCredentialHashes: Record<string, string> = {};
+  for (const { envKey, token } of messagingTokenDefs) {
+    const hash = token ? hashCredential(token) : null;
+    if (hash) {
+      providerCredentialHashes[envKey] = hash;
+    }
+  }
   // openshell tags images with seconds; buildId is ms. Parse actual tag from output. Fixes #2672.
   const resolvedImageTag = resolveSandboxImageTagFromCreateOutput(createResult.output, buildId);
 
@@ -3880,6 +3866,8 @@ async function createSandbox(
     ...sandboxRuntimeFields,
     ...getSandboxAgentRegistryFields(agent, !fromDockerfile),
     imageTag: resolvedImageTag,
+    providerCredentialHashes:
+      Object.keys(providerCredentialHashes).length > 0 ? providerCredentialHashes : undefined,
     policies: initialSandboxPolicy.appliedPresets,
     messaging: messagingState,
     hermesToolGateways: hermesToolGateways.length > 0 ? [...hermesToolGateways] : undefined,

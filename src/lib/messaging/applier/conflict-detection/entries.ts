@@ -12,20 +12,27 @@ import type {
 
 /**
  * Return the active (non-disabled) channel IDs for a registry entry.
- * Returns `null` when the entry has no plan-backed messaging state.
+ * Uses `entry.messaging.plan` when available. Pre-plan registry entries are
+ * supported only for channel presence via the legacy
+ * `messagingChannels`/`disabledChannels` flat fields; legacy credential hashes
+ * are deliberately not recovered. Remove this branch when flat pre-plan
+ * messaging registry fields are no longer supported. Returns `null` when the
+ * entry has neither shape.
  */
 export function resolveActiveChannelsFromEntry(entry: ConflictRegistryEntry): string[] | null {
   if (entry.messaging?.plan) {
     return getActiveChannelIdsFromPlan(entry.messaging.plan);
   }
-  return null;
+  if (!Array.isArray(entry.messagingChannels)) return null;
+  const disabled = new Set(Array.isArray(entry.disabledChannels) ? entry.disabledChannels : []);
+  return (entry.messagingChannels as string[]).filter((c) => !disabled.has(c));
 }
 
 /**
  * Return credential hashes scoped to `channelId` for a registry entry.
  * Plan-backed entries return channel-scoped hashes from `getCredentialHashesFromPlan`.
- * Entries without a plan return an empty map and are ignored by callers because
- * they have no active channels.
+ * Legacy entries without a plan return an empty map, which falls through to
+ * conservative `"unknown-token"` detection in the callers.
  */
 function resolveChannelHashesFromEntry(
   entry: ConflictRegistryEntry,
@@ -134,7 +141,11 @@ export function findConflictsInEntries(
   requests: readonly ConflictRequest[],
   entries: readonly ConflictRegistryEntry[],
 ): ConflictMatch[] {
-  const others = entries.filter((e) => e.name !== currentSandbox && e.messaging?.plan != null);
+  const others = entries.filter(
+    (e) =>
+      e.name !== currentSandbox &&
+      (Array.isArray(e.messagingChannels) || e.messaging?.plan != null),
+  );
   return requests.flatMap((request) =>
     others.flatMap((entry) => {
       const reason = conflictReasonForRequest(entry, request);

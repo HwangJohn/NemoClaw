@@ -119,6 +119,7 @@ on:
         description: >-
           Comma-separated job names to run (empty = all).
           Valid: cloud-e2e, cloud-onboard-e2e, cloud-inference-e2e,
+          cron-preflight-inference-local-e2e,
           agent-turn-latency-e2e, skill-agent-e2e, openclaw-skill-cli-e2e,
           docs-validation-e2e, messaging-providers-e2e, openclaw-slack-pairing-e2e,
           openclaw-tui-chat-correlation-e2e, issue-4434-tui-unreachable-inference-e2e,
@@ -237,6 +238,21 @@ jobs:
       artifact_name: "install-log-cloud-inference"
       artifact_path: "/tmp/nemoclaw-e2e-cloud-inference-install.log"
       env_json: '{"NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE":"1","NEMOCLAW_NON_INTERACTIVE":"1","NEMOCLAW_RECREATE_SANDBOX":"1","NEMOCLAW_SANDBOX_NAME":"e2e-cloud-inference"}'
+      nvidia_api_key: true
+    secrets: *nightly-e2e-default-secrets
+  cron-preflight-inference-local-e2e:
+    if: >-
+      github.repository == 'NVIDIA/NemoClaw' && (github.event_name != 'workflow_dispatch' ||
+       inputs.jobs == '' ||
+       contains(format(',{0},', inputs.jobs), ',cron-preflight-inference-local-e2e,'))
+    uses: ./.github/workflows/e2e-script.yaml
+    with:
+      ref: ${{ inputs.target_ref || github.ref }}
+      script: test/e2e/test-cron-preflight-inference-local-e2e.sh
+      timeout_minutes: 30
+      artifact_name: "install-log-cron-preflight-inference-local"
+      artifact_path: "/tmp/nemoclaw-e2e-cron-preflight-install.log"
+      env_json: '{"NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE":"1","NEMOCLAW_NON_INTERACTIVE":"1","NEMOCLAW_RECREATE_SANDBOX":"1","NEMOCLAW_SANDBOX_NAME":"e2e-cron-preflight"}'
       nvidia_api_key: true
     secrets: *nightly-e2e-default-secrets
   agent-turn-latency-e2e:
@@ -459,7 +475,7 @@ jobs:
     timeout-minutes: 120
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           # This privileged proof mutates host firewall state and receives
           # NVIDIA_API_KEY. Keep the runner script from the trusted workflow ref;
@@ -739,7 +755,7 @@ jobs:
         /tmp/nemoclaw-e2e-install.log
         /tmp/nemoclaw-e2e-channels-*-install.log
         /tmp/nc-channels-*.log
-      env_json: '{"DISCORD_ALLOWED_IDS":"1005536447329222676","DISCORD_BOT_TOKEN":"test-fake-discord-token-stop-start-e2e","DISCORD_REQUIRE_MENTION":"0","DISCORD_SERVER_ID":"1491590992753590594","NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE":"1","NEMOCLAW_NON_INTERACTIVE":"1","NEMOCLAW_POLICY_TIER":"open","NEMOCLAW_SANDBOX_NAME":"e2e-channels-stop-start","SLACK_ALLOWED_USERS":"U0123456789,U09ABCDEFGH","SLACK_APP_TOKEN":"xapp-fake-slack-app-token-stop-start-e2e","SLACK_BOT_TOKEN":"xoxb-fake-slack-token-stop-start-e2e","TELEGRAM_ALLOWED_IDS":"123456789","TELEGRAM_BOT_TOKEN":"test-fake-telegram-token-stop-start-e2e","WECHAT_ACCOUNT_ID":"e2e-fake-account-stop-start","WECHAT_ALLOWED_IDS":"wxid_stopstart_operator","WECHAT_BASE_URL":"https://ilinkai-fake-stop-start.wechat.com","WECHAT_BOT_TOKEN":"test-fake-wechat-token-stop-start-e2e","WECHAT_USER_ID":"wxid_stopstart_operator"}'
+      env_json: '{"DISCORD_ALLOWED_IDS":"1005536447329222676","DISCORD_BOT_TOKEN":"test-fake-discord-token-stop-start-e2e","DISCORD_REQUIRE_MENTION":"0","DISCORD_SERVER_ID":"1491590992753590594","NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE":"1","NEMOCLAW_NON_INTERACTIVE":"1","NEMOCLAW_POLICY_TIER":"open","NEMOCLAW_SANDBOX_NAME":"e2e-channels-stop-start","SLACK_ALLOWED_USERS":"U0123456789,U09ABCDEFGH","SLACK_APP_TOKEN":"xapp-fake-slack-app-token-stop-start-e2e","SLACK_BOT_TOKEN":"xoxb-fake-slack-token-stop-start-e2e","TELEGRAM_ALLOWED_IDS":"123456789","TELEGRAM_BOT_TOKEN":"test-fake-telegram-token-stop-start-e2e","WECHAT_ACCOUNT_ID":"e2e-fake-account-stop-start","WECHAT_ALLOWED_IDS":"wxid_stopstart_operator","WECHAT_BASE_URL":"https://ilinkai.wechat.com","WECHAT_BOT_TOKEN":"test-fake-wechat-token-stop-start-e2e","WECHAT_USER_ID":"wxid_stopstart_operator"}'
       nvidia_api_key: true
       github_token: true
     secrets: *nightly-e2e-default-secrets
@@ -2229,6 +2245,7 @@ jobs:
         cloud-e2e,
         cloud-onboard-e2e,
         cloud-inference-e2e,
+        cron-preflight-inference-local-e2e,
         agent-turn-latency-e2e,
         skill-agent-e2e,
         openclaw-skill-cli-e2e,
@@ -2346,6 +2363,7 @@ jobs:
         cloud-e2e,
         cloud-onboard-e2e,
         cloud-inference-e2e,
+        cron-preflight-inference-local-e2e,
         agent-turn-latency-e2e,
         skill-agent-e2e,
         openclaw-skill-cli-e2e,
@@ -2522,6 +2540,7 @@ jobs:
         cloud-e2e,
         cloud-onboard-e2e,
         cloud-inference-e2e,
+        cron-preflight-inference-local-e2e,
         agent-turn-latency-e2e,
         skill-agent-e2e,
         openclaw-skill-cli-e2e,

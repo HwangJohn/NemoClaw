@@ -2,16 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { spawnSync } from "node:child_process";
-
+import type { CaptureOpenshellResult } from "./adapters/openshell/client";
+import { captureOpenshellCommand, stripAnsi } from "./adapters/openshell/client";
+import { resolveOpenshell } from "./adapters/openshell/resolve";
+import { OPENSHELL_PROBE_TIMEOUT_MS } from "./adapters/openshell/timeouts";
 import { getNamedGatewayLifecycleState } from "./gateway-runtime-action";
 import { getLiveGatewayInference } from "./inference/live";
 import type { GatewayHealth, MessagingBridgeHealth, ShowStatusCommandDeps } from "./inventory";
-import { findAllOverlaps } from "./messaging/applier";
-import type { CaptureOpenshellResult } from "./adapters/openshell/client";
-import { captureOpenshellCommand } from "./adapters/openshell/client";
-import { OPENSHELL_PROBE_TIMEOUT_MS } from "./adapters/openshell/timeouts";
+import {
+  backfillMessagingChannels,
+  detectAllSlackSocketModeGatewayOverlaps,
+  findAllOverlaps,
+} from "./messaging/applier";
 import * as registry from "./state/registry";
-import { resolveOpenshell } from "./adapters/openshell/resolve";
 import { createSystemDeps, parseSshProcesses } from "./state/sandbox-session";
 import { getServiceStatuses, showStatus as showServiceStatus } from "./tunnel/services";
 
@@ -58,10 +61,68 @@ function checkMessagingBridgeHealth(
   }
 }
 
-function findStoredMessagingOverlaps() {
-  // Non-critical path: status must remain usable even if registry reads throw.
+function isMissingProviderOutput(output: string): boolean {
+  const normalized = stripAnsi(output).toLowerCase();
+  return [
+    /\bno such provider\b/,
+    /\bno provider named\b/,
+    /\bunknown provider\b/,
+    /\bprovider\b[\s\S]{0,120}\bnot found\b/,
+    /\bnot found\b[\s\S]{0,120}\bprovider\b/,
+    /\bprovider\b[\s\S]{0,120}\bdoes not exist\b/,
+  ].some((pattern) => pattern.test(normalized));
+}
+
+function makeConflictProbe(rootDir: string) {
+  // Upfront liveness check so we can distinguish "provider not attached" from
+  // "gateway unreachable". Provider probes also classify only explicit missing
+  // provider responses as absent so status remains non-destructive under
+  // transient transport, auth, or timeout failures.
+  let gatewayAlive: boolean | null = null;
+  const isGatewayAlive = (): boolean => {
+    if (gatewayAlive === null) {
+      const result = captureOpenshell(rootDir, ["sandbox", "list"], {
+        timeout: OPENSHELL_PROBE_TIMEOUT_MS,
+      });
+      gatewayAlive = result.status === 0;
+    }
+    return gatewayAlive;
+  };
+  return {
+    providerExists: (name: string) => {
+      if (!isGatewayAlive()) return "error" as const;
+      const result = captureOpenshell(rootDir, ["provider", "get", name], {
+        timeout: OPENSHELL_PROBE_TIMEOUT_MS,
+      });
+      if (result.status === 0) return "present" as const;
+      return isMissingProviderOutput(result.output) ? ("absent" as const) : ("error" as const);
+    },
+  };
+}
+
+function backfillAndFindOverlaps(rootDir: string) {
+  // Non-critical path: status must remain usable even if the gateway probe or
+  // registry write throws, so any failure yields an empty overlap list.
   try {
-    return findAllOverlaps(registry);
+    backfillMessagingChannels(registry, makeConflictProbe(rootDir));
+    // Report both conflict axes independently and without deduping. They are
+    // distinct, both-true facts: a shared messaging credential conflicts on any
+    // gateway (the gateway-independent, more actionable signal), while two Slack
+    // sandboxes on one gateway conflict even with distinct tokens (#4953). A
+    // pair that hits both genuinely has two problems, so surfacing both avoids
+    // masking the credential warning behind the gateway one.
+    const credentialOverlaps = findAllOverlaps(registry);
+    const slackGatewayOverlaps = detectAllSlackSocketModeGatewayOverlaps(
+      registry.listSandboxes().sandboxes,
+    );
+    return [
+      ...credentialOverlaps,
+      ...slackGatewayOverlaps.map((o) => ({
+        channel: "slack",
+        sandboxes: o.sandboxes,
+        reason: "slack-socket-mode-gateway" as const,
+      })),
+    ];
   } catch {
     return [];
   }
@@ -160,7 +221,7 @@ export function buildStatusCommandDeps(rootDir: string): ShowStatusCommandDeps {
       : undefined,
     checkMessagingBridgeHealth: (sandboxName, channels) =>
       checkMessagingBridgeHealth(rootDir, sandboxName, channels),
-    backfillAndFindOverlaps: findStoredMessagingOverlaps,
+    backfillAndFindOverlaps: () => backfillAndFindOverlaps(rootDir),
     readGatewayLog: (sandboxName) => readGatewayLog(rootDir, sandboxName),
     log: console.log,
   };

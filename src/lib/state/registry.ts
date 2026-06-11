@@ -4,6 +4,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isErrnoException } from "../core/errno";
+import type { MessagingChannelConfig } from "../messaging-channel-config";
 import { ensureConfigDir, readConfigFile, writeConfigFile } from "./config-io";
 import {
   cloneSandboxMessagingState,
@@ -71,13 +72,24 @@ export interface SandboxEntry {
   policyPresetsFinalized?: boolean;
   agent?: string | null;
   agentVersion?: string | null;
+  // NemoClaw build fingerprint (the NemoClaw CLI/build version) stamped only on
+  // NemoClaw-managed images at create/rebuild time. `upgrade-sandboxes` compares
+  // it against the running NemoClaw build so an image/build change with an
+  // unchanged agent version is still detected as needing a rebuild. Custom-image
+  // (`--from`) sandboxes are intentionally left without a fingerprint so they
+  // are never auto-rebuilt onto the default image (#5026).
+  nemoclawVersion?: string | null;
   imageTag?: string | null;
+  providerCredentialHashes?: Record<string, string>;
+  messagingChannels?: string[];
+  messagingChannelConfig?: MessagingChannelConfig;
   messaging?: SandboxMessagingState;
   hermesToolGateways?: string[];
   hermesDashboardEnabled?: boolean;
   hermesDashboardPort?: number | null;
   hermesDashboardInternalPort?: number | null;
   hermesDashboardTui?: boolean;
+  disabledChannels?: string[];
   dashboardPort?: number | null;
   // OpenShell gateway registration name and host port bound to this sandbox.
   // Persisted so later lifecycle commands operate on the sandbox's own gateway
@@ -344,7 +356,9 @@ export function registerSandbox(entry: SandboxEntry): void {
       // cannot inherit a stale finalized marker. See #4621.
       agent: entry.agent || null,
       agentVersion: entry.agentVersion || null,
+      nemoclawVersion: entry.nemoclawVersion || null,
       imageTag: entry.imageTag || null,
+      providerCredentialHashes: entry.providerCredentialHashes || undefined,
       messaging: cloneSandboxMessagingState(entry.messaging),
       hermesToolGateways:
         Array.isArray(entry.hermesToolGateways) && entry.hermesToolGateways.length > 0
