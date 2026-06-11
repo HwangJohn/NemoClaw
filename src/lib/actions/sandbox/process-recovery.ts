@@ -22,6 +22,7 @@ import { ROOT, shellQuote } from "../../runner";
 import * as registry from "../../state/registry";
 import { parseForwardList } from "../../state/sandbox-session";
 import { classifyForwardHealthWithReachability, isLocalForwardReachable } from "./forward-health";
+import { printGatewayWedgeDiagnostics } from "./gateway-wedge-diagnostics";
 import {
   ensureHermesDashboardPortForwardIfEnabled as ensureHermesDashboardPortForward,
   getHermesDashboardRecoveryConfig,
@@ -338,6 +339,8 @@ export function waitForRecoveredSandboxGateway(
       // successful probe inside that window is not proof of recovery — wait
       // out a settle window and require the gateway to still be serving.
       // 0 disables the settle confirm.
+      // Source boundary and removal condition for this detection live in
+      // gateway-wedge-diagnostics.ts.
       const settleSeconds = readNonNegativeNumberEnv(
         "NEMOCLAW_GATEWAY_RECOVERY_SETTLE_SECONDS",
         25,
@@ -356,52 +359,6 @@ export function waitForRecoveredSandboxGateway(
     }
   }
   return false;
-}
-
-/**
- * Collect the #4710 wedge signature from the sandbox gateway log: the
- * sequence a self-initiated in-process gateway restart leaves behind when it
- * closes the HTTP listener and then fails, parking the process alive.
- * Returns up to the last five matching lines, or [] when none match or the
- * log cannot be read.
- */
-export function collectGatewayWedgeDiagnostics(
-  sandboxName: string,
-  options: {
-    execImpl?: (sandboxName: string, command: string) => SandboxCommandResult | null;
-  } = {},
-): string[] {
-  const exec = options.execImpl ?? executeSandboxExecCommand;
-  const signature =
-    "config change requires gateway restart|gateway startup failed|Process will stay alive";
-  const command = `grep -E ${shellQuote(signature)} /tmp/gateway.log 2>/dev/null | tail -5`;
-  const result = exec(sandboxName, command);
-  if (!result || result.status !== 0) {
-    return [];
-  }
-  return result.stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-}
-
-/**
- * Print the #4710 wedge signature (if present) to stderr so the operator
- * sees why the gateway is unreachable despite a live process. Returns true
- * when signature lines were found and printed.
- */
-export function printGatewayWedgeDiagnostics(sandboxName: string): boolean {
-  const wedgeLines = collectGatewayWedgeDiagnostics(sandboxName);
-  if (wedgeLines.length === 0) {
-    return false;
-  }
-  console.error(
-    "  The gateway served briefly and then dropped its HTTP listener (#4710 wedge signature):",
-  );
-  for (const line of wedgeLines) {
-    console.error(`    ${line}`);
-  }
-  return true;
 }
 
 /**
@@ -564,7 +521,7 @@ export function checkAndRecoverSandboxProcesses(
     if (!waitForRecoveredSandboxGateway(sandboxName, { quiet })) {
       if (!quiet) {
         console.error("  Gateway process started but is not responding.");
-        printGatewayWedgeDiagnostics(sandboxName);
+        printGatewayWedgeDiagnostics(sandboxName, executeSandboxExecCommand);
         console.error("  Check /tmp/gateway.log inside the sandbox for details.");
         console.error("  Connect to the sandbox and run manually:");
         console.error(

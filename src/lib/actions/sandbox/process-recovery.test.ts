@@ -5,7 +5,6 @@ import { afterEach, describe, it, expect } from "vitest";
 
 // Import from compiled dist for parity with the other CLI tests in this project.
 import {
-  collectGatewayWedgeDiagnostics,
   probeSandboxInferenceGatewayHealth,
   waitForRecoveredSandboxGateway,
 } from "../../../../dist/lib/actions/sandbox/process-recovery";
@@ -135,37 +134,5 @@ describe("waitForRecoveredSandboxGateway — #4710 settle-window confirm", () =>
       sleepImpl: () => {},
     });
     expect(ok).toBe(false);
-  });
-});
-
-describe("collectGatewayWedgeDiagnostics — #4710 wedge signature", () => {
-  it("returns the matching gateway.log lines, trimmed", () => {
-    const lines = collectGatewayWedgeDiagnostics("my-sandbox", {
-      execImpl: () => ({
-        status: 0,
-        stdout:
-          "  [reload] config change requires gateway restart (plugins.installs)\n" +
-          "  gateway startup failed: listen EADDRINUSE. Process will stay alive; fix the issue and restart.\n",
-        stderr: "",
-      }),
-    });
-    expect(lines).toEqual([
-      "[reload] config change requires gateway restart (plugins.installs)",
-      "gateway startup failed: listen EADDRINUSE. Process will stay alive; fix the issue and restart.",
-    ]);
-  });
-
-  it("returns [] when nothing matches (grep exits non-zero)", () => {
-    const lines = collectGatewayWedgeDiagnostics("my-sandbox", {
-      execImpl: () => ({ status: 1, stdout: "", stderr: "" }),
-    });
-    expect(lines).toEqual([]);
-  });
-
-  it("returns [] when the sandbox exec is unavailable", () => {
-    const lines = collectGatewayWedgeDiagnostics("my-sandbox", {
-      execImpl: () => null,
-    });
-    expect(lines).toEqual([]);
   });
 });
