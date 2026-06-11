@@ -31,6 +31,7 @@ export interface CreatedSandboxRegistryEntryInput {
   agent: AgentDefinition | null | undefined;
   agentVersionKnown: boolean;
   imageTag: string | null;
+  providerCredentialHashes: Record<string, string>;
   appliedPolicies: string[];
   configuredMessagingChannels: string[] | null;
   activeMessagingChannels: string[];
@@ -63,6 +64,10 @@ export function buildCreatedSandboxRegistryEntry(
     ...input.runtimeFields,
     ...getSandboxAgentRegistryFields(input.agent, input.agentVersionKnown),
     imageTag: input.imageTag,
+    providerCredentialHashes:
+      Object.keys(input.providerCredentialHashes).length > 0
+        ? input.providerCredentialHashes
+        : undefined,
     policies: input.appliedPolicies,
     messagingChannels:
       input.configuredMessagingChannels != null

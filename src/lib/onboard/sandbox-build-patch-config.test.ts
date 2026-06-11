@@ -23,6 +23,7 @@ describe("prepareSandboxBuildPatchConfig", () => {
         { name: "wechat", userIdEnvKey: "WECHAT_ALLOWED_IDS" },
       ],
       activeMessagingChannels: ["telegram", "slack"],
+      configuredMessagingChannels: ["telegram", "slack"],
       messagingTokenDefs: [{ envKey: "TELEGRAM_BOT_TOKEN" }, { envKey: "SLACK_BOT_TOKEN" }],
       discordSnowflakeRe: DISCORD_SNOWFLAKE_RE,
       env: {
@@ -103,5 +104,30 @@ describe("prepareSandboxBuildPatchConfig", () => {
       telegramConfig: null,
       wechatConfig: null,
     });
+  });
+
+  it("uses configured channel membership for Telegram mention config", () => {
+    const computeTelegramRequireMention = vi.fn(() => true);
+
+    const result = prepareSandboxBuildPatchConfig({
+      channels: [{ name: "telegram", userIdEnvKey: "TELEGRAM_ALLOWED_IDS" }],
+      activeMessagingChannels: [],
+      configuredMessagingChannels: ["telegram"],
+      messagingTokenDefs: [],
+      discordSnowflakeRe: DISCORD_SNOWFLAKE_RE,
+      deps: {
+        readMessagingChannelConfigFromEnv: vi.fn(() => null),
+        computeTelegramRequireMention,
+        loadSession: vi.fn(() => null),
+        gatherWechatConfig: vi.fn(() => ({})),
+        updateSession: vi.fn((mutator: (session: Session) => Session | void) => {
+          const current = {} as Session;
+          return mutator(current) ?? current;
+        }),
+      },
+    });
+
+    expect(result.telegramConfig).toEqual({ requireMention: true });
+    expect(computeTelegramRequireMention).toHaveBeenCalledOnce();
   });
 });
