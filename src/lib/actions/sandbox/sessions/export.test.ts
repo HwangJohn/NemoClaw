@@ -7,22 +7,16 @@ vi.mock("../gateway-state", () => ({
   ensureLiveSandboxOrExit: vi.fn(async () => undefined),
 }));
 
-vi.mock("../download", () => ({
-  downloadFromSandbox: vi.fn(async () => ({ sandboxPath: "", hostDest: "" })),
-}));
-
 vi.mock("../../../adapters/openshell/runtime", () => ({
   captureOpenshell: vi.fn(),
   runOpenshell: vi.fn(),
 }));
 
 import { captureOpenshell, runOpenshell } from "../../../adapters/openshell/runtime";
-import { downloadFromSandbox } from "../download";
 import { buildSandboxTarArgv, exportSandboxSessions, parseSessionIndex } from "./export";
 
 const captureMock = captureOpenshell as unknown as ReturnType<typeof vi.fn>;
 const runMock = runOpenshell as unknown as ReturnType<typeof vi.fn>;
-const downloadMock = downloadFromSandbox as unknown as ReturnType<typeof vi.fn>;
 
 let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 let consoleLogSpy: ReturnType<typeof vi.spyOn>;
@@ -30,8 +24,7 @@ let consoleLogSpy: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
   captureMock.mockReset();
   runMock.mockReset();
-  downloadMock.mockReset();
-  downloadMock.mockResolvedValue({ sandboxPath: "", hostDest: "" });
+  runMock.mockReturnValue({ status: 0, stdout: "", stderr: "" });
   consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
   consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
 });
@@ -43,6 +36,10 @@ afterEach(() => {
 
 function makeCapture(output: string, status = 0) {
   return { status, output, error: undefined as Error | undefined };
+}
+
+function makeRun(status: number) {
+  return { status, stdout: "", stderr: "" };
 }
 
 describe("buildSandboxTarArgv", () => {
@@ -87,8 +84,16 @@ describe("parseSessionIndex", () => {
     expect(parseSessionIndex(output)).toEqual([{ key: "agent:main:main", sessionId: "sid-1" }]);
   });
 
-  it("returns empty when the output cannot be parsed", () => {
-    expect(parseSessionIndex("hello world")).toEqual([]);
+  it("returns [] when the upstream emits an empty index (empty array)", () => {
+    expect(parseSessionIndex("[]")).toEqual([]);
+  });
+
+  it("returns [] when the upstream emits no output at all", () => {
+    expect(parseSessionIndex("")).toEqual([]);
+  });
+
+  it("returns null when the output is non-empty but no JSON shape is recognised", () => {
+    expect(parseSessionIndex("hello world")).toBeNull();
   });
 });
 
@@ -124,11 +129,15 @@ describe("exportSandboxSessions", () => {
     expect(shellCommand).toMatch(/&& chmod 600 /);
     expect(shellCommand).not.toMatch(/sid-a\.trajectory\.jsonl/);
 
+    const downloadCall = runMock.mock.calls[1]?.[0] as string[];
+    expect(downloadCall.slice(0, 3)).toEqual(["sandbox", "download", "alpha"]);
+    expect(downloadCall.at(-1)).toBe("./out.tgz");
+
     expect(result.selectedKeys).toBe("all");
     expect(result.resolvedFiles).toEqual(["sid-a.jsonl", "sid-b.jsonl"]);
   });
 
-  it("includes trajectory files for every session when --include-trajectory is set and no keys filter", async () => {
+  it("dedupes resolved session ids when the same session is referenced by both alias and canonical key", async () => {
     captureMock.mockReturnValueOnce(
       makeCapture(
         JSON.stringify([
@@ -140,16 +149,11 @@ describe("exportSandboxSessions", () => {
 
     const result = await exportSandboxSessions({
       sandboxName: "alpha",
+      keys: ["agent:main:main", "main"],
       out: "./out.tgz",
-      includeTrajectory: true,
     });
 
-    expect(result.resolvedFiles).toEqual([
-      "sid-a.jsonl",
-      "sid-a.trajectory.jsonl",
-      "sid-b.jsonl",
-      "sid-b.trajectory.jsonl",
-    ]);
+    expect(result.resolvedFiles).toEqual(["sid-a.jsonl"]);
   });
 
   it("resolves canonical keys to filenames via openclaw sessions list", async () => {
@@ -229,6 +233,17 @@ describe("exportSandboxSessions", () => {
     expect(runMock).not.toHaveBeenCalled();
   });
 
+  it("refuses to export when sessions list emits an unrecognised payload (does not silently fall back to no-sessions)", async () => {
+    captureMock.mockReturnValueOnce(makeCapture("upstream changed contract\n<not json>"));
+    await expect(
+      exportSandboxSessions({
+        sandboxName: "alpha",
+        out: "./out.tgz",
+      }),
+    ).rejects.toThrow(/Could not parse `openclaw sessions list/);
+    expect(runMock).not.toHaveBeenCalled();
+  });
+
   it("refuses to tar when a resolved session id starts with '-' (would be interpreted as a tar option)", async () => {
     captureMock.mockReturnValueOnce(
       makeCapture(
@@ -258,17 +273,34 @@ describe("exportSandboxSessions", () => {
     expect(cleanupCall?.[1]).toMatchObject({ ignoreError: true });
   });
 
-  it("still cleans up the staging tarball when the host download throws", async () => {
+  it("still cleans up the staging tarball when the in-sandbox tar exits non-zero", async () => {
     captureMock.mockReturnValueOnce(
       makeCapture(JSON.stringify([{ key: "agent:main:main", sessionId: "sid-a" }])),
     );
-    downloadMock.mockRejectedValueOnce(new Error("openshell download exited 1"));
+    runMock.mockReturnValueOnce(makeRun(1));
     await expect(
       exportSandboxSessions({
         sandboxName: "alpha",
         out: "./out.tgz",
       }),
-    ).rejects.toThrow(/openshell download exited 1/);
+    ).rejects.toThrow(/Failed to tar sessions/);
+    const cleanupCall = runMock.mock.calls.at(-1);
+    expect(cleanupCall?.[0]).toContain("rm");
+    expect(cleanupCall?.[0]).toContain("-f");
+    expect(cleanupCall?.[1]).toMatchObject({ ignoreError: true });
+  });
+
+  it("still cleans up the staging tarball when the host download exits non-zero", async () => {
+    captureMock.mockReturnValueOnce(
+      makeCapture(JSON.stringify([{ key: "agent:main:main", sessionId: "sid-a" }])),
+    );
+    runMock.mockReturnValueOnce(makeRun(0)).mockReturnValueOnce(makeRun(1));
+    await expect(
+      exportSandboxSessions({
+        sandboxName: "alpha",
+        out: "./out.tgz",
+      }),
+    ).rejects.toThrow(/Failed to download/);
     const cleanupCall = runMock.mock.calls.at(-1);
     expect(cleanupCall?.[0]).toContain("rm");
     expect(cleanupCall?.[0]).toContain("-f");

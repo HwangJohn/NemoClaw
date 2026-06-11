@@ -6,8 +6,7 @@
 //   - Invalid state addressed: extracting OpenClaw's per-agent session JSONL
 //     out of a running sandbox to the host today requires a two-hop
 //     `docker exec kubectl cp` + `docker cp` workaround that bakes in-sandbox
-//     paths and TLS quirks into every consumer (see issue #3979). This module
-//     wraps that flow.
+//     paths and TLS quirks into every consumer. This module wraps that flow.
 //   - Source boundary:
 //       * NemoClaw side (this file): validate the requested agent/keys,
 //         resolve canonical keys to session ids via the in-sandbox
@@ -43,7 +42,6 @@ import { randomBytes } from "node:crypto";
 
 import { CLI_NAME } from "../../../cli/branding";
 import { captureOpenshell, runOpenshell } from "../../../adapters/openshell/runtime";
-import { downloadFromSandbox } from "../download";
 import { ensureLiveSandboxOrExit } from "../gateway-state";
 import {
   DEFAULT_AGENT_ID,
@@ -117,23 +115,38 @@ export async function exportSandboxSessions(
   const hostDest = resolveHostDestination(opts.out, opts.sandboxName, agent);
 
   try {
-    runOpenshell([
-      "sandbox",
-      "exec",
-      "--name",
-      opts.sandboxName,
-      "--",
-      "sh",
-      "-c",
-      buildShellInvocation(tarArgv, tarballRemote),
-    ]);
+    // Use ignoreError so the underlying spawn helper does not call
+    // process.exit on a non-zero tar/download status. Without that, the
+    // finally cleanup below would never run and the staged session JSONL
+    // would survive in the sandbox's /tmp.
+    const tarResult = runOpenshell(
+      [
+        "sandbox",
+        "exec",
+        "--name",
+        opts.sandboxName,
+        "--",
+        "sh",
+        "-c",
+        buildShellInvocation(tarArgv, tarballRemote),
+      ],
+      { ignoreError: true, stdio: "inherit" },
+    );
+    if (tarResult.status !== 0) {
+      throw new Error(
+        `Failed to tar sessions for agent '${agent}' in sandbox '${opts.sandboxName}' (exit ${tarResult.status}).`,
+      );
+    }
 
-    await downloadFromSandbox({
-      sandboxName: opts.sandboxName,
-      sandboxPath: tarballRemote,
-      hostDest,
-      allowNonReadyPhase: true,
-    });
+    const downloadResult = runOpenshell(
+      ["sandbox", "download", opts.sandboxName, tarballRemote, hostDest],
+      { ignoreError: true, stdio: "inherit" },
+    );
+    if (downloadResult.status !== 0) {
+      throw new Error(
+        `Failed to download '${tarballRemote}' from sandbox '${opts.sandboxName}' (exit ${downloadResult.status}).`,
+      );
+    }
   } finally {
     // Best-effort cleanup of the in-sandbox staging tarball. Runs even when
     // tar/download fail so a partial export cannot leave a world-readable
@@ -244,6 +257,7 @@ function resolveSelectedFiles(
     }
   }
 
+  const seen = new Set<string>();
   const files: string[] = [];
   for (const { key, sessionId } of entries) {
     if (!SAFE_TOKEN_RE.test(sessionId)) {
@@ -251,6 +265,8 @@ function resolveSelectedFiles(
         `Refusing to tar: session id '${sessionId}' resolved for key '${key}' contains unsafe characters or starts with '-'.`,
       );
     }
+    if (seen.has(sessionId)) continue;
+    seen.add(sessionId);
     files.push(`${sessionId}.jsonl`);
     if (includeTrajectory) files.push(`${sessionId}.trajectory.jsonl`);
   }
@@ -284,7 +300,13 @@ function readSessionIndex(sandboxName: string, agent: string): SessionIndexEntry
       `Failed to list sessions in sandbox '${sandboxName}' for agent '${agent}' (exit ${result.status}). Verify the sandbox is live with \`${CLI_NAME} ${sandboxName} status\`.`,
     );
   }
-  return parseSessionIndex(result.output);
+  const parsed = parseSessionIndex(result.output);
+  if (parsed === null) {
+    throw new Error(
+      `Could not parse \`openclaw sessions list --agent ${agent} --json\` output as a session index. Check the OpenClaw version pinned in agents/openclaw/manifest.yaml.`,
+    );
+  }
+  return parsed;
 }
 
 // Tolerant parsing of `openclaw sessions list --json`.
@@ -310,7 +332,7 @@ function readSessionIndex(sandboxName: string, agent: string): SessionIndexEntry
 //   - Removal condition: once OpenClaw documents a single stable JSON
 //     contract for `sessions list --json` in its release notes, this
 //     parser can collapse to the strict shape and the alias map can drop.
-export function parseSessionIndex(output: string): SessionIndexEntry[] {
+export function parseSessionIndex(output: string): SessionIndexEntry[] | null {
   const trimmed = output.trim();
   if (!trimmed) return [];
   const lines = trimmed.split(/\r?\n/);
@@ -326,7 +348,11 @@ export function parseSessionIndex(output: string): SessionIndexEntry[] {
     const entries = tryExtractIndex(candidate);
     if (entries) return entries;
   }
-  return [];
+  // Non-empty output, but no JSON-shaped candidate parsed into a recognised
+  // session index. Distinguish this from the empty-string case so callers
+  // can surface a parse error instead of silently treating it as "no
+  // sessions" — the latter would mask an upstream contract drift.
+  return null;
 }
 
 function tryExtractIndex(text: string): SessionIndexEntry[] | null {
