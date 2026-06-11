@@ -24,8 +24,17 @@ import {
 import { finalizeDockerGpuPatchBackup } from "./docker-gpu-patch-finalize";
 import { detectWslDockerDesktopStatus } from "./wsl-docker-desktop-gpu";
 
+let cachedDockerDesktopWslRuntime: boolean | null = null;
+
 export function isDockerDesktopWslRuntime(): boolean {
-  return detectWslDockerDesktopStatus({}) === "docker-desktop";
+  if (cachedDockerDesktopWslRuntime === null) {
+    cachedDockerDesktopWslRuntime = detectWslDockerDesktopStatus({}) === "docker-desktop";
+  }
+  return cachedDockerDesktopWslRuntime;
+}
+
+export function resetIsDockerDesktopWslRuntimeCache(): void {
+  cachedDockerDesktopWslRuntime = null;
 }
 
 type DockerGpuSandboxCreateDeps = Pick<

@@ -264,6 +264,13 @@ describe("classifySandboxCreateFailure", () => {
     expect(result.kind).toBe("unknown");
   });
 
+  it("classifies gpu_cdi_injection_failed even when 'Created sandbox:' is also present", () => {
+    const output =
+      "Created sandbox: test-sandbox\nError response from daemon: CDI device injection failed: unresolvable CDI devices nvidia.com/gpu=all";
+    const result = classifySandboxCreateFailure(output);
+    expect(result.kind).toBe("gpu_cdi_injection_failed");
+  });
+
   it("does NOT classify generic TLS transport errors as tls_cert_mismatch", () => {
     expect(classifySandboxCreateFailure("TLS error: connection refused by proxy").kind).toBe(
       "unknown",

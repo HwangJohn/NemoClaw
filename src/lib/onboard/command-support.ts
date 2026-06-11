@@ -67,7 +67,7 @@ export function buildOnboardFlags(): Record<string, any> {
     }),
     "no-sandbox-gpu": Flags.boolean({
       description:
-        "Force CPU sandbox behavior (equivalent to NEMOCLAW_SANDBOX_GPU=0; pair with --no-gpu on Docker Desktop WSL when CDI injection fails)",
+        "Force CPU sandbox behavior (equivalent to NEMOCLAW_SANDBOX_GPU=0; alternative to --no-gpu when Docker Desktop WSL CDI injection fails)",
     }),
     "sandbox-gpu-device": Flags.string({
       description:

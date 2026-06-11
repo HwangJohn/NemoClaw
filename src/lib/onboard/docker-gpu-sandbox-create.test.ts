@@ -7,7 +7,10 @@ import type {
   DockerGpuPatchFailureContext,
   DockerGpuPatchResult,
 } from "../../../dist/lib/onboard/docker-gpu-patch";
-import { createDockerGpuSandboxCreatePatch } from "../../../dist/lib/onboard/docker-gpu-sandbox-create";
+import {
+  createDockerGpuSandboxCreatePatch,
+  resolveDockerGpuSandboxCreatePlan,
+} from "../../../dist/lib/onboard/docker-gpu-sandbox-create";
 
 function deferredCreateResult(): DockerGpuPatchResult {
   return {
@@ -218,5 +221,43 @@ describe("createDockerGpuSandboxCreatePatch composed flow", () => {
     patch.waitForSupervisorReconnectIfNeeded();
     expect(waitForSupervisor).not.toHaveBeenCalled();
     expect(finalizeBackup).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveDockerGpuSandboxCreatePlan Docker Desktop WSL handling", () => {
+  it("keeps useDockerGpuPatch=true on Docker Desktop WSL even when NEMOCLAW_DOCKER_GPU_PATCH=0", () => {
+    const originalEnv = process.env.NEMOCLAW_DOCKER_GPU_PATCH;
+    process.env.NEMOCLAW_DOCKER_GPU_PATCH = "0";
+    try {
+      const plan = resolveDockerGpuSandboxCreatePlan(
+        { sandboxGpuEnabled: true },
+        {
+          dockerDriverGateway: true,
+          detectDockerDesktopWsl: () => true,
+        },
+      );
+      expect(plan.useDockerGpuPatch).toBe(true);
+    } finally {
+      if (originalEnv === undefined) delete process.env.NEMOCLAW_DOCKER_GPU_PATCH;
+      else process.env.NEMOCLAW_DOCKER_GPU_PATCH = originalEnv;
+    }
+  });
+
+  it("honors NEMOCLAW_DOCKER_GPU_PATCH=0 when not on Docker Desktop WSL", () => {
+    const originalEnv = process.env.NEMOCLAW_DOCKER_GPU_PATCH;
+    process.env.NEMOCLAW_DOCKER_GPU_PATCH = "0";
+    try {
+      const plan = resolveDockerGpuSandboxCreatePlan(
+        { sandboxGpuEnabled: true },
+        {
+          dockerDriverGateway: true,
+          detectDockerDesktopWsl: () => false,
+        },
+      );
+      expect(plan.useDockerGpuPatch).toBe(false);
+    } finally {
+      if (originalEnv === undefined) delete process.env.NEMOCLAW_DOCKER_GPU_PATCH;
+      else process.env.NEMOCLAW_DOCKER_GPU_PATCH = originalEnv;
+    }
   });
 });
