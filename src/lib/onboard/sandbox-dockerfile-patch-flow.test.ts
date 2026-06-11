@@ -31,13 +31,7 @@ describe("prepareSandboxDockerfilePatch", () => {
       provider: "nvidia-prod",
       preferredInferenceApi: "chat",
       webSearchConfig: { fetchEnabled: true },
-      activeMessagingChannels: ["telegram"],
-      messagingAllowedIds: { telegram: ["123"] },
-      discordGuilds: {},
-      telegramConfig: { requireMention: true },
-      wechatConfig: { accountId: "wx" },
       hermesToolGateways: ["github"],
-      slackConfig: { allowedChannels: ["C123"] },
       sandboxGpuConfig,
       log,
       deps: {
@@ -76,16 +70,10 @@ describe("prepareSandboxDockerfilePatch", () => {
       "nvidia-prod",
       "chat",
       { fetchEnabled: true },
-      ["telegram"],
-      { telegram: ["123"] },
-      {},
       "ghcr.io/nvidia/nemoclaw/sandbox-base@sha256:abcdef0123456789",
-      { requireMention: true },
-      { accountId: "wx" },
       false,
       null,
       ["github"],
-      { allowedChannels: ["C123"] },
     );
   });
 
@@ -103,13 +91,7 @@ describe("prepareSandboxDockerfilePatch", () => {
       provider: null,
       preferredInferenceApi: null,
       webSearchConfig: null,
-      activeMessagingChannels: [],
-      messagingAllowedIds: {},
-      discordGuilds: {},
-      telegramConfig: {},
-      wechatConfig: {},
       hermesToolGateways: [],
-      slackConfig: {},
       sandboxGpuConfig,
       deps: {
         isLinuxDockerDriverGatewayEnabled: vi.fn(() => false),
@@ -144,13 +126,7 @@ describe("prepareSandboxDockerfilePatch", () => {
       provider: null,
       preferredInferenceApi: null,
       webSearchConfig: null,
-      activeMessagingChannels: [],
-      messagingAllowedIds: {},
-      discordGuilds: {},
-      telegramConfig: {},
-      wechatConfig: {},
       hermesToolGateways: [],
-      slackConfig: {},
       sandboxGpuConfig,
       log: vi.fn(),
       deps: {
@@ -169,7 +145,7 @@ describe("prepareSandboxDockerfilePatch", () => {
     expect(pullAndResolveBaseImageDigest).toHaveBeenCalledWith({
       requireOpenshellSandboxAbi: false,
     });
-    expect(patchStagedDockerfile.mock.calls[0]?.[10]).toBe(
+    expect(patchStagedDockerfile.mock.calls[0]?.[7]).toBe(
       "ghcr.io/nvidia/nemoclaw/sandbox-base@sha256:customagent",
     );
   });
@@ -187,13 +163,7 @@ describe("prepareSandboxDockerfilePatch", () => {
       provider: null,
       preferredInferenceApi: null,
       webSearchConfig: null,
-      activeMessagingChannels: [],
-      messagingAllowedIds: {},
-      discordGuilds: {},
-      telegramConfig: {},
-      wechatConfig: {},
       hermesToolGateways: [],
-      slackConfig: {},
       sandboxGpuConfig,
       warn,
       deps: {
@@ -224,13 +194,7 @@ describe("prepareSandboxDockerfilePatch", () => {
       provider: null,
       preferredInferenceApi: null,
       webSearchConfig: null,
-      activeMessagingChannels: [],
-      messagingAllowedIds: {},
-      discordGuilds: {},
-      telegramConfig: {},
-      wechatConfig: {},
       hermesToolGateways: [],
-      slackConfig: {},
       sandboxGpuConfig,
       warn,
       deps: {

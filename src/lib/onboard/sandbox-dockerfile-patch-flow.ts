@@ -4,10 +4,8 @@
 import type { AgentDefinition } from "../agent/defs";
 import type { WebSearchConfig } from "../inference/web-search";
 import type { SandboxGpuConfig } from "./sandbox-gpu-mode";
-import type { WechatConfigSnapshot } from "./wechat-config";
 
 type DockerRunResult = { status: number | null };
-type LooseObject = Record<string, unknown>;
 type PullAndResolveBaseImageDigest = typeof import("./base-image").pullAndResolveBaseImageDigest;
 type ResolvedSandboxBaseImage = NonNullable<ReturnType<PullAndResolveBaseImageDigest>>;
 type EnforceDockerGpuPatchPreserveNetwork =
@@ -34,13 +32,7 @@ export type PrepareSandboxDockerfilePatchInput = {
   provider: string | null;
   preferredInferenceApi: string | null;
   webSearchConfig: WebSearchConfig | null;
-  activeMessagingChannels: string[];
-  messagingAllowedIds: LooseObject;
-  discordGuilds: LooseObject;
-  telegramConfig: LooseObject;
-  wechatConfig: WechatConfigSnapshot;
   hermesToolGateways: string[];
-  slackConfig: LooseObject;
   sandboxGpuConfig: SandboxGpuConfig;
   log?: (message: string) => void;
   warn?: (message: string) => void;
@@ -99,13 +91,7 @@ export async function prepareSandboxDockerfilePatch({
   provider,
   preferredInferenceApi,
   webSearchConfig,
-  activeMessagingChannels,
-  messagingAllowedIds,
-  discordGuilds,
-  telegramConfig,
-  wechatConfig,
   hermesToolGateways,
-  slackConfig,
   sandboxGpuConfig,
   log = console.log,
   warn = console.warn,
@@ -158,16 +144,10 @@ export async function prepareSandboxDockerfilePatch({
     provider,
     preferredInferenceApi,
     webSearchConfig,
-    activeMessagingChannels,
-    messagingAllowedIds,
-    discordGuilds,
     resolved ? resolved.ref : null,
-    telegramConfig,
-    wechatConfig as LooseObject,
     false,
     null,
     hermesToolGateways,
-    slackConfig,
   );
 
   return { buildId, resolvedBaseImage: resolved };

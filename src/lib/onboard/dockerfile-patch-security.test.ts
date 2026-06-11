@@ -28,25 +28,7 @@ describe("dockerfile patch security guards", () => {
     fs.symlinkSync(realDockerfile, linkDockerfile);
 
     expect(() =>
-      patchStagedDockerfile(
-        linkDockerfile,
-        "custom-model",
-        "https://chat.example",
-        "build-1",
-        "compatible-endpoint",
-        null,
-        null,
-        [],
-        {},
-        {},
-        null,
-        {},
-        {},
-        false,
-        null,
-        [],
-        {},
-      ),
+      patchStagedDockerfile(linkDockerfile, "custom-model", "https://chat.example"),
     ).toThrow(/Refusing to patch Dockerfile through a symlink/);
   });
 

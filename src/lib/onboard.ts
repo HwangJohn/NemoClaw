@@ -1602,7 +1602,7 @@ async function preflight(
     !sandboxGpuConfig.sandboxGpuEnabled;
   assertCdiNvidiaGpuSpecPresent(host, optedOutGpuPassthrough, sandboxGpuConfig.hostGpuPlatform);
 
-  assertDockerBridgeAndContainerDnsHealthy(host);
+  assertDockerBridgeAndContainerDnsHealthy(host, isNonInteractive());
 
   if (host.runtime !== "unknown") {
     console.log(`  ✓ Container runtime: ${host.runtime}`);
@@ -2576,12 +2576,12 @@ async function createSandbox(
   const hermesDashboardState = hermesDashboardForwarding.resolveStateForPort(effectivePort);
 
   const {
-    disabledChannelNames,
     messagingTokenDefs,
     extraPlaceholderKeys,
     hasMessagingTokens,
     reusableMessagingProviders,
     reusableMessagingChannels,
+    disabledChannelNames,
     disabledChannels,
   } = await sandboxMessagingPreflight.prepareSandboxMessagingPreflight(
     {
@@ -2977,16 +2977,12 @@ async function createSandbox(
   if (sandboxGpuLogMessage) console.log(sandboxGpuLogMessage);
 
   console.log(`  Creating sandbox '${sandboxName}' (this takes a few minutes on first run)...`);
-  const {
-    messagingAllowedIds,
-    discordGuilds,
-    slackConfig,
-    telegramConfig,
-    wechatConfig,
-    messagingChannelConfig,
-  } = sandboxBuildPatchConfig.prepareSandboxBuildPatchConfig({
+  const configuredMessagingChannels =
+    enabledChannels != null ? [...new Set(enabledChannels)] : activeMessagingChannels;
+  const { messagingChannelConfig } = sandboxBuildPatchConfig.prepareSandboxBuildPatchConfig({
     channels: MESSAGING_CHANNELS,
     activeMessagingChannels,
+    configuredMessagingChannels,
     messagingTokenDefs,
     discordSnowflakeRe: onboardProviders.DISCORD_SNOWFLAKE_RE,
   });
@@ -3001,13 +2997,7 @@ async function createSandbox(
     provider,
     preferredInferenceApi,
     webSearchConfig,
-    activeMessagingChannels,
-    messagingAllowedIds,
-    discordGuilds,
-    telegramConfig,
-    wechatConfig,
     hermesToolGateways,
-    slackConfig,
     sandboxGpuConfig: effectiveSandboxGpuConfig,
     log: console.log,
     warn: console.warn,
@@ -3186,6 +3176,14 @@ async function createSandbox(
     hermesDashboardForwarding.resolveStateForPort(actualDashboardPort);
   hermesDashboardForwarding.ensureForState(finalHermesDashboardState, sandboxName, true);
 
+  // Register only after confirmed ready — prevents phantom entries
+  const providerCredentialHashes: Record<string, string> = {};
+  for (const { envKey, token } of messagingTokenDefs) {
+    const hash = token ? hashCredential(token) : null;
+    if (hash) {
+      providerCredentialHashes[envKey] = hash;
+    }
+  }
   // openshell tags images with seconds; buildId is ms. Parse actual tag from output. Fixes #2672.
   const resolvedImageTag = resolveSandboxImageTagFromCreateOutput(createResult.output, buildId);
 
@@ -3198,13 +3196,14 @@ async function createSandbox(
     agent,
     agentVersionKnown: !fromDockerfile,
     imageTag: resolvedImageTag,
+    providerCredentialHashes,
     appliedPolicies: initialSandboxPolicy.appliedPresets,
     // Persist the operator's configured channel set, not the post-disabled-filter
     // active set. After `channels stop X` + rebuild, activeMessagingChannels drops
     // X, but X is still configured — losing it here means a later `channels start
     // X` has nothing to re-enable (the next rebuild sees an empty channel set and
     // never reattaches the gateway bridge). See #3381.
-    configuredMessagingChannels: enabledChannels,
+    configuredMessagingChannels,
     activeMessagingChannels,
     messagingChannelConfig,
     plannedMessagingState: MessagingHostStateApplier.readPlanStateFromEnv(),
