@@ -12,7 +12,7 @@
 //         resolve canonical keys to session ids via the in-sandbox
 //         `openclaw sessions list --json`, build the in-sandbox tar command,
 //         download the resulting tarball via `openshell sandbox download`,
-//         and best-effort clean up the staging artifact afterwards.
+//         and best-effort clean up the staging artefact afterwards.
 //       * OpenClaw side (upstream `openclaw` npm package): owns the on-disk
 //         session store under `/sandbox/.openclaw/agents/<id>/sessions/` and
 //         the `sessions.list` index contract. NemoClaw never edits that
@@ -39,6 +39,7 @@
 //     the tar command and re-resolve key -> session-id host-side.
 
 import { randomBytes } from "node:crypto";
+import fs from "node:fs";
 
 import { CLI_NAME } from "../../../cli/branding";
 import { captureOpenshell, runOpenshell } from "../../../adapters/openshell/runtime";
@@ -63,9 +64,11 @@ export interface SessionsExportResult {
   sandboxName: string;
   agent: string;
   selectedKeys: string[] | "all";
+  resolvedSessionIds: string[];
   resolvedFiles: string[];
   tarballRemote: string;
   hostDest: string;
+  bundleBytes: number | null;
 }
 
 interface SessionIndexEntry {
@@ -95,7 +98,7 @@ export async function exportSandboxSessions(
   // matching `<sessionId>.jsonl` (+ optional trajectory) files and never
   // picks up `sessions.json`, stale `.jsonl.lock` files, or other store
   // bookkeeping.
-  const resolvedFiles = resolveSelectedFiles(
+  const { sessionIds: resolvedSessionIds, files: resolvedFiles } = resolveSelectedFiles(
     opts.sandboxName,
     agent,
     trimmedKeys,
@@ -157,23 +160,33 @@ export async function exportSandboxSessions(
     });
   }
 
+  let bundleBytes: number | null = null;
+  try {
+    bundleBytes = fs.statSync(hostDest).size;
+  } catch {
+    bundleBytes = null;
+  }
+
   const result: SessionsExportResult = {
     sandboxName: opts.sandboxName,
     agent,
     selectedKeys: trimmedKeys.length > 0 ? trimmedKeys : "all",
+    resolvedSessionIds,
     resolvedFiles,
     tarballRemote,
     hostDest,
+    bundleBytes,
   };
 
   if (opts.json) {
     console.log(JSON.stringify(result));
   } else {
+    const sizeNote = bundleBytes !== null ? ` (${bundleBytes} byte(s))` : "";
     const scope =
       trimmedKeys.length > 0
         ? `${trimmedKeys.length} key(s) on agent '${agent}'`
-        : `all sessions for agent '${agent}' (${resolvedFiles.length} file(s))`;
-    console.error(`  Exported ${scope} to ${hostDest}`);
+        : `all sessions for agent '${agent}' (${resolvedSessionIds.length} session(s))`;
+    console.error(`  Exported ${scope} to ${hostDest}${sizeNote}`);
   }
 
   return result;
@@ -232,7 +245,7 @@ function resolveSelectedFiles(
   agent: string,
   keys: readonly string[],
   includeTrajectory: boolean,
-): string[] {
+): { sessionIds: string[]; files: string[] } {
   const index = readSessionIndex(sandboxName, agent);
   const byKey = new Map<string, string>();
   for (const entry of index) byKey.set(entry.key, entry.sessionId);
@@ -258,6 +271,7 @@ function resolveSelectedFiles(
   }
 
   const seen = new Set<string>();
+  const sessionIds: string[] = [];
   const files: string[] = [];
   for (const { key, sessionId } of entries) {
     if (!SAFE_TOKEN_RE.test(sessionId)) {
@@ -267,10 +281,11 @@ function resolveSelectedFiles(
     }
     if (seen.has(sessionId)) continue;
     seen.add(sessionId);
+    sessionIds.push(sessionId);
     files.push(`${sessionId}.jsonl`);
     if (includeTrajectory) files.push(`${sessionId}.trajectory.jsonl`);
   }
-  return files;
+  return { sessionIds, files };
 }
 
 function normaliseToCanonical(agent: string, key: string): string {
@@ -364,6 +379,8 @@ function tryExtractIndex(text: string): SessionIndexEntry[] | null {
   }
   const array = pickIndexArray(parsed);
   if (!array) return null;
+  // Legitimate empty index — upstream said no sessions.
+  if (array.length === 0) return [];
   const entries: SessionIndexEntry[] = [];
   for (const entry of array) {
     if (!entry || typeof entry !== "object") continue;
@@ -377,6 +394,10 @@ function tryExtractIndex(text: string): SessionIndexEntry[] | null {
           : null;
     if (key && sessionId) entries.push({ key, sessionId });
   }
+  // Non-empty upstream array yielded zero recognised entries — schema drift.
+  // Return null so the caller surfaces a parse error instead of silently
+  // treating it as "no sessions".
+  if (entries.length === 0) return null;
   return entries;
 }
 

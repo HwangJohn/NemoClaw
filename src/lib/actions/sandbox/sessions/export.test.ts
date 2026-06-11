@@ -95,6 +95,11 @@ describe("parseSessionIndex", () => {
   it("returns null when the output is non-empty but no JSON shape is recognised", () => {
     expect(parseSessionIndex("hello world")).toBeNull();
   });
+
+  it("returns null when the array is non-empty but every entry uses unknown field names (schema drift)", () => {
+    const output = JSON.stringify([{ alias: "agent:main:main", uuid: "sid-1" }]);
+    expect(parseSessionIndex(output)).toBeNull();
+  });
 });
 
 describe("exportSandboxSessions", () => {
@@ -134,7 +139,10 @@ describe("exportSandboxSessions", () => {
     expect(downloadCall.at(-1)).toBe("./out.tgz");
 
     expect(result.selectedKeys).toBe("all");
+    expect(result.resolvedSessionIds).toEqual(["sid-a", "sid-b"]);
     expect(result.resolvedFiles).toEqual(["sid-a.jsonl", "sid-b.jsonl"]);
+    expect(result.hostDest).toBe("./out.tgz");
+    expect(result.bundleBytes).toBeNull();
   });
 
   it("dedupes resolved session ids when the same session is referenced by both alias and canonical key", async () => {
@@ -153,6 +161,7 @@ describe("exportSandboxSessions", () => {
       out: "./out.tgz",
     });
 
+    expect(result.resolvedSessionIds).toEqual(["sid-a"]);
     expect(result.resolvedFiles).toEqual(["sid-a.jsonl"]);
   });
 
@@ -307,7 +316,7 @@ describe("exportSandboxSessions", () => {
     expect(cleanupCall?.[1]).toMatchObject({ ignoreError: true });
   });
 
-  it("emits a JSON manifest when --json is set", async () => {
+  it("emits a JSON manifest with resolved session ids, files, host path, and bundle size when --json is set", async () => {
     captureMock.mockReturnValueOnce(
       makeCapture(JSON.stringify([{ key: "agent:main:main", sessionId: "sid-a" }])),
     );
@@ -318,12 +327,15 @@ describe("exportSandboxSessions", () => {
     });
     expect(consoleLogSpy).toHaveBeenCalledTimes(1);
     const printed = consoleLogSpy.mock.calls[0]?.[0] as string;
-    expect(JSON.parse(printed)).toMatchObject({
+    const parsed = JSON.parse(printed);
+    expect(parsed).toMatchObject({
       sandboxName: "alpha",
       agent: "main",
       selectedKeys: "all",
+      resolvedSessionIds: ["sid-a"],
       resolvedFiles: ["sid-a.jsonl"],
       hostDest: "./out.tgz",
     });
+    expect(parsed).toHaveProperty("bundleBytes");
   });
 });

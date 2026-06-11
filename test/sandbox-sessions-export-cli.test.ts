@@ -78,9 +78,11 @@ describe("sandbox sessions export CLI", () => {
         sandboxName: "alpha",
         agent: "main",
         selectedKeys: "all",
+        resolvedSessionIds: ["sid-a", "sid-b"],
         resolvedFiles: ["sid-a.jsonl", "sid-b.jsonl"],
         hostDest: out,
       });
+      expect(manifest).toHaveProperty("bundleBytes");
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
