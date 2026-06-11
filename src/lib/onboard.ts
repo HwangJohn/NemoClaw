@@ -3053,14 +3053,7 @@ async function createSandbox(
   console.log(`  Creating sandbox '${sandboxName}' (this takes a few minutes on first run)...`);
   const configuredMessagingChannels =
     enabledChannels != null ? [...new Set(enabledChannels)] : activeMessagingChannels;
-  const {
-    messagingAllowedIds,
-    discordGuilds,
-    slackConfig,
-    telegramConfig,
-    wechatConfig,
-    messagingChannelConfig,
-  } = sandboxBuildPatchConfig.prepareSandboxBuildPatchConfig({
+  const { messagingChannelConfig } = sandboxBuildPatchConfig.prepareSandboxBuildPatchConfig({
     channels: MESSAGING_CHANNELS,
     activeMessagingChannels,
     configuredMessagingChannels,
