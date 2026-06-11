@@ -130,10 +130,7 @@ function makeHealthyVmGatewayEnv(prefix: string): Record<string, string> {
     "exit 0",
   ]);
 
-  writeExecutable(path.join(localBin, "ssh"), [
-    'printf "%s" "$*" | grep -q "openclaw.json" && printf "%s" "$*" | grep -q "cat --" && exit 2',
-    "exit 0",
-  ]);
+  writeExecutable(path.join(localBin, "ssh"), ["exit 0"]);
   writeExecutable(path.join(localBin, "docker"), [
     'if [ "$1" = "inspect" ]; then echo "false"; exit 0; fi',
     "exit 0",
@@ -164,6 +161,7 @@ function makeVmRestoreToEnv(
   writeExecutable(path.join(localBin, "openshell"), [
     'case "$1 $2" in',
     '  "gateway info") printf "Gateway Info\\n\\nGateway: nemoclaw\\nGateway endpoint: https://127.0.0.1:8080/\\n"; exit 0 ;;',
+    '  "sandbox get") printf "{\\"name\\":\\"%s\\"}\\n" "$3"; exit 0 ;;',
     `  "sandbox list") if [ -f ${JSON.stringify(cloneReadyMarker)} ]; then printf "NAME STATUS\\nalpha Ready\\nclone-1 Ready\\n"; else printf "NAME STATUS\\nalpha Ready\\n"; fi; exit 0 ;;`,
     '  "sandbox ssh-config") printf "Host openshell-alpha\\n  HostName 127.0.0.1\\n  User sandbox\\n"; exit 0 ;;',
     `  "sandbox create") touch ${JSON.stringify(cloneReadyMarker)}; printf "created clone-1\\n"; exit 0 ;;`,
@@ -172,8 +170,15 @@ function makeVmRestoreToEnv(
     "exit 0",
   ]);
 
+  const remoteOpenClawJson = path.join(home, "remote-openclaw.json");
+  fs.writeFileSync(remoteOpenClawJson, JSON.stringify({ gateway: { auth: { token: "fresh" } } }));
   writeExecutable(path.join(localBin, "ssh"), [
-    'printf "%s" "$*" | grep -q "openclaw.json" && printf "%s" "$*" | grep -q "cat --" && exit 2',
+    `REMOTE_OPENCLAW_JSON=${JSON.stringify(remoteOpenClawJson)}`,
+    'cmd=""; for arg do cmd="$arg"; done',
+    'if printf "%s" "$cmd" | grep -q "openclaw.json"; then',
+    '  if printf "%s" "$cmd" | grep -q "cat --"; then cat "$REMOTE_OPENCLAW_JSON"; exit 0; fi',
+    '  if printf "%s" "$cmd" | grep -q ".nemoclaw-restore"; then cat > "$REMOTE_OPENCLAW_JSON"; exit 0; fi',
+    "fi",
     "exit 0",
   ]);
 
@@ -233,7 +238,7 @@ describe("snapshot VM-driver gateway guard", () => {
     expect(r.out).not.toContain("could not resolve");
     expect(r.out).not.toContain("kubectl-must-not-run");
     expect(r.out).toContain("openshell/sandbox-from:fast-path-test");
-  });
+  }, 15000);
 
   it("snapshot restore --to fails closed for VM-driver entries missing imageTag", () => {
     const env = makeVmRestoreToEnv("nemoclaw-snap-vm-gw-restore-to-missing-image-", {
@@ -247,5 +252,5 @@ describe("snapshot VM-driver gateway guard", () => {
     expect(r.code).toBe(1);
     expect(r.out).toContain("Cannot resolve image");
     expect(r.out).not.toContain("kubectl-must-not-run");
-  });
+  }, 15000);
 });

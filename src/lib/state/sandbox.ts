@@ -31,7 +31,10 @@ import { OPENSHELL_PROBE_TIMEOUT_MS } from "../adapters/openshell/timeouts.js";
 import type { AgentStateFile } from "../agent/defs.js";
 import { loadAgent } from "../agent/defs.js";
 import { isRecord, type UnknownRecord } from "../core/json-types.js";
-import { mergeOpenClawRestoredConfig } from "./openclaw-config-merge.js";
+import {
+  buildOpenClawConfigRestoreInputFromSandbox,
+  shouldMergeOpenClawConfigStateFile,
+} from "./openclaw-config-restore-input.js";
 import { shellQuote } from "../runner.js";
 import { isSensitiveFile, sanitizeConfigFile } from "../security/credential-filter.js";
 import * as registry from "./registry.js";
@@ -857,18 +860,11 @@ function backupStateFile(
   return "backed_up";
 }
 
-function buildStateFileReadCommand(dir: string, spec: StateFileSpec): string {
-  const remotePath = stateFileRemotePath(dir, spec.path);
-  const quotedRemotePath = shellQuote(remotePath);
-  return [
-    `src=${quotedRemotePath}`,
-    '[ ! -e "$src" ] && exit 2',
-    '[ -f "$src" ] && [ ! -L "$src" ] || { echo "unsafe state file: $src" >&2; exit 10; }',
-    'cat -- "$src"',
-  ].join("; ");
-}
-
-function buildStateFileRestoreCommand(dir: string, spec: StateFileSpec): string {
+function buildStateFileRestoreCommand(
+  dir: string,
+  spec: StateFileSpec,
+  refreshOpenClawConfigHash = false,
+): string {
   const remotePath = stateFileRemotePath(dir, spec.path);
   const quotedRemotePath = shellQuote(remotePath);
   if (spec.strategy === "sqlite_backup") {
@@ -886,7 +882,7 @@ function buildStateFileRestoreCommand(dir: string, spec: StateFileSpec): string 
     ].join("; ");
   }
 
-  return [
+  const steps = [
     `dst=${quotedRemotePath}`,
     'parent="$(dirname "$dst")"',
     '[ ! -L "$parent" ] || { echo "refusing symlinked state parent: $parent" >&2; exit 10; }',
@@ -897,42 +893,18 @@ function buildStateFileRestoreCommand(dir: string, spec: StateFileSpec): string 
     'cat > "$tmp"',
     'chmod 640 "$tmp"',
     'mv -f "$tmp" "$dst"',
-  ].join("; ");
-}
+  ];
 
-function readCurrentStateFile(
-  configFile: string,
-  sandboxName: string,
-  dir: string,
-  spec: StateFileSpec,
-): Buffer | null {
-  const command = buildStateFileReadCommand(dir, spec);
-  const result = spawnSync("ssh", [...sshArgs(configFile, sandboxName), command], {
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: 120000,
-    maxBuffer: 256 * 1024 * 1024,
-  });
-  if (result.status === 0 && !result.error && !result.signal) return result.stdout;
-  if (result.status !== 2) {
-    const detail =
-      (result.stderr?.toString() || "").trim() ||
-      result.error?.message ||
-      (result.signal ? `signal ${result.signal}` : `exit ${String(result.status)}`);
-    _log(`WARNING: state file current read ${spec.path} failed: ${detail.substring(0, 200)}`);
+  if (refreshOpenClawConfigHash) {
+    steps.push(
+      'hash_file="${parent}/.config-hash"',
+      '[ ! -L "$hash_file" ] || { echo "refusing symlinked config hash target: $hash_file" >&2; exit 12; }',
+      '(cd "$parent" && sha256sum "$(basename "$dst")" > .config-hash)',
+      'chmod 660 "$hash_file" 2>/dev/null || true',
+    );
   }
-  return null;
-}
 
-function shouldMergeOpenClawConfig(
-  manifest: RebuildManifest,
-  dir: string,
-  spec: StateFileSpec,
-): boolean {
-  return (
-    spec.strategy === "copy" &&
-    spec.path === "openclaw.json" &&
-    (manifest.agentType === "openclaw" || dir.replace(/\/+$/, "").endsWith("/.openclaw"))
-  );
+  return steps.join("; ");
 }
 
 function buildStateFileRestoreInput(
@@ -947,24 +919,16 @@ function buildStateFileRestoreInput(
   const backupContents = readFileSync(localPath);
   if (!mergeOpenClawConfig) return backupContents;
 
-  const currentContents = readCurrentStateFile(configFile, sandboxName, dir, spec);
-  if (!currentContents) {
-    _log(
-      "FAILED: openclaw.json selective merge could not read the current rebuild config; leaving current file intact",
-    );
-    return null;
-  }
-  try {
-    const backedUpConfig = parseJson<unknown>(backupContents.toString("utf-8"));
-    const currentConfig = parseJson<unknown>(currentContents.toString("utf-8"));
-    const merged = mergeOpenClawRestoredConfig(backedUpConfig, currentConfig);
-    return Buffer.from(`${JSON.stringify(merged, null, 2)}\n`);
-  } catch (err) {
-    _log(
-      `FAILED: openclaw.json selective merge failed; leaving current file intact: ${err instanceof Error ? err.message : String(err)}`,
-    );
-    return null;
-  }
+  const result = buildOpenClawConfigRestoreInputFromSandbox({
+    backupContents,
+    dir,
+    log: _log,
+    specPath: spec.path,
+    sshArgs: sshArgs(configFile, sandboxName),
+  });
+  if (result.ok) return result.input;
+  _log(`FAILED: ${result.error}`);
+  return null;
 }
 
 function restoreStateFile(
@@ -978,7 +942,7 @@ function restoreStateFile(
   const localPath = path.join(backupPath, spec.path);
   if (!existsSync(localPath)) return true;
 
-  const command = buildStateFileRestoreCommand(dir, spec);
+  const command = buildStateFileRestoreCommand(dir, spec, mergeOpenClawConfig);
   _log(`Restoring state file ${spec.path} (${spec.strategy})`);
   const input = buildStateFileRestoreInput(
     configFile,
@@ -1573,7 +1537,7 @@ export function restoreSandboxState(sandboxName: string, backupPath: string): Re
           dir,
           spec,
           backupPath,
-          shouldMergeOpenClawConfig(manifest, dir, spec),
+          shouldMergeOpenClawConfigStateFile(manifest.agentType, dir, spec),
         )
       ) {
         restoredFiles.push(spec.path);
