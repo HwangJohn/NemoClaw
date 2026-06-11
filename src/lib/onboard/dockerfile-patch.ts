@@ -5,6 +5,7 @@ import fs from "node:fs";
 
 import { getSandboxInferenceConfig } from "../inference/config";
 import type { WebSearchConfig } from "../inference/web-search";
+import { MessagingSetupApplier } from "../messaging";
 
 const SANDBOX_BASE_IMAGE = "ghcr.io/nvidia/nemoclaw/sandbox-base";
 const PROXY_HOST_RE = /^[A-Za-z0-9._-]+$/;
@@ -93,16 +94,10 @@ export function patchStagedDockerfile(
   provider: string | null = null,
   preferredInferenceApi: string | null = null,
   webSearchConfig: WebSearchConfig | null = null,
-  messagingChannels: string[] = [],
-  messagingAllowedIds: LooseObject = {},
-  discordGuilds: LooseObject = {},
   baseImageRef: string | null = null,
-  telegramConfig: LooseObject = {},
-  wechatConfig: LooseObject = {},
   darwinVmCompat = false,
   inferenceBaseUrlOverride: string | null = null,
   hermesToolGateways: string[] = [],
-  slackConfig: LooseObject = {},
 ): void {
   const sanitizedModel = sanitizeDockerArg(model);
   const sandboxInference = getSandboxInferenceConfig(
@@ -280,40 +275,17 @@ export function patchStagedDockerfile(
     /^ARG NEMOCLAW_DISABLE_DEVICE_AUTH=.*$/m,
     `ARG NEMOCLAW_DISABLE_DEVICE_AUTH=${sanitizeDockerArg("1")}`,
   );
-  if (messagingChannels.length > 0) {
+  const messagingPlan = MessagingSetupApplier.readPlanFromEnv();
+  if (messagingPlan) {
+    const messagingPlanArgPattern = /^ARG NEMOCLAW_MESSAGING_PLAN_B64=.*$/m;
+    if (!messagingPlanArgPattern.test(dockerfile)) {
+      throw new Error(
+        "Dockerfile is missing ARG NEMOCLAW_MESSAGING_PLAN_B64; cannot apply messaging plan.",
+      );
+    }
     dockerfile = dockerfile.replace(
-      /^ARG NEMOCLAW_MESSAGING_CHANNELS_B64=.*$/m,
-      `ARG NEMOCLAW_MESSAGING_CHANNELS_B64=${encodeSanitizedDockerJsonArg(messagingChannels)}`,
-    );
-  }
-  if (Object.keys(messagingAllowedIds).length > 0) {
-    dockerfile = dockerfile.replace(
-      /^ARG NEMOCLAW_MESSAGING_ALLOWED_IDS_B64=.*$/m,
-      `ARG NEMOCLAW_MESSAGING_ALLOWED_IDS_B64=${encodeSanitizedDockerJsonArg(messagingAllowedIds)}`,
-    );
-  }
-  if (Object.keys(discordGuilds).length > 0) {
-    dockerfile = dockerfile.replace(
-      /^ARG NEMOCLAW_DISCORD_GUILDS_B64=.*$/m,
-      `ARG NEMOCLAW_DISCORD_GUILDS_B64=${encodeSanitizedDockerJsonArg(discordGuilds)}`,
-    );
-  }
-  if (telegramConfig && Object.keys(telegramConfig).length > 0) {
-    dockerfile = dockerfile.replace(
-      /^ARG NEMOCLAW_TELEGRAM_CONFIG_B64=.*$/m,
-      `ARG NEMOCLAW_TELEGRAM_CONFIG_B64=${encodeSanitizedDockerJsonArg(telegramConfig)}`,
-    );
-  }
-  if (wechatConfig && Object.keys(wechatConfig).length > 0) {
-    dockerfile = dockerfile.replace(
-      /^ARG NEMOCLAW_WECHAT_CONFIG_B64=.*$/m,
-      `ARG NEMOCLAW_WECHAT_CONFIG_B64=${encodeSanitizedDockerJsonArg(wechatConfig)}`,
-    );
-  }
-  if (slackConfig && Object.keys(slackConfig).length > 0) {
-    dockerfile = dockerfile.replace(
-      /^ARG NEMOCLAW_SLACK_CONFIG_B64=.*$/m,
-      `ARG NEMOCLAW_SLACK_CONFIG_B64=${encodeSanitizedDockerJsonArg(slackConfig)}`,
+      messagingPlanArgPattern,
+      `ARG NEMOCLAW_MESSAGING_PLAN_B64=${sanitizeDockerArg(MessagingSetupApplier.encodePlan(messagingPlan))}`,
     );
   }
   if (hermesToolGateways.length > 0) {
