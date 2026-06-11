@@ -173,7 +173,34 @@ export function StarterPromptButton() {
       }}
       type="button"
     >
-      {BUTTON_LABEL}
+      <svg
+        aria-hidden="true"
+        focusable="false"
+        height="18"
+        style={{ flexShrink: 0 }}
+        viewBox="0 0 24 24"
+        width="18"
+      >
+        <g data-starter-prompt-icon="prompt">
+          <rect
+            fill="none"
+            height="16"
+            rx="3"
+            stroke="currentColor"
+            strokeWidth="2"
+            width="20"
+            x="2"
+            y="4"
+          />
+          <path d="M7 9l3 3-3 3" fill="none" stroke="currentColor" strokeWidth="2" />
+          <path d="M12 15h5" fill="none" stroke="currentColor" strokeWidth="2" />
+        </g>
+        <g data-starter-prompt-icon="check" style={{ display: "none" }}>
+          <circle cx="12" cy="12" fill="none" r="9" stroke="currentColor" strokeWidth="2" />
+          <path d="M8 12.5l2.5 2.5L16 9" fill="none" stroke="currentColor" strokeWidth="2" />
+        </g>
+      </svg>
+      <span data-starter-prompt-label>{BUTTON_LABEL}</span>
     </button>
   );
 }
@@ -191,6 +218,7 @@ async function handleCopyClick(event: { currentTarget: HTMLButtonElement }) {
     copied
       ? "Copied NemoClaw starter prompt to clipboard"
       : "Could not copy NemoClaw starter prompt",
+    copied ? "check" : "prompt",
   );
 }
 
@@ -227,12 +255,14 @@ function setCopyButtonState(
   label: string,
   background: string,
   ariaLabel: string,
+  icon: "prompt" | "check" = "prompt",
 ) {
   if (resetCopyButtonTimer) {
     clearTimeout(resetCopyButtonTimer);
   }
 
-  button.textContent = label;
+  setButtonLabel(button, label);
+  setButtonIcon(button, icon);
   button.setAttribute("aria-label", ariaLabel);
   button.style.background = background;
   button.style.boxShadow = "0 0 0 4px rgb(118 185 0 / 20%)";
@@ -249,12 +279,31 @@ function setCopyButtonState(
   }
 
   resetCopyButtonTimer = setTimeout(() => {
-    button.textContent = BUTTON_LABEL;
+    setButtonLabel(button, BUTTON_LABEL);
+    setButtonIcon(button, "prompt");
     button.setAttribute("aria-label", "Copy NemoClaw starter prompt for terminal beginners");
     button.style.background = "#76B900";
     button.style.boxShadow = "none";
     button.style.width = "";
   }, 2000);
+}
+
+function setButtonIcon(button: HTMLButtonElement, icon: "prompt" | "check") {
+  const promptIcon = button.querySelector<SVGGElement>("[data-starter-prompt-icon='prompt']");
+  const checkIcon = button.querySelector<SVGGElement>("[data-starter-prompt-icon='check']");
+  if (promptIcon) {
+    promptIcon.style.display = icon === "prompt" ? "" : "none";
+  }
+  if (checkIcon) {
+    checkIcon.style.display = icon === "check" ? "" : "none";
+  }
+}
+
+function setButtonLabel(button: HTMLButtonElement, label: string) {
+  const labelElement = button.querySelector<HTMLElement>("[data-starter-prompt-label]");
+  if (labelElement) {
+    labelElement.textContent = label;
+  }
 }
 
 function lockButtonWidth(button: HTMLButtonElement) {
