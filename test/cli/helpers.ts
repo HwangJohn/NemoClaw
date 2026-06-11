@@ -174,7 +174,7 @@ export function runWithEnv(
       // #4710: the post-recovery settle-confirm waits 25s by default; CLI
       // tests disable it to stay fast. Settle behavior has dedicated
       // coverage in process-recovery.test.ts and a targeted CLI test in
-      // connect-recovery.test.ts that overrides this with a short window.
+      // connect-recovery-settle.test.ts that overrides this with a short window.
       NEMOCLAW_GATEWAY_RECOVERY_SETTLE_SECONDS: "0",
       ...env,
     },
