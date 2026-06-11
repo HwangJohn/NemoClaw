@@ -32,10 +32,7 @@ import {
   wslDockerDesktopGpuCompatibilityAction,
 } from "./wsl-docker-desktop-gpu";
 export { getNvidiaCdiSpecPath, parseDockerCdiSpecDirs } from "./docker-cdi";
-export {
-  detectWslDockerDesktopStatus,
-  isWslDockerDesktopRuntime,
-} from "./wsl-docker-desktop-gpu";
+export { isWslDockerDesktopRuntime } from "./wsl-docker-desktop-gpu";
 
 // runner.ts still uses CommonJS-style exports — use require here.
 const { run, runCapture } = require("../runner");

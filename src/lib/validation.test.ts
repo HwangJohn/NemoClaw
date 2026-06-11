@@ -255,9 +255,7 @@ describe("classifySandboxCreateFailure", () => {
   });
 
   it("detects GPU CDI injection failure from 'unresolvable CDI devices' alone", () => {
-    const result = classifySandboxCreateFailure(
-      "unresolvable CDI devices nvidia.com/gpu=all",
-    );
+    const result = classifySandboxCreateFailure("unresolvable CDI devices nvidia.com/gpu=all");
     expect(result.kind).toBe("gpu_cdi_injection_failed");
   });
 

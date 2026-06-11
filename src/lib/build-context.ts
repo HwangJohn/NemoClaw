@@ -207,15 +207,11 @@ export function printSandboxCreateRecoveryHints(
     return;
   }
   if (failure.kind === "gpu_cdi_injection_failed") {
-    console.error(
-      "  Hint: GPU CDI device injection failed inside the OpenShell gateway.",
-    );
+    console.error("  Hint: GPU CDI device injection failed inside the OpenShell gateway.");
     console.error(
       "        The gateway issues `docker create --device nvidia.com/gpu=all` on its own, so",
     );
-    console.error(
-      "        NEMOCLAW_DOCKER_GPU_PATCH=0 does not bypass this path.",
-    );
+    console.error("        NEMOCLAW_DOCKER_GPU_PATCH=0 does not bypass this path.");
     console.error("  Skip GPU passthrough entirely with either:");
     console.error(`    ${CLI_NAME} onboard --no-gpu`);
     console.error("    NEMOCLAW_SANDBOX_GPU=0  (env var, applies to subsequent runs)");

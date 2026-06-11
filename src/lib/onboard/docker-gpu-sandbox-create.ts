@@ -22,6 +22,11 @@ import {
   waitForOpenShellSupervisorReconnect,
 } from "./docker-gpu-patch";
 import { finalizeDockerGpuPatchBackup } from "./docker-gpu-patch-finalize";
+import { detectWslDockerDesktopStatus } from "./wsl-docker-desktop-gpu";
+
+export function isDockerDesktopWslRuntime(): boolean {
+  return detectWslDockerDesktopStatus({}) === "docker-desktop";
+}
 
 type DockerGpuSandboxCreateDeps = Pick<
   DockerGpuPatchDeps,
@@ -311,9 +316,18 @@ export function shouldUseDockerGpuPatchForCreate(
 
 export function resolveDockerGpuSandboxCreatePlan(
   config: DockerGpuSandboxConfig,
-  options: { dockerDriverGateway: boolean; dockerDesktopWsl?: boolean },
+  options: {
+    dockerDriverGateway: boolean;
+    dockerDesktopWsl?: boolean;
+    detectDockerDesktopWsl?: () => boolean;
+  },
 ): DockerGpuSandboxCreatePlan {
-  const useDockerGpuPatch = shouldUseDockerGpuPatchForCreate(config, options);
+  const dockerDesktopWsl =
+    options.dockerDesktopWsl ?? (options.detectDockerDesktopWsl ?? isDockerDesktopWslRuntime)();
+  const useDockerGpuPatch = shouldUseDockerGpuPatchForCreate(config, {
+    dockerDriverGateway: options.dockerDriverGateway,
+    dockerDesktopWsl,
+  });
   const logMessage = config.sandboxGpuEnabled
     ? useDockerGpuPatch
       ? config.hostGpuPlatform === "jetson"

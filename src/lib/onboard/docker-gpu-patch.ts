@@ -538,9 +538,7 @@ export function shouldApplyDockerGpuPatch(
     log(
       "  NEMOCLAW_DOCKER_GPU_PATCH=0 ignored on Docker Desktop WSL: GPU passthrough on this runtime requires the patch.",
     );
-    log(
-      "  Skip GPU passthrough entirely with --no-gpu or NEMOCLAW_SANDBOX_GPU=0.",
-    );
+    log("  Skip GPU passthrough entirely with --no-gpu or NEMOCLAW_SANDBOX_GPU=0.");
     return true;
   }
   return !optedOut;

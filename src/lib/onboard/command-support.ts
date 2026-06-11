@@ -66,7 +66,8 @@ export function buildOnboardFlags(): Record<string, any> {
       description: "Enable direct NVIDIA GPU access inside the sandbox",
     }),
     "no-sandbox-gpu": Flags.boolean({
-      description: "Force CPU sandbox behavior",
+      description:
+        "Force CPU sandbox behavior (equivalent to NEMOCLAW_SANDBOX_GPU=0; pair with --no-gpu on Docker Desktop WSL when CDI injection fails)",
     }),
     "sandbox-gpu-device": Flags.string({
       description:

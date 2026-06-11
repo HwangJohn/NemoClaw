@@ -3464,12 +3464,9 @@ async function createSandbox(
       ...qrSelectedChannels,
     ]),
   ];
-  const dockerDesktopWsl =
-    preflightUtils.detectWslDockerDesktopStatus({}) === "docker-desktop";
   const { useDockerGpuPatch, logMessage: sandboxGpuLogMessage } =
     dockerGpuSandboxCreate.resolveDockerGpuSandboxCreatePlan(effectiveSandboxGpuConfig, {
       dockerDriverGateway: isLinuxDockerDriverGatewayEnabled(),
-      dockerDesktopWsl,
     });
   const initialSandboxPolicy = prepareInitialSandboxCreatePolicy(
     basePolicyPath,
