@@ -326,15 +326,16 @@ export function parseVllmExtraServeArgs(env: NodeJS.ProcessEnv = process.env): s
     if (typeof value !== "string") {
       throw new Error(`${VLLM_EXTRA_ARGS_ENV}[${String(index)}] must be a string.`);
     }
-    if (value.length === 0) {
+    const trimmed = value.trim();
+    if (trimmed.length === 0) {
       throw new Error(`${VLLM_EXTRA_ARGS_ENV}[${String(index)}] must not be empty.`);
     }
-    if (/[\u0000-\u001f\u007f]/.test(value)) {
+    if (/[\u0000-\u001f\u007f]/.test(trimmed)) {
       throw new Error(
         `${VLLM_EXTRA_ARGS_ENV}[${String(index)}] must not contain control characters.`,
       );
     }
-    return value;
+    return trimmed;
   });
 }
 

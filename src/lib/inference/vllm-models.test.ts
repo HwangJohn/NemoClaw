@@ -268,7 +268,7 @@ describe("parseVllmExtraServeArgs", () => {
   it("parses a JSON array of extra vLLM serve argument tokens", () => {
     expect(
       parseVllmExtraServeArgs({
-        [VLLM_EXTRA_ARGS_ENV]: '["--max-num-seqs","2"]',
+        [VLLM_EXTRA_ARGS_ENV]: '[" --max-num-seqs ","2"]',
       } as NodeJS.ProcessEnv),
     ).toEqual(["--max-num-seqs", "2"]);
   });
@@ -288,7 +288,7 @@ describe("parseVllmExtraServeArgs", () => {
 
     expect(() =>
       parseVllmExtraServeArgs({
-        [VLLM_EXTRA_ARGS_ENV]: '[""]',
+        [VLLM_EXTRA_ARGS_ENV]: '["   "]',
       } as NodeJS.ProcessEnv),
     ).toThrow(/\[0\] must not be empty/);
 

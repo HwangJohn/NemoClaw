@@ -379,8 +379,8 @@ The token check runs on the host before any docker pull, so a missing or empty t
 
 ### Add Managed-vLLM Serve Arguments
 
-For advanced vLLM options that are not in the NemoClaw registry yet, export `NEMOCLAW_VLLM_EXTRA_ARGS_JSON` as a JSON array of individual `vllm serve` tokens.
-NemoClaw validates the array before pulling images or downloading models, shell-quotes each token, and appends the tokens after the registry defaults.
+For advanced vLLM options that are not in the NemoClaw registry yet, export `NEMOCLAW_VLLM_EXTRA_ARGS_JSON` as a JSON array of individual non-blank `vllm serve` tokens.
+NemoClaw trims and validates the array before pulling images or downloading models, shell-quotes each token, and appends the tokens after the registry defaults.
 
 ```bash
 NEMOCLAW_PROVIDER=install-vllm \

@@ -52,6 +52,7 @@ describe("isGatewayTcpReady (#3111)", () => {
       teardown = null;
     }
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it("resolves true when something is accepting connections", async () => {
