@@ -409,8 +409,10 @@ export function verifyGpuSandboxAfterReady(
     throw error;
   }
 
-  // When NEMOCLAW_DOCKER_GPU_PATCH=0, useDockerGpuPatch is false and there is no
-  // GPU-patched sandbox to gate, so skip the local inference reachability gate.
+  // When the resolved create plan disabled the Docker GPU patch (e.g.
+  // NEMOCLAW_DOCKER_GPU_PATCH=0 honoured outside Docker Desktop WSL), there is
+  // no GPU-patched sandbox to gate, so skip the local inference reachability
+  // gate.
   if (!options.useDockerGpuPatch) return;
   const verification = verifyDockerGpuSandboxLocalInference(config, provider, {
     sandboxName: options.sandboxName,

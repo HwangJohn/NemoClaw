@@ -7,6 +7,7 @@ import type {
   DockerGpuPatchFailureContext,
   DockerGpuPatchResult,
 } from "../../../dist/lib/onboard/docker-gpu-patch";
+import { buildSandboxGpuCreateArgs } from "../../../dist/lib/onboard/sandbox-gpu-create";
 import {
   createDockerGpuSandboxCreatePatch,
   resolveDockerGpuSandboxCreatePlan,
@@ -255,6 +256,46 @@ describe("resolveDockerGpuSandboxCreatePlan Docker Desktop WSL handling", () => 
         },
       );
       expect(plan.useDockerGpuPatch).toBe(false);
+    } finally {
+      if (originalEnv === undefined) delete process.env.NEMOCLAW_DOCKER_GPU_PATCH;
+      else process.env.NEMOCLAW_DOCKER_GPU_PATCH = originalEnv;
+    }
+  });
+
+  it("suppresses the openshell sandbox create --gpu flag on Docker Desktop WSL when the opt-out is ignored", () => {
+    const originalEnv = process.env.NEMOCLAW_DOCKER_GPU_PATCH;
+    process.env.NEMOCLAW_DOCKER_GPU_PATCH = "0";
+    try {
+      const sandboxGpuConfig = { sandboxGpuEnabled: true };
+      const plan = resolveDockerGpuSandboxCreatePlan(sandboxGpuConfig, {
+        dockerDriverGateway: true,
+        detectDockerDesktopWsl: () => true,
+      });
+      expect(plan.useDockerGpuPatch).toBe(true);
+      const createArgs = buildSandboxGpuCreateArgs(sandboxGpuConfig, {
+        suppressGpuFlag: plan.useDockerGpuPatch,
+      });
+      expect(createArgs).toEqual([]);
+    } finally {
+      if (originalEnv === undefined) delete process.env.NEMOCLAW_DOCKER_GPU_PATCH;
+      else process.env.NEMOCLAW_DOCKER_GPU_PATCH = originalEnv;
+    }
+  });
+
+  it("emits --gpu when the patch is disabled outside Docker Desktop WSL", () => {
+    const originalEnv = process.env.NEMOCLAW_DOCKER_GPU_PATCH;
+    process.env.NEMOCLAW_DOCKER_GPU_PATCH = "0";
+    try {
+      const sandboxGpuConfig = { sandboxGpuEnabled: true };
+      const plan = resolveDockerGpuSandboxCreatePlan(sandboxGpuConfig, {
+        dockerDriverGateway: true,
+        detectDockerDesktopWsl: () => false,
+      });
+      expect(plan.useDockerGpuPatch).toBe(false);
+      const createArgs = buildSandboxGpuCreateArgs(sandboxGpuConfig, {
+        suppressGpuFlag: plan.useDockerGpuPatch,
+      });
+      expect(createArgs).toEqual(["--gpu"]);
     } finally {
       if (originalEnv === undefined) delete process.env.NEMOCLAW_DOCKER_GPU_PATCH;
       else process.env.NEMOCLAW_DOCKER_GPU_PATCH = originalEnv;

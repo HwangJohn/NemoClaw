@@ -128,7 +128,10 @@ export function classifySandboxCreateFailure(output = ""): SandboxCreateFailure 
   ) {
     return { kind: "image_upload_container_missing", uploadedToGateway };
   }
-  if (/CDI device injection failed|unresolvable CDI devices?/i.test(text)) {
+  if (
+    /(CDI device injection failed|unresolvable CDI devices?)[^\n]*nvidia\.com\/gpu/i.test(text) ||
+    /nvidia\.com\/gpu[^\n]*(CDI device injection failed|unresolvable CDI devices?)/i.test(text)
+  ) {
     return { kind: "gpu_cdi_injection_failed", uploadedToGateway };
   }
   if (/Created sandbox:/i.test(text)) {
