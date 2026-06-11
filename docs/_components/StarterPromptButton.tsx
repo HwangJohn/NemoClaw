@@ -5,7 +5,7 @@
 
 declare const React: unknown;
 
-const BUTTON_LABEL = "Copy Prompt for Your Agent";
+const BUTTON_LABEL = "Copy Starter Prompt";
 const STARTER_PROMPT = `# NemoClaw Instructions for a Non-Technical User
 
 You are helping me install and run NVIDIA NemoClaw from this local coding-agent UI. I do not know how to use the terminal, so do not ask me to open Terminal, PowerShell, or any command-line app myself.
@@ -187,7 +187,7 @@ export function StarterPromptButton() {
 async function handleCopyClick(event: { currentTarget: HTMLButtonElement }) {
   const button = event.currentTarget;
   lockButtonWidth(button);
-  setCopyButtonState(button, "Copying...", "#8DD600", "Copying NemoClaw starter prompt");
+  setCopyButtonState(button, "Copying...", "#8DD600", "Copying Prompt");
 
   const copied = await copyText(STARTER_PROMPT);
   setCopyButtonState(
