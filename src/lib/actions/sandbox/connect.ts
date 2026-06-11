@@ -51,7 +51,7 @@ import {
 import { preflightVllmModelEnvOrExit } from "./connect-vllm-preflight";
 import { isDockerRuntimeDown, printDockerRuntimeDownGuidance } from "./gateway-failure-classifier";
 import { ensureLiveSandboxOrExit, printGatewayLifecycleHint } from "./gateway-state";
-import { checkAndRecoverSandboxProcesses } from "./process-recovery";
+import { checkAndRecoverSandboxProcesses, printGatewayWedgeDiagnostics } from "./process-recovery";
 import { applyOpenShellVmDnsMonkeypatch, shouldApplyVmDnsMonkeypatch } from "./vm-dns-monkeypatch";
 
 const NEMOCLAW_GATEWAY_NAME = "nemoclaw";
@@ -218,6 +218,10 @@ function runSandboxConnectProbe(sandboxName: string): void {
   console.error(
     `  Probe failed: ${agentName} gateway is not running in '${sandboxName}' and automatic recovery failed.`,
   );
+  // Surface the #4710 wedge signature: recovery ran with quiet=true, so this
+  // is the operator's only window into a gateway that served briefly and
+  // then dropped its listener.
+  printGatewayWedgeDiagnostics(sandboxName);
   console.error("  Check /tmp/gateway.log inside the sandbox for details.");
   process.exit(1);
 }

@@ -386,6 +386,25 @@ export function collectGatewayWedgeDiagnostics(
 }
 
 /**
+ * Print the #4710 wedge signature (if present) to stderr so the operator
+ * sees why the gateway is unreachable despite a live process. Returns true
+ * when signature lines were found and printed.
+ */
+export function printGatewayWedgeDiagnostics(sandboxName: string): boolean {
+  const wedgeLines = collectGatewayWedgeDiagnostics(sandboxName);
+  if (wedgeLines.length === 0) {
+    return false;
+  }
+  console.error(
+    "  The gateway served briefly and then dropped its HTTP listener (#4710 wedge signature):",
+  );
+  for (const line of wedgeLines) {
+    console.error(`    ${line}`);
+  }
+  return true;
+}
+
+/**
  * Re-establish the dashboard port forward to the sandbox.
  * Uses the recorded dashboard port for OpenClaw sandboxes, or the agent's
  * declared forward port when a non-OpenClaw agent is active.
@@ -545,15 +564,7 @@ export function checkAndRecoverSandboxProcesses(
     if (!waitForRecoveredSandboxGateway(sandboxName, { quiet })) {
       if (!quiet) {
         console.error("  Gateway process started but is not responding.");
-        const wedgeLines = collectGatewayWedgeDiagnostics(sandboxName);
-        if (wedgeLines.length > 0) {
-          console.error(
-            "  The gateway served briefly and then dropped its HTTP listener (#4710 wedge signature):",
-          );
-          for (const line of wedgeLines) {
-            console.error(`    ${line}`);
-          }
-        }
+        printGatewayWedgeDiagnostics(sandboxName);
         console.error("  Check /tmp/gateway.log inside the sandbox for details.");
         console.error("  Connect to the sandbox and run manually:");
         console.error(
