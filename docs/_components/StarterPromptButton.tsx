@@ -145,13 +145,7 @@ NEMOCLAW_NON_INTERACTIVE=1 SLACK_BOT_TOKEN=<local-secret> SLACK_APP_TOKEN=<local
 nemoclaw <sandbox-name> rebuild
 \`\`\`
 
-Use the official NemoClaw Markdown documentation as the source of truth. Start with the prerequisites for my chosen agent, then the matching quickstart install command:
-
-\`\`\`shell
-curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash
-\`\`\`
-
-After the install command finishes, summarize the output for me and choose the next command or prompt response with my approval.`;
+Use the official NemoClaw Markdown documentation as the source of truth. Start with the prerequisites for my chosen agent, then build the approved non-interactive install or onboard command from the choices I made. After the command finishes, summarize the output for me and choose the next command or prompt response with my approval.`;
 
 let resetCopyButtonTimer: ReturnType<typeof setTimeout> | null = null;
 
