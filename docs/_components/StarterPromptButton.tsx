@@ -5,12 +5,12 @@
 
 declare const React: unknown;
 
-const BUTTON_LABEL = "Copy prompt for your agent";
-const STARTER_PROMPT = `# NemoClaw starter instructions for a non-technical user
+const BUTTON_LABEL = "Copy Prompt for Your Agent";
+const STARTER_PROMPT = `# NemoClaw Instructions for a Non-Technical User
 
 You are helping me install and run NVIDIA NemoClaw from this local coding-agent UI. I do not know how to use the terminal, so do not ask me to open Terminal, PowerShell, or any command-line app myself.
 
-## How to help me
+## How to Help Me
 
 - Ask exactly one question at a time.
 - Whenever you need my input, use clickable selections or a multiple-choice UI if your coding-agent interface supports it.
@@ -31,7 +31,7 @@ You are helping me install and run NVIDIA NemoClaw from this local coding-agent 
 
 Help me install NemoClaw, complete the onboarding prompts, and launch my first sandboxed agent.
 
-## Choose my agent and docs variant
+## Choose My Agent and Docs Variant
 
 Before giving install instructions, ask me which supported agent I want to use:
 
@@ -53,7 +53,7 @@ Use these Markdown documentation pages as the first sources:
 - Hermes prerequisites: https://docs.nvidia.com/nemoclaw/latest/user-guide/hermes/get-started/prerequisites.md
 - Hermes quickstart: https://docs.nvidia.com/nemoclaw/latest/user-guide/hermes/get-started/quickstart.md
 
-## Avoid getting stuck on interactive NemoClaw prompts
+## Avoid Getting Stuck on Interactive NemoClaw Prompts
 
 Do not start the interactive installer first and then try to answer terminal menus after they appear. Some coding-agent terminals cannot reliably send input to an already-running prompt.
 
@@ -65,7 +65,7 @@ Instead, collect the required choices from me first, one clickable selection at 
 - For hosted or compatible providers, help me set the required credential in the local command environment without pasting the real value into chat.
 - Never echo a command that contains a real secret. Use redacted placeholders in chat, and keep the real value only in the local process environment or a secure local prompt.
 
-## Handle tokens securely and visually
+## Handle Tokens Securely and Visually
 
 When you need an API key, bot token, app token, or other secret, prefer a local visual credential form instead of chat.
 
@@ -107,7 +107,7 @@ NEMOCLAW_PROVIDER=ollama NEMOCLAW_MODEL=<approved-model-or-omit-this-variable> N
 
 If non-interactive mode cannot cover a later prompt, stop before running the interactive command. Ask me one selection question, then choose either a supported non-interactive environment variable or a rerun plan. Do not leave a command waiting at \`Choose [1]:\`.
 
-## Configure messaging channels after non-interactive onboarding
+## Configure Messaging Channels after Non-Interactive Onboarding
 
 Non-interactive onboarding can skip the interactive messaging-channel picker. After the sandbox is created, ask whether I want to set up messaging as a separate one-question selection.
 
@@ -192,7 +192,7 @@ async function handleCopyClick(event: { currentTarget: HTMLButtonElement }) {
   const copied = await copyText(STARTER_PROMPT);
   setCopyButtonState(
     button,
-    copied ? "Copied to clipboard" : "Copy failed. Try again",
+    copied ? "Copied to Clipboard" : "Copy Failed. Try Again",
     copied ? "#8DD600" : "#F97316",
     copied
       ? "Copied NemoClaw starter prompt to clipboard"
