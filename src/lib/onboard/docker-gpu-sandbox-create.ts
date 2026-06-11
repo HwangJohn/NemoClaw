@@ -288,10 +288,16 @@ function buildFailureContext(
 
 export function shouldUseDockerGpuPatchForCreate(
   config: DockerGpuSandboxConfig,
-  options: { dockerDriverGateway: boolean; log?: (message: string) => void },
+  options: {
+    dockerDriverGateway: boolean;
+    dockerDesktopWsl?: boolean;
+    log?: (message: string) => void;
+  },
 ): boolean {
   const enabled = shouldApplyDockerGpuPatch(config, {
     dockerDriverGateway: options.dockerDriverGateway,
+    dockerDesktopWsl: options.dockerDesktopWsl,
+    log: options.log,
   });
   if (enabled) {
     options.log?.(
@@ -305,7 +311,7 @@ export function shouldUseDockerGpuPatchForCreate(
 
 export function resolveDockerGpuSandboxCreatePlan(
   config: DockerGpuSandboxConfig,
-  options: { dockerDriverGateway: boolean },
+  options: { dockerDriverGateway: boolean; dockerDesktopWsl?: boolean },
 ): DockerGpuSandboxCreatePlan {
   const useDockerGpuPatch = shouldUseDockerGpuPatchForCreate(config, options);
   const logMessage = config.sandboxGpuEnabled

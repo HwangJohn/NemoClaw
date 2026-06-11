@@ -247,6 +247,25 @@ describe("classifySandboxCreateFailure", () => {
     expect(result.kind).toBe("tls_cert_mismatch");
   });
 
+  it("detects GPU CDI injection failure from 'CDI device injection failed'", () => {
+    const result = classifySandboxCreateFailure(
+      "Error response from daemon: CDI device injection failed: unresolvable CDI devices nvidia.com/gpu=all",
+    );
+    expect(result.kind).toBe("gpu_cdi_injection_failed");
+  });
+
+  it("detects GPU CDI injection failure from 'unresolvable CDI devices' alone", () => {
+    const result = classifySandboxCreateFailure(
+      "unresolvable CDI devices nvidia.com/gpu=all",
+    );
+    expect(result.kind).toBe("gpu_cdi_injection_failed");
+  });
+
+  it("does NOT misclassify generic CDI mentions as gpu_cdi_injection_failed", () => {
+    const result = classifySandboxCreateFailure("CDI spec directories configured");
+    expect(result.kind).toBe("unknown");
+  });
+
   it("does NOT classify generic TLS transport errors as tls_cert_mismatch", () => {
     expect(classifySandboxCreateFailure("TLS error: connection refused by proxy").kind).toBe(
       "unknown",
