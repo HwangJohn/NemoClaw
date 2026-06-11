@@ -371,6 +371,67 @@ describe("E2E reusable workflow contract", () => {
     expect(exportStep?.run).toContain('delimiter = f"EOF_{secrets.token_hex(16)}"');
   });
 
+  it("uploads cloud onboard traces as an always-on nightly artifact", () => {
+    const callInputs =
+      runnerWorkflow.on?.workflow_call?.inputs ?? runnerWorkflow.true?.workflow_call?.inputs ?? {};
+    const runStep = runnerWorkflow.jobs.run.steps.find((step) => step.name === "Run E2E script");
+    const sanitizeStep = action.runs.steps.find(
+      (step) => step.name === "Sanitize E2E trace artifacts",
+    );
+    const alwaysUploadStep = action.runs.steps.find((step) => step.name === "Upload E2E artifacts");
+    const workflowActionCheckout = runnerWorkflow.jobs.run.steps.find(
+      (step) => step.name === "Checkout workflow action",
+    );
+    const cloudOnboardJob = nightlyWorkflow.jobs["cloud-onboard-e2e"];
+    const envJson = JSON.parse(cloudOnboardJob.with?.env_json ?? "{}") as Record<string, unknown>;
+
+    expect(callInputs.always_artifact_name?.default).toBe("");
+    expect(callInputs.always_artifact_path?.default).toBe("");
+    expect(callInputs.always_artifact_sanitize_trace_source_path?.default).toBe("");
+    expect(runStep?.with?.["always-artifact-name"]).toBe("${{ inputs.always_artifact_name }}");
+    expect(runStep?.with?.["always-artifact-path"]).toBe("${{ inputs.always_artifact_path }}");
+    expect(runStep?.with?.["always-artifact-sanitize-trace-source-path"]).toBe(
+      "${{ inputs.always_artifact_sanitize_trace_source_path }}",
+    );
+    expect(sanitizeStep?.if).toBe(
+      "always() && inputs.always-artifact-sanitize-trace-source-path != '' && inputs.always-artifact-path != ''",
+    );
+    expect(sanitizeStep?.run).toContain(
+      'node "$GITHUB_ACTION_PATH/../../../scripts/ci/sanitize-trace-artifacts.js"',
+    );
+    expect(workflowActionCheckout?.with?.["sparse-checkout"]).toContain(
+      "scripts/ci/sanitize-trace-artifacts.js",
+    );
+    expect(alwaysUploadStep?.if).toBe(
+      "always() && inputs.always-artifact-name != '' && inputs.always-artifact-path != ''",
+    );
+    expect(cloudOnboardJob.with?.always_artifact_name).toBe("cloud-onboard-traces");
+    expect(cloudOnboardJob.with?.always_artifact_path).toBe("/tmp/nemoclaw-traces-sanitized/");
+    expect(cloudOnboardJob.with?.always_artifact_sanitize_trace_source_path).toBe(
+      "/tmp/nemoclaw-traces/",
+    );
+    expect(envJson.NEMOCLAW_TRACE_DIR).toBe("/tmp/nemoclaw-traces");
+  });
+
+  it("compares cloud onboard trace phases against the prior release commit run", () => {
+    const scorecardStep = nightlyWorkflow.jobs.scorecard.steps?.find(
+      (step) => step.name === "Generate nightly scorecard",
+    );
+
+    expect(scorecardStep?.with?.script).toContain(
+      "const ONBOARD_PHASE_PREFIX = 'nemoclaw.onboard.phase.'",
+    );
+    expect(scorecardStep?.with?.script).toContain("const ONBOARD_PHASE_ORDER = [");
+    expect(scorecardStep?.with?.script).toContain("head_sha: tag.sha");
+    expect(scorecardStep?.with?.script).toContain("if (phaseRows.length === 0) return []");
+    expect(scorecardStep?.with?.script).toContain("if (phaseRows.length === 0) {");
+    expect(scorecardStep?.with?.script).toContain("return traceTimingResult(traceLine)");
+    expect(scorecardStep?.with?.script).toContain("Top phase changes: ${topPhaseChanges}.");
+    expect(scorecardStep?.with?.script).toContain("## Cloud Onboard Trace Timing");
+    expect(scorecardStep?.with?.script).toContain("| Phase | Current | Previous | Delta |");
+    expect(scorecardStep?.with?.script).toContain("lines.push(...traceSummaryLines)");
+  });
+
   it("keeps env_json valid and aligned with target-ref installs", () => {
     const reusableJobs = reusableNightlyJobs(nightlyWorkflow);
 

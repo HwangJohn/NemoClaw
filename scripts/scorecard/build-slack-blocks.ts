@@ -36,6 +36,8 @@ type ScorecardData = {
   failedJobs: { name: string; url: string | null }[];
   /** Pre-rendered trend line, prefixed with "Trend: ". */
   trendLine: string;
+  /** Pre-rendered trace timing line, prefixed with "Trace: ". */
+  traceTimingLine?: string;
   /** Direct link to the current run. */
   runUrl: string;
 };
@@ -138,6 +140,16 @@ function buildBlocks(data: ScorecardData): SlackBlock[] {
       },
     ],
   });
+
+  if (data.traceTimingLine) {
+    blocks.push({
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: data.traceTimingLine.replace(/^Trace:\s*/, "*Trace:* "),
+      },
+    });
+  }
 
   const workflowUrl = data.runUrl.replace(/\/runs\/\d+$/, "/workflows/nightly-e2e.yaml");
   blocks.push({

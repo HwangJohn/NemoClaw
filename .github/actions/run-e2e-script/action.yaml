@@ -5,7 +5,7 @@ name: Run E2E script
 
 description: >-
   Runs a repository E2E script from an already-checked-out workspace and uploads
-  the configured artifacts when the script fails.
+  configured failure artifacts plus optional always-on artifacts.
 
 inputs:
   script:
@@ -21,6 +21,18 @@ inputs:
   artifact-path:
     description: Newline-capable artifact path glob list.
     required: true
+  always-artifact-name:
+    description: Optional artifact name to upload after every script run.
+    required: false
+    default: ""
+  always-artifact-path:
+    description: Optional newline-capable artifact path glob list to upload after every script run.
+    required: false
+    default: ""
+  always-artifact-sanitize-trace-source-path:
+    description: Optional raw trace directory to sanitize into always-artifact-path before upload.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -62,3 +74,22 @@ runs:
         name: ${{ inputs.artifact-name }}
         path: ${{ inputs.artifact-path }}
         if-no-files-found: ignore
+
+    - name: Sanitize E2E trace artifacts
+      if: always() && inputs.always-artifact-sanitize-trace-source-path != '' && inputs.always-artifact-path != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        RAW_TRACE_PATH: ${{ inputs.always-artifact-sanitize-trace-source-path }}
+        SANITIZED_TRACE_PATH: ${{ inputs.always-artifact-path }}
+      run: |
+        set -euo pipefail
+        node "$GITHUB_ACTION_PATH/../../../scripts/ci/sanitize-trace-artifacts.js" "$RAW_TRACE_PATH" "$SANITIZED_TRACE_PATH"
+
+    - name: Upload E2E artifacts
+      if: always() && inputs.always-artifact-name != '' && inputs.always-artifact-path != ''
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: ${{ inputs.always-artifact-name }}
+        path: ${{ inputs.always-artifact-path }}
+        if-no-files-found: warn
