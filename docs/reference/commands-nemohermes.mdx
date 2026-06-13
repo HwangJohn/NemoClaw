@@ -525,7 +525,7 @@ nemohermes my-assistant exec --workdir /sandbox/workspace -- ls -la
 
 Everything after `--` is forwarded verbatim to the sandbox command, including flags the inner command needs.
 The exit code is the remote command's exit code.
-Caller stdin is forwarded by default for compatibility with terminal, pipe, and SSH workflows.
+NemoClaw forwards caller stdin by default for compatibility with terminal, pipe, and SSH workflows.
 For scripted SSH or CI one-shot commands that should not read caller stdin, pass `--no-stdin` so the sandbox command cannot wait on an inherited pipe.
 Pass `--stdin` to force forwarding when a wrapper or alias sets `--no-stdin`.
 
@@ -758,7 +758,7 @@ Use `--` to separate `exec` options from the command you want to run inside the 
 nemohermes my-assistant exec [--workdir <dir>] [--tty|--no-tty] [--timeout <s>] [--stdin|--no-stdin] -- <cmd> [args...]
 ```
 
-Caller stdin is forwarded by default for compatibility with terminal, pipe, and SSH workflows.
+NemoClaw forwards caller stdin by default for compatibility with terminal, pipe, and SSH workflows.
 For scripted SSH or CI one-shot commands that should not read caller stdin, pass `--no-stdin` so the command cannot wait on an inherited pipe.
 Pass `--stdin` to force forwarding when a wrapper or alias sets `--no-stdin`.
 
