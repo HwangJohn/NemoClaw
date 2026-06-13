@@ -523,12 +523,21 @@ nemohermes my-assistant exec --workdir /sandbox/workspace -- ls -la
 
 Everything after `--` is forwarded verbatim to the sandbox command, including flags the inner command needs.
 The exit code is the remote command's exit code.
+Caller stdin is forwarded by default for compatibility with terminal, pipe, and SSH workflows.
+For scripted SSH or CI one-shot commands that should not read caller stdin, pass `--no-stdin` so the sandbox command cannot wait on an inherited pipe.
+Pass `--stdin` to force forwarding when a wrapper or alias sets `--no-stdin`.
+
+```bash
+printf 'hello\n' | $$nemoclaw my-assistant exec -- cat
+ssh dgx-spark '$$nemoclaw my-assistant exec --no-stdin -- pwd'
+```
 
 | Flag | Description |
 |------|-------------|
 | `--workdir <dir>` | Working directory inside the sandbox |
 | `--tty` / `--no-tty` | Allocate a pseudo-terminal; defaults to auto-detection (on when stdin and stdout are terminals) |
 | `--timeout <seconds>` | Timeout in seconds (`0` means no timeout) |
+| `--stdin` / `--no-stdin` | Force caller stdin forwarding or closure. Default: forward stdin |
 
 ### Advanced Sandbox Maintenance Commands
 
@@ -744,14 +753,19 @@ The command runs as the sandbox user with `HOME=/sandbox` and exits with the rem
 Use `--` to separate `exec` options from the command you want to run inside the sandbox.
 
 ```bash
-$$nemoclaw my-assistant exec [--workdir <dir>] [--tty|--no-tty] [--timeout <s>] -- <cmd> [args...]
+$$nemoclaw my-assistant exec [--workdir <dir>] [--tty|--no-tty] [--timeout <s>] [--stdin|--no-stdin] -- <cmd> [args...]
 ```
+
+Caller stdin is forwarded by default for compatibility with terminal, pipe, and SSH workflows.
+For scripted SSH or CI one-shot commands that should not read caller stdin, pass `--no-stdin` so the command cannot wait on an inherited pipe.
+Pass `--stdin` to force forwarding when a wrapper or alias sets `--no-stdin`.
 
 | Flag | Description |
 |------|-------------|
 | `--workdir <dir>` | Set the working directory inside the sandbox |
 | `--tty`, `--no-tty` | Allocate or disable a pseudo-terminal; defaults to auto-detection |
 | `--timeout <s>` | Timeout in seconds. Use `0` for no timeout |
+| `--stdin`, `--no-stdin` | Force caller stdin forwarding or closure. Default: forward stdin |
 
 ### `$$nemoclaw <name> logs`
 

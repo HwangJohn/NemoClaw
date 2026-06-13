@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { buildOpenshellExecArgs, computeExitCode } from "./exec";
+import { buildOpenshellExecArgs, buildSandboxExecStdio, computeExitCode } from "./exec";
 
 describe("buildOpenshellExecArgs", () => {
   it("targets the sandbox by name and forwards the user command after --", () => {
@@ -82,6 +82,20 @@ describe("buildOpenshellExecArgs", () => {
     const argv = buildOpenshellExecArgs("name; rm -rf /", ["echo", "ok"]);
     expect(argv).toContain("name; rm -rf /");
     expect(argv).toEqual(["sandbox", "exec", "--name", "name; rm -rf /", "--", "echo", "ok"]);
+  });
+});
+
+describe("buildSandboxExecStdio", () => {
+  it("preserves legacy inherited stdin when callers do not choose a stdin mode", () => {
+    expect(buildSandboxExecStdio()).toBe("inherit");
+  });
+
+  it("closes stdin when explicitly disabled for one-shot commands", () => {
+    expect(buildSandboxExecStdio({ stdin: false })).toEqual(["ignore", "inherit", "inherit"]);
+  });
+
+  it("inherits stdin when explicitly requested", () => {
+    expect(buildSandboxExecStdio({ stdin: true })).toBe("inherit");
   });
 });
 

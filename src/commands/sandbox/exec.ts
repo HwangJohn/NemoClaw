@@ -10,11 +10,14 @@ export default class SandboxExecCommand extends NemoClawCommand {
   static strict = false;
   static summary = "Run a command non-interactively in a running sandbox";
   static description =
-    "Run a single command inside a running sandbox via the OpenShell exec endpoint. The command runs as the sandbox user (HOME=/sandbox) and exits with the remote command's exit code. Use `--` to separate exec options from the user command.";
-  static usage = ["<name> [--workdir <dir>] [--tty|--no-tty] [--timeout <s>] -- <cmd> [args...]"];
+    "Run a single command inside a running sandbox via the OpenShell exec endpoint. The command runs as the sandbox user (HOME=/sandbox) and exits with the remote command's exit code. Use `--` to separate exec options from the user command. Stdin is forwarded by default for compatibility; pass `--no-stdin` for SSH/CI one-shot commands that should not read caller stdin.";
+  static usage = [
+    "<name> [--workdir <dir>] [--tty|--no-tty] [--timeout <s>] [--stdin|--no-stdin] -- <cmd> [args...]",
+  ];
   static examples = [
     "<%= config.bin %> sandbox exec alpha -- openclaw agent --agent main -m hi",
     "<%= config.bin %> sandbox exec alpha --workdir /sandbox -- ls -la",
+    "printf 'hello' | <%= config.bin %> sandbox exec alpha -- cat",
   ];
   static args = {
     sandboxName: Args.string({ name: "sandbox", description: "Sandbox name", required: true }),
@@ -29,6 +32,10 @@ export default class SandboxExecCommand extends NemoClawCommand {
       min: 0,
       description: "Timeout in seconds (0 = no timeout)",
     }),
+    stdin: Flags.boolean({
+      allowNo: true,
+      description: "Pass caller stdin through to the sandbox command; --no-stdin closes it",
+    }),
   };
 
   public async run(): Promise<void> {
@@ -38,6 +45,12 @@ export default class SandboxExecCommand extends NemoClawCommand {
       workdir: flags.workdir,
       tty: typeof flags.tty === "boolean" ? flags.tty : null,
       timeoutSeconds: flags.timeout,
+      stdin: shouldInheritSandboxExecStdin(flags.stdin),
     });
   }
+}
+
+export function shouldInheritSandboxExecStdin(flagValue: boolean | undefined): boolean {
+  if (typeof flagValue === "boolean") return flagValue;
+  return true;
 }

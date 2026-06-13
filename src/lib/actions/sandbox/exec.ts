@@ -1,13 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { spawnSync } from "node:child_process";
+import { type StdioOptions, spawnSync } from "node:child_process";
 import os from "node:os";
 
 export type SandboxExecOptions = {
   workdir?: string;
   tty?: boolean | null;
   timeoutSeconds?: number;
+  stdin?: boolean;
 };
 
 type SpawnLikeResult = {
@@ -47,6 +48,10 @@ export function computeExitCode(result: SpawnLikeResult): {
   return { code: 1 };
 }
 
+export function buildSandboxExecStdio(options: SandboxExecOptions = {}): StdioOptions {
+  return options.stdin === false ? ["ignore", "inherit", "inherit"] : "inherit";
+}
+
 function exitWithSpawnResult(result: SpawnLikeResult): never {
   const { code, errorMessage } = computeExitCode(result);
   if (errorMessage) {
@@ -65,14 +70,14 @@ export async function execSandbox(
   const { getOpenshellBinary } = require("../../adapters/openshell/runtime");
   if (command.length === 0) {
     console.error(
-      `  Usage: ${CLI_NAME} ${sandboxName} exec [--workdir <dir>] [--tty|--no-tty] [--timeout <s>] -- <cmd> [args...]`,
+      `  Usage: ${CLI_NAME} ${sandboxName} exec [--workdir <dir>] [--tty|--no-tty] [--timeout <s>] [--stdin|--no-stdin] -- <cmd> [args...]`,
     );
     process.exit(2);
   }
   const result = spawnSync(
     getOpenshellBinary(),
     buildOpenshellExecArgs(sandboxName, command, options),
-    { stdio: "inherit" },
+    { stdio: buildSandboxExecStdio(options) },
   );
   exitWithSpawnResult(result);
 }
