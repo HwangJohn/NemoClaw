@@ -94,6 +94,7 @@ interface SessionIndexEntry {
 // interpreted as a tar option (`--checkpoint-action=...`, etc.) when appended
 // to the argv. Hyphens and underscores remain permitted as inner characters.
 const SAFE_TOKEN_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const ONBOARD_WARMUP_SESSION_ID_PREFIX = "nemoclaw-onboard-warmup-";
 
 export async function exportSandboxSessions(
   opts: SessionsExportOptions,
@@ -323,7 +324,10 @@ function resolveSelectedFiles(
 
   const entries: { key: string; sessionId: string }[] = [];
   if (keys.length === 0) {
-    for (const entry of index) entries.push(entry);
+    for (const entry of index) {
+      if (isInternalSessionEntry(entry)) continue;
+      entries.push(entry);
+    }
   } else {
     const missing: string[] = [];
     for (const key of keys) {
@@ -359,6 +363,10 @@ function resolveSelectedFiles(
     if (includeTrajectory) files.push(`${sessionId}.trajectory.jsonl`);
   }
   return { sessionIds, files, sessions };
+}
+
+function isInternalSessionEntry(entry: SessionIndexEntry): boolean {
+  return entry.sessionId.startsWith(ONBOARD_WARMUP_SESSION_ID_PREFIX);
 }
 
 function normaliseToCanonical(agent: string, key: string): string {

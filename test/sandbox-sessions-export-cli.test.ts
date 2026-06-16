@@ -91,6 +91,44 @@ describe("sandbox sessions export CLI", () => {
     }
   });
 
+  it("excludes NemoClaw onboard warmup sessions from an all-session export", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-cli-sessions-export-warmup-"));
+    try {
+      writeSandboxRegistry(home);
+      const openshellLog = path.join(home, "openshell-calls.log");
+      const localBin = buildStubOpenshell(
+        home,
+        openshellLog,
+        JSON.stringify([
+          {
+            key: "agent:main:nemoclaw-onboard-warmup",
+            sessionId: "nemoclaw-onboard-warmup-123",
+          },
+          { key: "agent:main:main", sessionId: "sid-user" },
+        ]),
+      );
+
+      const out = path.join(home, "bundle.tgz");
+      const result = runWithEnv(`alpha sessions export --format tar --out ${out} --json 2>&1`, {
+        HOME: home,
+        PATH: `${localBin}:${process.env.PATH || ""}`,
+      });
+      expect(result.code).toBe(0);
+
+      const calls = fs.readFileSync(openshellLog, "utf8").split("\n");
+      const tarLine = calls.find((line) => line.includes("-- sh -c") && line.includes("umask 077"));
+      expect(tarLine).toBeDefined();
+      expect(tarLine).toContain("./sid-user.jsonl");
+      expect(tarLine).not.toContain("nemoclaw-onboard-warmup-123");
+
+      const manifest = JSON.parse(result.out.trim().split("\n").at(-1) as string);
+      expect(manifest.resolvedSessionIds).toEqual(["sid-user"]);
+      expect(manifest.resolvedFiles).toEqual(["sid-user.jsonl"]);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it("writes a browsable directory of session files by default (dir format, no tar/staging)", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-cli-sessions-export-dir-"));
     try {

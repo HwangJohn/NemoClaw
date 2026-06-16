@@ -155,6 +155,49 @@ describe("exportSandboxSessions", () => {
     expect(result.bundleBytes).toBeNull();
   });
 
+  it("skips NemoClaw onboard warmup sessions when exporting all sessions", async () => {
+    captureMock.mockReturnValueOnce(
+      makeCapture(
+        JSON.stringify([
+          { key: "agent:main:nemoclaw-onboard-warmup", sessionId: "nemoclaw-onboard-warmup-123" },
+          { key: "agent:main:main", sessionId: "sid-user" },
+        ]),
+      ),
+    );
+
+    const result = await exportSandboxSessions({
+      sandboxName: "alpha",
+      out: "./out.tgz",
+      format: "tar",
+    });
+
+    const tarCall = runMock.mock.calls[0]?.[0] as string[];
+    const shellCommand = tarCall[7] as string;
+    expect(shellCommand).toContain("./sid-user.jsonl");
+    expect(shellCommand).not.toContain("nemoclaw-onboard-warmup-123");
+    expect(result.resolvedSessionIds).toEqual(["sid-user"]);
+    expect(result.resolvedFiles).toEqual(["sid-user.jsonl"]);
+  });
+
+  it("reports no exportable sessions when only the onboard warmup session exists", async () => {
+    captureMock.mockReturnValueOnce(
+      makeCapture(
+        JSON.stringify([
+          { key: "agent:main:nemoclaw-onboard-warmup", sessionId: "nemoclaw-onboard-warmup-123" },
+        ]),
+      ),
+    );
+
+    await expect(
+      exportSandboxSessions({
+        sandboxName: "alpha",
+        out: "./out.tgz",
+        format: "tar",
+      }),
+    ).rejects.toThrow(/agent 'main' has no sessions to bundle/);
+    expect(runMock).not.toHaveBeenCalled();
+  });
+
   it("writes a browsable directory of session files by default (dir format, no tar staging)", async () => {
     captureMock.mockReturnValueOnce(
       makeCapture(
