@@ -1349,6 +1349,8 @@ $$nemoclaw my-assistant sessions delete agent:main:slack:c-9 --json
 
 ### `$$nemoclaw <name> sessions export [keys...]`
 
+<AgentOnly variant="openclaw">
+
 Export the OpenClaw session JSONL from a running sandbox to the host, replacing the two-hop `docker exec kubectl cp` plus `docker cp` workaround.
 
 The command always enumerates the session store through `openclaw sessions list --agent <id> --json` and copies only the matching `<sessionId>.jsonl` (plus optional `<sessionId>.trajectory.jsonl`) files, so the export never picks up `sessions.json`, stale `.jsonl.lock` files, or other store bookkeeping.
@@ -1374,6 +1376,32 @@ $$nemoclaw my-assistant sessions export --format tar --out ./bundles/alpha.tgz -
 Mismatched `--agent` plus canonical-key combinations are refused before any download runs.
 Session keys that begin with `-` are rejected at the command boundary instead of being silently dropped.
 Session JSONL can contain pasted secrets (API keys, tokens), so exported files are written owner-only (`0600`); for `tar` format the in-sandbox staging tarball is additionally created with `umask 077` and removed after the host download completes.
+
+</AgentOnly>
+<AgentOnly variant="hermes">
+
+Export Hermes session JSONL from a running sandbox to the host.
+
+For Hermes sandboxes, the command calls the native `hermes sessions export -` command inside the sandbox and writes each returned JSONL record to a browsable host directory.
+By default the destination is `./sessions-<sandbox>/`.
+Use `--agent hermes` when you want to be explicit; omitting `--agent` is equivalent for a registered Hermes sandbox.
+
+```bash
+$$nemoclaw my-assistant sessions export
+$$nemoclaw my-assistant sessions export --agent hermes
+$$nemoclaw my-assistant sessions export --out ./sessions-hermes --json
+```
+
+| Flag | Description |
+|------|-------------|
+| `--agent hermes` | Optional explicit Hermes agent selection. Other agent ids are refused for Hermes exports. |
+| `--out <path>` | Host directory destination. Defaults to `./sessions-<sandbox>/`. |
+| `--json` | Print the export manifest as JSON instead of a status line. |
+
+Hermes exports currently do not support positional key filters, `--format tar`, or `--include-trajectory`.
+Session JSONL can contain pasted secrets (API keys, tokens), so exported files are written owner-only (`0600`).
+
+</AgentOnly>
 
 ### `$$nemoclaw <name> download <sandbox-path> [host-dest]`
 

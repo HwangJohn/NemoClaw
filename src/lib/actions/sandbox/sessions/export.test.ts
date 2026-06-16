@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import fs from "node:fs";
+import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -14,11 +15,17 @@ vi.mock("../../../adapters/openshell/runtime", () => ({
   runOpenshell: vi.fn(),
 }));
 
+vi.mock("../../../state/registry", () => ({
+  getSandbox: vi.fn(),
+}));
+
 import { captureOpenshell, runOpenshell } from "../../../adapters/openshell/runtime";
+import { getSandbox } from "../../../state/registry";
 import { buildSandboxTarArgv, exportSandboxSessions, parseSessionIndex } from "./export";
 
 const captureMock = captureOpenshell as unknown as ReturnType<typeof vi.fn>;
 const runMock = runOpenshell as unknown as ReturnType<typeof vi.fn>;
+const getSandboxMock = getSandbox as unknown as ReturnType<typeof vi.fn>;
 
 let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 let consoleLogSpy: ReturnType<typeof vi.spyOn>;
@@ -26,6 +33,8 @@ let consoleLogSpy: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
   captureMock.mockReset();
   runMock.mockReset();
+  getSandboxMock.mockReset();
+  getSandboxMock.mockReturnValue(null);
   runMock.mockReturnValue({ status: 0, stdout: "", stderr: "" });
   consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
   consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
@@ -188,10 +197,10 @@ describe("exportSandboxSessions", () => {
       "download",
       "alpha",
       "/sandbox/.openclaw/agents/main/sessions/sid-a.jsonl",
-      "sessions-alpha/sid-a.jsonl",
+      path.join("sessions-alpha", "sid-a.jsonl"),
     ]);
     // Each downloaded file is locked to owner-only (session JSONL may hold secrets).
-    expect(chmodSpy).toHaveBeenCalledWith("sessions-alpha/sid-a.jsonl", 0o600);
+    expect(chmodSpy).toHaveBeenCalledWith(path.join("sessions-alpha", "sid-a.jsonl"), 0o600);
 
     expect(result.format).toBe("dir");
     expect(result.hostDest).toBe("./sessions-alpha");
@@ -200,13 +209,13 @@ describe("exportSandboxSessions", () => {
       {
         key: "agent:main:main",
         sessionId: "sid-a",
-        path: "sessions-alpha/sid-a.jsonl",
+        path: path.join("sessions-alpha", "sid-a.jsonl"),
         sizeBytes: 42,
       },
       {
         key: "agent:main:telegram:t-1",
         sessionId: "sid-b",
-        path: "sessions-alpha/sid-b.jsonl",
+        path: path.join("sessions-alpha", "sid-b.jsonl"),
         sizeBytes: 42,
       },
     ]);
@@ -417,5 +426,110 @@ describe("exportSandboxSessions", () => {
       hostDest: "./out.tgz",
     });
     expect(parsed).toHaveProperty("bundleBytes");
+  });
+
+  it("routes Hermes sandboxes through the native hermes sessions export command and writes one JSONL file per exported session", async () => {
+    getSandboxMock.mockReturnValue({ name: "alpha", agent: "hermes" });
+    const hermesExport = [
+      JSON.stringify({ id: "20260616_095753_802334", messages: [{ role: "user" }] }),
+      JSON.stringify({ id: "session/with spaces", messages: [{ role: "assistant" }] }),
+    ].join("\n");
+    runMock.mockImplementationOnce((_args, options) => {
+      const fd = (options as { stdio: ["ignore", number, "inherit"] }).stdio[1];
+      fs.writeSync(fd, hermesExport);
+      return makeRun(0);
+    });
+
+    const mkdirSpy = vi.spyOn(fs, "mkdirSync").mockImplementation(() => undefined);
+    const writeSpy = vi.spyOn(fs, "writeFileSync").mockImplementation(() => undefined);
+    const chmodSpy = vi.spyOn(fs, "chmodSync").mockImplementation(() => {});
+    const statSpy = vi
+      .spyOn(fs, "statSync")
+      .mockReturnValue({ size: 42 } as unknown as ReturnType<typeof fs.statSync>);
+
+    const result = await exportSandboxSessions({
+      sandboxName: "alpha",
+      agent: "hermes",
+      out: "./sessions-alpha",
+      json: true,
+    });
+
+    expect(captureMock).not.toHaveBeenCalled();
+    expect(runMock).toHaveBeenCalledWith(
+      ["sandbox", "exec", "--name", "alpha", "--", "hermes", "sessions", "export", "-"],
+      { ignoreError: true, stdio: expect.any(Array) },
+    );
+    expect(mkdirSpy).toHaveBeenCalledWith("./sessions-alpha", { recursive: true });
+    expect(writeSpy).toHaveBeenCalledWith(
+      path.join("sessions-alpha", "20260616_095753_802334.jsonl"),
+      expect.stringContaining('"id":"20260616_095753_802334"'),
+      { mode: 0o600 },
+    );
+    expect(writeSpy).toHaveBeenCalledWith(
+      path.join("sessions-alpha", "session_with_spaces.jsonl"),
+      expect.stringContaining('"id":"session/with spaces"'),
+      { mode: 0o600 },
+    );
+    expect(chmodSpy).toHaveBeenCalledWith(
+      path.join("sessions-alpha", "20260616_095753_802334.jsonl"),
+      0o600,
+    );
+    expect(result).toMatchObject({
+      sandboxName: "alpha",
+      agent: "hermes",
+      format: "dir",
+      selectedKeys: "all",
+      resolvedSessionIds: ["20260616_095753_802334", "session/with spaces"],
+      resolvedFiles: ["20260616_095753_802334.jsonl", "session_with_spaces.jsonl"],
+      hostDest: "./sessions-alpha",
+      bundleBytes: null,
+    });
+    expect(consoleLogSpy).toHaveBeenCalledTimes(1);
+
+    mkdirSpy.mockRestore();
+    writeSpy.mockRestore();
+    chmodSpy.mockRestore();
+    statSpy.mockRestore();
+  });
+
+  it("refuses Hermes-only exports when OpenClaw-specific options are requested", async () => {
+    getSandboxMock.mockReturnValue({ name: "alpha", agent: "hermes" });
+
+    await expect(
+      exportSandboxSessions({
+        sandboxName: "alpha",
+        keys: ["main"],
+      }),
+    ).rejects.toThrow(/Hermes session export does not support positional key filters/);
+    await expect(
+      exportSandboxSessions({
+        sandboxName: "alpha",
+        includeTrajectory: true,
+      }),
+    ).rejects.toThrow(/Hermes session export does not support --include-trajectory/);
+    await expect(
+      exportSandboxSessions({
+        sandboxName: "alpha",
+        format: "tar",
+      }),
+    ).rejects.toThrow(/Hermes session export currently supports only --format dir/);
+    expect(captureMock).not.toHaveBeenCalled();
+    expect(runMock).not.toHaveBeenCalled();
+  });
+
+  it("does not create the Hermes output directory when the native export has no sessions", async () => {
+    getSandboxMock.mockReturnValue({ name: "alpha", agent: "hermes" });
+    runMock.mockReturnValueOnce(makeRun(0));
+    const mkdirSpy = vi.spyOn(fs, "mkdirSync").mockImplementation(() => undefined);
+
+    await expect(
+      exportSandboxSessions({
+        sandboxName: "alpha",
+        out: "./sessions-alpha",
+      }),
+    ).rejects.toThrow(/Hermes has no sessions to bundle/);
+    expect(mkdirSpy).not.toHaveBeenCalled();
+
+    mkdirSpy.mockRestore();
   });
 });

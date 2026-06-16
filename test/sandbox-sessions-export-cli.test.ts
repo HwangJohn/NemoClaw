@@ -4,11 +4,17 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
-import { runWithEnv, writeSandboxRegistry } from "./cli/helpers";
+import { HERMES_CLI, execTimeout, runWithEnv, writeSandboxRegistry } from "./cli/helpers";
 
-function buildStubOpenshell(home: string, logFile: string, sessionListJson: string): string {
+function buildStubOpenshell(
+  home: string,
+  logFile: string,
+  sessionListJson: string,
+  hermesExportJsonl = "",
+): string {
   const localBin = path.join(home, "bin");
   fs.mkdirSync(localBin, { recursive: true });
   fs.writeFileSync(
@@ -20,6 +26,9 @@ function buildStubOpenshell(home: string, logFile: string, sessionListJson: stri
       '  "sandbox list"*) printf "alpha Ready\\n"; exit 0 ;;',
       '  "sandbox get alpha"*) printf "Name: alpha\\nPhase: Ready\\nPolicy:\\n"; exit 0 ;;',
       '  "gateway info -g nemoclaw"*) printf "Gateway: nemoclaw\\n"; exit 0 ;;',
+      '  *"hermes sessions export -"*)',
+      `    printf '%s\\n' ${JSON.stringify(hermesExportJsonl)}`,
+      "    exit 0 ;;",
       '  *"openclaw sessions list"*)',
       `    printf '%s\\n' ${JSON.stringify(sessionListJson)}`,
       "    exit 0 ;;",
@@ -35,6 +44,26 @@ function buildStubOpenshell(home: string, logFile: string, sessionListJson: stri
     { mode: 0o755 },
   );
   return localBin;
+}
+
+function runHermesWithEnv(args: readonly string[], env: Record<string, string | undefined>) {
+  const result = spawnSync(process.execPath, [HERMES_CLI, ...args], {
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: execTimeout(),
+    env: {
+      ...process.env,
+      HOME: fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-cli-test-")),
+      NEMOCLAW_HEALTH_POLL_COUNT: "1",
+      NEMOCLAW_HEALTH_POLL_INTERVAL: "0",
+      NEMOCLAW_GATEWAY_RECOVERY_SETTLE_SECONDS: "0",
+      ...env,
+    },
+  });
+  return {
+    code: typeof result.status === "number" ? result.status : 1,
+    out: `${result.stdout || ""}${result.stderr || ""}${result.error ? String(result.error) : ""}`,
+  };
 }
 
 describe("sandbox sessions export CLI", () => {
@@ -237,6 +266,50 @@ describe("sandbox sessions export CLI", () => {
       const calls = fs.existsSync(openshellLog) ? fs.readFileSync(openshellLog, "utf8") : "";
       expect(calls).not.toMatch(/-- sh -c/);
       expect(calls).not.toMatch(/sandbox download/);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("routes nemohermes sessions export through the native Hermes export command", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-cli-hermes-sessions-export-"));
+    try {
+      writeSandboxRegistry(home, { agent: "hermes" });
+      const openshellLog = path.join(home, "openshell-calls.log");
+      const localBin = buildStubOpenshell(
+        home,
+        openshellLog,
+        "[]",
+        JSON.stringify({ id: "20260616_095753_802334", messages: [] }),
+      );
+
+      const outDir = path.join(home, "sessions-alpha");
+      const result = runHermesWithEnv(
+        ["alpha", "sessions", "export", "--agent", "hermes", "--out", outDir, "--json"],
+        {
+          HOME: home,
+          PATH: `${localBin}:${process.env.PATH || ""}`,
+        },
+      );
+      expect(result.code).toBe(0);
+
+      const calls = fs.readFileSync(openshellLog, "utf8");
+      expect(calls).toMatch(/hermes sessions export -/);
+      expect(calls).not.toMatch(/openclaw sessions list/);
+      expect(calls).not.toMatch(/sandbox download/);
+
+      const exportedFile = path.join(outDir, "20260616_095753_802334.jsonl");
+      expect(fs.readFileSync(exportedFile, "utf8")).toContain('"id":"20260616_095753_802334"');
+      const manifest = JSON.parse(result.out.trim().split("\n").at(-1) as string);
+      expect(manifest).toMatchObject({
+        sandboxName: "alpha",
+        agent: "hermes",
+        format: "dir",
+        selectedKeys: "all",
+        resolvedSessionIds: ["20260616_095753_802334"],
+        resolvedFiles: ["20260616_095753_802334.jsonl"],
+        hostDest: outDir,
+      });
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }

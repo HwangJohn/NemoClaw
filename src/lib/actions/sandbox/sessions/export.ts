@@ -40,9 +40,11 @@
 
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { captureOpenshell, runOpenshell } from "../../../adapters/openshell/runtime";
 import { CLI_NAME } from "../../../cli/branding";
+import * as registry from "../../../state/registry";
 import { ensureLiveSandboxOrExit } from "../gateway-state";
 import {
   DEFAULT_AGENT_ID,
@@ -90,10 +92,16 @@ interface SessionIndexEntry {
   sessionId: string;
 }
 
+type RegistryAgentLookup =
+  | { kind: "missing" }
+  | { kind: "agent"; agent: string | null }
+  | { kind: "error"; message: string };
+
 // Session ids must start with an alphanumeric character so they can never be
 // interpreted as a tar option (`--checkpoint-action=...`, etc.) when appended
 // to the argv. Hyphens and underscores remain permitted as inner characters.
 const SAFE_TOKEN_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const HERMES_AGENT_ID = "hermes";
 
 export async function exportSandboxSessions(
   opts: SessionsExportOptions,
@@ -103,6 +111,16 @@ export async function exportSandboxSessions(
   enforceAgentScope(agent, trimmedKeys);
 
   await ensureLiveSandboxOrExit(opts.sandboxName, { allowNonReadyPhase: true });
+
+  const sandboxAgent = readSandboxAgentFromRegistry(opts.sandboxName);
+  if (sandboxAgent.kind === "error") {
+    throw new Error(
+      `Could not read the local sandbox registry to confirm agent type for '${opts.sandboxName}': ${sandboxAgent.message}`,
+    );
+  }
+  if (sandboxAgent.kind === "agent" && sandboxAgent.agent === HERMES_AGENT_ID) {
+    return exportHermesSessions(opts, trimmedKeys);
+  }
 
   const format: SessionsExportFormat = opts.format === "tar" ? "tar" : "dir";
   const sourceDir = `/sandbox/.openclaw/agents/${agent}/sessions`;
@@ -248,6 +266,187 @@ export async function exportSandboxSessions(
   }
 
   return result;
+}
+
+function readSandboxAgentFromRegistry(
+  sandboxName: string,
+  getSandbox: typeof registry.getSandbox = registry.getSandbox,
+): RegistryAgentLookup {
+  try {
+    const sandbox = getSandbox(sandboxName);
+    if (!sandbox) return { kind: "missing" };
+    return { kind: "agent", agent: sandbox.agent ?? null };
+  } catch (error) {
+    return { kind: "error", message: (error as Error).message ?? String(error) };
+  }
+}
+
+function exportHermesSessions(
+  opts: SessionsExportOptions,
+  trimmedKeys: readonly string[],
+): SessionsExportResult {
+  if (trimmedKeys.length > 0) {
+    throw new Error("Hermes session export does not support positional key filters yet.");
+  }
+  if (opts.includeTrajectory) {
+    throw new Error("Hermes session export does not support --include-trajectory.");
+  }
+  if (opts.format === "tar") {
+    throw new Error("Hermes session export currently supports only --format dir.");
+  }
+  const requestedAgent = opts.agent ? validateAgentId(opts.agent) : HERMES_AGENT_ID;
+  if (requestedAgent !== HERMES_AGENT_ID) {
+    throw new Error(
+      `Hermes session export does not support --agent ${requestedAgent}; omit --agent or use --agent hermes.`,
+    );
+  }
+
+  const rawExportPath = hermesRawExportPath();
+  const rawExportFd = fs.openSync(rawExportPath, "w", 0o600);
+  let runResult: ReturnType<typeof runOpenshell>;
+  try {
+    runResult = runOpenshell(
+      ["sandbox", "exec", "--name", opts.sandboxName, "--", "hermes", "sessions", "export", "-"],
+      { ignoreError: true, stdio: ["ignore", rawExportFd, "inherit"] },
+    );
+  } finally {
+    fs.closeSync(rawExportFd);
+  }
+  if (runResult.status !== 0) {
+    removeHermesRawExport(rawExportPath);
+    throw new Error(
+      `Failed to export Hermes sessions in sandbox '${opts.sandboxName}' (exit ${runResult.status}). Verify the sandbox is live with \`${CLI_NAME} ${opts.sandboxName} status\`.`,
+    );
+  }
+
+  let rawExportOutput = "";
+  try {
+    rawExportOutput = fs.readFileSync(rawExportPath, "utf8");
+  } finally {
+    removeHermesRawExport(rawExportPath);
+  }
+  const files = splitHermesJsonlExport(rawExportOutput);
+  if (files.length === 0) {
+    throw new Error("Refusing to export: Hermes has no sessions to bundle.");
+  }
+
+  const hostDest = resolveHostDestination(opts.out, opts.sandboxName, HERMES_AGENT_ID, "dir");
+  try {
+    fs.mkdirSync(hostDest, { recursive: true });
+  } catch (err) {
+    throw new Error(`Failed to create export directory '${hostDest}': ${(err as Error).message}`);
+  }
+
+  const sessions: SessionExportEntry[] = [];
+  for (const file of files) {
+    const localPath = path.join(hostDest, file.fileName);
+    try {
+      fs.writeFileSync(localPath, file.contents, { mode: 0o600 });
+    } catch (err) {
+      throw new Error(
+        `Failed to write Hermes session export '${localPath}': ${(err as Error).message}`,
+      );
+    }
+    hardenPermissions(localPath);
+    let sizeBytes: number | null = null;
+    try {
+      sizeBytes = fs.statSync(localPath).size;
+    } catch {
+      sizeBytes = null;
+    }
+    sessions.push({
+      key: `hermes:${file.sessionId}`,
+      sessionId: file.sessionId,
+      path: localPath,
+      sizeBytes,
+    });
+  }
+
+  const exportResult: SessionsExportResult = {
+    sandboxName: opts.sandboxName,
+    agent: HERMES_AGENT_ID,
+    format: "dir",
+    selectedKeys: "all",
+    resolvedSessionIds: files.map((file) => file.sessionId),
+    resolvedFiles: files.map((file) => file.fileName),
+    hostDest,
+    bundleBytes: null,
+    sessions,
+  };
+
+  if (opts.json) {
+    console.log(JSON.stringify(exportResult));
+  } else {
+    console.error(`  Exported all Hermes sessions (${files.length} session(s)) to ${hostDest}`);
+  }
+
+  return exportResult;
+}
+
+function hermesRawExportPath(): string {
+  const suffix = randomBytes(6).toString("hex");
+  return path.join(os.tmpdir(), `nemoclaw-hermes-sessions-${process.pid}-${suffix}.jsonl`);
+}
+
+function removeHermesRawExport(target: string): void {
+  try {
+    fs.rmSync(target, { force: true });
+  } catch {
+    /* best effort */
+  }
+}
+
+function splitHermesJsonlExport(
+  output: string,
+): { sessionId: string; fileName: string; contents: string }[] {
+  const usedFileNames = new Set<string>();
+  return output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line, index) => {
+      const sessionId = readHermesSessionId(line) ?? `session-${index + 1}`;
+      const baseName = sanitiseHermesSessionFileBase(sessionId) || `session-${index + 1}`;
+      const fileName = uniqueHermesFileName(`${baseName}.jsonl`, usedFileNames);
+      return { sessionId, fileName, contents: `${line}\n` };
+    });
+}
+
+function readHermesSessionId(line: string): string | null {
+  try {
+    const parsed = JSON.parse(line) as unknown;
+    if (parsed && typeof parsed === "object") {
+      const id = (parsed as Record<string, unknown>).id;
+      if (typeof id === "string" && id.trim()) return id.trim();
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function sanitiseHermesSessionFileBase(value: string): string {
+  return value
+    .trim()
+    .replace(/[^A-Za-z0-9._-]+/g, "_")
+    .replace(/^[-.]+/, "")
+    .slice(0, 120);
+}
+
+function uniqueHermesFileName(fileName: string, usedFileNames: Set<string>): string {
+  if (!usedFileNames.has(fileName)) {
+    usedFileNames.add(fileName);
+    return fileName;
+  }
+  const ext = ".jsonl";
+  const baseName = fileName.endsWith(ext) ? fileName.slice(0, -ext.length) : fileName;
+  for (let suffix = 2; ; suffix += 1) {
+    const candidate = `${baseName}-${suffix}${ext}`;
+    if (!usedFileNames.has(candidate)) {
+      usedFileNames.add(candidate);
+      return candidate;
+    }
+  }
 }
 
 // Restrict a freshly written host artefact to owner-only (0600). Best-effort:

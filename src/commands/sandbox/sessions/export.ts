@@ -9,15 +9,17 @@ import { NemoClawCommand } from "../../../lib/cli/nemoclaw-oclif-command";
 export default class SandboxSessionsExportCommand extends NemoClawCommand {
   static id = "sandbox:sessions:export";
   static strict = false;
-  static summary = "Export OpenClaw session JSONL out of a running sandbox";
+  static summary = "Export agent session JSONL out of a running sandbox";
   static description = [
-    "Tar the OpenClaw session store inside the sandbox and download the bundle to",
-    "the host via `openshell sandbox download`. By default every session for the",
-    "agent is exported; pass one or more positional keys to filter.",
+    "Export session JSONL from a running sandbox to the host. OpenClaw sandboxes",
+    "use the OpenClaw session store and support per-key filters plus dir/tar",
+    "output formats. Hermes sandboxes use the native `hermes sessions export -`",
+    "command and currently support dir output only.",
     "",
     "Keys may be either an alias (e.g. `main`, `telegram:t-1`) or the canonical",
-    "`agent:<id>:<rest>` form. Use --agent to scope aliases to a non-default",
-    "agent; mismatched --agent + canonical-key combinations are refused.",
+    "`agent:<id>:<rest>` form for OpenClaw exports. Use --agent to scope aliases",
+    "to a non-default OpenClaw agent; mismatched --agent + canonical-key",
+    "combinations are refused.",
     "",
     "Trajectory files are excluded by default (large) and re-added with",
     "--include-trajectory.",
@@ -31,6 +33,7 @@ export default class SandboxSessionsExportCommand extends NemoClawCommand {
   ];
   static examples = [
     "<%= config.bin %> sandbox sessions export alpha",
+    "<%= config.bin %> sandbox sessions export alpha --agent hermes",
     "<%= config.bin %> sandbox sessions export alpha main --agent main",
     "<%= config.bin %> sandbox sessions export alpha agent:work:telegram:t-1 --include-trajectory",
     "<%= config.bin %> sandbox sessions export alpha --format tar --out ./bundles/alpha.tgz --json",
