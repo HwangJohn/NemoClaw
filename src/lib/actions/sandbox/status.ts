@@ -150,7 +150,8 @@ function printMissingLiveSandboxStatusGuidance(
   );
 }
 
-// eslint-disable-next-line complexity
+/* eslint-disable complexity */
+/** Render sandbox-scoped status and surface recovery guidance for one registered sandbox. */
 export async function showSandboxStatus(sandboxName: string): Promise<void> {
   const preflight = await getSandboxStatusPreflight(registry.getSandbox(sandboxName));
   // #2666: never let an unexpected throw from the gateway probe (e.g. openshell
@@ -487,3 +488,4 @@ export async function showSandboxStatus(sandboxName: string): Promise<void> {
   }
   console.log("");
 }
+/* eslint-enable complexity */

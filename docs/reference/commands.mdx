@@ -1740,7 +1740,7 @@ This command remains as a compatibility alias to `$$nemoclaw tunnel stop`.
 ### `$$nemoclaw status`
 
 Show the global sandbox list and the status of host auxiliary services (for example cloudflared).
-This command is host-wide: it summarizes registered sandboxes, the default sandbox's live inference route, messaging overlap warnings, gateway health, and host services.
+This command is host-wide. It summarizes registered sandboxes, the default sandbox's live inference route, messaging overlap warnings, gateway health, and host services.
 Use `$$nemoclaw <name> status` when you need one sandbox's live health and recovery guidance.
 Pass `--json` for machine-readable output with registered sandboxes, service state, inference routes, and messaging health.
 For each listed sandbox, the text output includes the configured inference provider and model plus whether an active SSH session is connected.

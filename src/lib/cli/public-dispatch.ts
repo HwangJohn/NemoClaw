@@ -199,6 +199,7 @@ function printDispatchUsageError(
   process.exit(1);
 }
 
+/** Returns the sandbox-like positional argument passed to global `status`, if one exists. */
 function findGlobalStatusSandboxArgument(args: readonly string[]): string | null {
   for (const arg of args) {
     if (arg === "--json") {
@@ -212,6 +213,7 @@ function findGlobalStatusSandboxArgument(args: readonly string[]): string | null
   return null;
 }
 
+/** Prints the correction for `status <name>` and exits with the usage-error status code. */
 function printGlobalStatusScopeHint(sandboxName: string, args: readonly string[]): never {
   const jsonFlag = args.includes("--json") ? " --json" : "";
   console.error(`  '${CLI_NAME} status' shows the global sandbox/service overview.`);
@@ -305,7 +307,8 @@ async function runPublicTranslationResult(
 
 // ── Dispatch ─────────────────────────────────────────────────────
 
-// eslint-disable-next-line complexity
+/* eslint-disable complexity */
+/** Normalize public argv and route it to oclif or sandbox-first command handlers. */
 export async function dispatchCli(argv: string[] = process.argv.slice(2)): Promise<void> {
   if (argv[0] === "internal" || argv[0] === "sandbox") {
     await runNativeOclifArgv(argv);
@@ -414,3 +417,4 @@ export async function dispatchCli(argv: string[] = process.argv.slice(2)): Promi
   console.error(`  Run '${CLI_NAME} help' for usage.`);
   process.exit(1);
 }
+/* eslint-enable complexity */
