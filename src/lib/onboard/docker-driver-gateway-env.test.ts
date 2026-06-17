@@ -10,7 +10,11 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildDockerDriverGatewayEnv,
   buildDockerGatewayDebEnvFile,
+  getGatewayPortCheckOptions,
+  getGatewayStartNetworkEnv,
+  resolveGatewayBindAddress,
   startPackageManagedDockerDriverGatewayWithEnvOverride,
+  warnIfGatewayWildcardBindAddress,
   writeDockerGatewayDebEnvOverride,
 } from "./docker-driver-gateway-env";
 
@@ -55,6 +59,63 @@ describe("buildDockerDriverGatewayEnv", () => {
     expect(env.OPENSHELL_DOCKER_SUPERVISOR_BIN).toBeUndefined();
     expect(env.OPENSHELL_VM_DRIVER_STATE_DIR).toBeUndefined();
     expect(env.OPENSHELL_DRIVER_DIR).toBeUndefined();
+  });
+
+  it("binds the gateway to wildcard on Docker Desktop WSL while keeping local client endpoints loopback", () => {
+    const env = buildDockerDriverGatewayEnv({
+      platform: "linux",
+      stateDir: "/tmp/nemoclaw-gateway",
+      gatewayBindAddressOptions: {
+        detectWslDockerDesktopStatus: () => "docker-desktop",
+      },
+      getDockerSupervisorImage: () => "ghcr.io/nvidia/openshell/supervisor:0.0.37",
+      resolveSandboxBin: () => "/usr/bin/openshell-sandbox",
+    });
+
+    expect(env).toMatchObject({
+      OPENSHELL_BIND_ADDRESS: "0.0.0.0",
+      OPENSHELL_GRPC_ENDPOINT: "http://127.0.0.1:8080",
+      OPENSHELL_SSH_GATEWAY_HOST: "127.0.0.1",
+    });
+    expect(
+      getGatewayStartNetworkEnv({ detectWslDockerDesktopStatus: () => "docker-desktop" }),
+    ).toMatchInlineSnapshot(`
+        {
+          "OPENSHELL_BIND_ADDRESS": "0.0.0.0",
+          "OPENSHELL_SERVER_PORT": "8080",
+          "OPENSHELL_SSH_GATEWAY_HOST": "127.0.0.1",
+          "OPENSHELL_SSH_GATEWAY_PORT": "8080",
+        }
+      `);
+    expect(
+      getGatewayPortCheckOptions({ detectWslDockerDesktopStatus: () => "docker-desktop" }),
+    ).toEqual({ host: "0.0.0.0" });
+  });
+
+  it("lets an explicit loopback bind override the Docker Desktop WSL auto-bind", () => {
+    const options = {
+      env: { NEMOCLAW_GATEWAY_BIND_ADDRESS: "127.0.0.1" },
+      detectWslDockerDesktopStatus: () => "docker-desktop" as const,
+    };
+
+    expect(resolveGatewayBindAddress(options)).toBe("127.0.0.1");
+    expect(getGatewayStartNetworkEnv(options).OPENSHELL_BIND_ADDRESS).toBe("127.0.0.1");
+    expect(getGatewayPortCheckOptions(options)).toEqual({ host: "127.0.0.1" });
+  });
+
+  it("logs a Docker Desktop WSL-specific warning for the automatic wildcard bind", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      warnIfGatewayWildcardBindAddress({
+        detectWslDockerDesktopStatus: () => "docker-desktop",
+      });
+      const joined = log.mock.calls.map((call) => call.join(" ")).join("\n");
+
+      expect(joined).toContain("Docker Desktop WSL detected");
+      expect(joined).toContain("NEMOCLAW_GATEWAY_BIND_ADDRESS=127.0.0.1");
+    } finally {
+      log.mockRestore();
+    }
   });
 });
 

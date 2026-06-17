@@ -1335,6 +1335,13 @@ If `nvidia-smi` works on the host but onboarding says GPU passthrough was not en
 If a reusable gateway was previously started without GPU passthrough, NemoClaw replaces it automatically only when no other registered sandboxes depend on it, or when `--recreate-sandbox` is recreating the only registered sandbox with the same name.
 When shared gateway cleanup would be unsafe, follow the targeted destroy or gateway-removal commands printed by onboarding.
 
+### Docker Desktop WSL sandbox bridge cannot reach the gateway
+
+On Docker Desktop WSL, sandbox containers reach host services through Docker Desktop's `host-gateway` route, not through the WSL distro's `127.0.0.1` loopback.
+When NemoClaw detects this runtime, it binds the OpenShell Docker-driver gateway to `0.0.0.0` while keeping the CLI-facing gateway endpoint on `127.0.0.1`.
+This lets sandbox containers connect to `host.openshell.internal:<gateway-port>` during onboarding.
+If your environment requires a loopback-only gateway, set `NEMOCLAW_GATEWAY_BIND_ADDRESS=127.0.0.1`; Docker Desktop WSL sandbox callbacks may then fail until the gateway is reachable through another route.
+
 ### `unresolvable CDI devices nvidia.com/gpu=all` during gateway start
 
 Recent NVIDIA Container Toolkit installs configure the Docker daemon for Container Device Interface (CDI) device injection, which OpenShell's `gateway start --gpu` then auto-selects.

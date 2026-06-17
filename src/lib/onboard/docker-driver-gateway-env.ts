@@ -5,8 +5,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { dockerExecFileSync } from "../adapters/docker/exec";
 import {
-  GATEWAY_BIND_ADDRESS,
+  DEFAULT_GATEWAY_BIND_ADDRESS,
+  type GatewayBindAddress,
   WILDCARD_GATEWAY_BIND_ADDRESS,
   getGatewayConnectHost,
   getGatewayHttpEndpoint,
@@ -21,6 +23,8 @@ import {
 
 export { getGatewayHttpsEndpoint };
 export { startPackageManagedDockerDriverGateway };
+
+const WSL_DOCKER_DESKTOP_DETECTION_TIMEOUT_MS = 30_000;
 
 export const DOCKER_DRIVER_GATEWAY_RUNTIME_ENV_KEYS = [
   "OPENSHELL_DRIVERS",
@@ -43,8 +47,99 @@ export interface BuildDockerDriverGatewayEnvOptions {
   platform?: NodeJS.Platform;
   stateDir: string;
   dockerNetworkName?: string;
+  gatewayBindAddress?: GatewayBindAddress;
+  gatewayBindAddressOptions?: ResolveGatewayBindAddressOptions;
   getDockerSupervisorImage: () => string;
   resolveSandboxBin: () => string | null;
+}
+
+export interface ResolveGatewayBindAddressOptions {
+  env?: NodeJS.ProcessEnv;
+  detectWslDockerDesktopStatus?: () => WslDockerDesktopStatus;
+}
+
+type WslDockerDesktopStatus = "docker-desktop" | "not-docker-desktop" | "unknown";
+type GatewayBindAddressSource = "env" | "docker-desktop-wsl" | "default";
+
+let cachedDefaultWslDockerDesktopStatus: WslDockerDesktopStatus | null = null;
+
+function configuredGatewayBindAddress(
+  env: NodeJS.ProcessEnv,
+): { bindAddress: GatewayBindAddress; source: "env" } | null {
+  const raw = env.NEMOCLAW_GATEWAY_BIND_ADDRESS;
+  if (raw === undefined || raw === "") return null;
+  const trimmed = String(raw).trim();
+  if (trimmed === DEFAULT_GATEWAY_BIND_ADDRESS) {
+    return { bindAddress: DEFAULT_GATEWAY_BIND_ADDRESS, source: "env" };
+  }
+  if (trimmed === WILDCARD_GATEWAY_BIND_ADDRESS) {
+    return { bindAddress: WILDCARD_GATEWAY_BIND_ADDRESS, source: "env" };
+  }
+  throw new Error(
+    `Invalid gateway bind address: NEMOCLAW_GATEWAY_BIND_ADDRESS="${raw}" — must be either ${DEFAULT_GATEWAY_BIND_ADDRESS} or ${WILDCARD_GATEWAY_BIND_ADDRESS}`,
+  );
+}
+
+function isWslRuntime(env: NodeJS.ProcessEnv): boolean {
+  if (process.platform !== "linux") return false;
+  if (env.WSL_DISTRO_NAME || env.WSL_INTEROP) return true;
+  if (/microsoft/i.test(os.release())) return true;
+  try {
+    return /microsoft/i.test(fs.readFileSync("/proc/version", "utf-8"));
+  } catch {
+    return false;
+  }
+}
+
+function defaultDetectWslDockerDesktopStatus(
+  env: NodeJS.ProcessEnv = process.env,
+): WslDockerDesktopStatus {
+  const canUseCache = env === process.env;
+  if (canUseCache && cachedDefaultWslDockerDesktopStatus !== null) {
+    return cachedDefaultWslDockerDesktopStatus;
+  }
+  if (!isWslRuntime(env)) {
+    if (canUseCache) cachedDefaultWslDockerDesktopStatus = "not-docker-desktop";
+    return "not-docker-desktop";
+  }
+  try {
+    const output = dockerExecFileSync(["info", "--format", "{{json .OperatingSystem}}"], {
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: WSL_DOCKER_DESKTOP_DETECTION_TIMEOUT_MS,
+    }).trim();
+    const status =
+      !output || output === "<no value>"
+        ? "unknown"
+        : /^"?docker desktop\b/i.test(output)
+          ? "docker-desktop"
+          : "not-docker-desktop";
+    if (canUseCache) cachedDefaultWslDockerDesktopStatus = status;
+    return status;
+  } catch {
+    if (canUseCache) cachedDefaultWslDockerDesktopStatus = "unknown";
+    return "unknown";
+  }
+}
+
+function resolveGatewayBindAddressWithSource(options: ResolveGatewayBindAddressOptions = {}): {
+  bindAddress: GatewayBindAddress;
+  source: GatewayBindAddressSource;
+} {
+  const env = options.env ?? process.env;
+  const configured = configuredGatewayBindAddress(env);
+  if (configured) return configured;
+  const wslDockerDesktopStatus =
+    options.detectWslDockerDesktopStatus?.() ?? defaultDetectWslDockerDesktopStatus(env);
+  if (wslDockerDesktopStatus === "docker-desktop") {
+    return { bindAddress: WILDCARD_GATEWAY_BIND_ADDRESS, source: "docker-desktop-wsl" };
+  }
+  return { bindAddress: DEFAULT_GATEWAY_BIND_ADDRESS, source: "default" };
+}
+
+export function resolveGatewayBindAddress(
+  options: ResolveGatewayBindAddressOptions = {},
+): GatewayBindAddress {
+  return resolveGatewayBindAddressWithSource(options).bindAddress;
 }
 
 export type PackageManagedDockerDriverGatewayWithEnvOverrideOptions = Omit<
@@ -54,25 +149,45 @@ export type PackageManagedDockerDriverGatewayWithEnvOverrideOptions = Omit<
   gatewayEnv: Record<string, string>;
 };
 
-export function getGatewayPortCheckOptions(): { host: string } {
-  return { host: GATEWAY_BIND_ADDRESS };
+export function getGatewayPortCheckOptions(options: ResolveGatewayBindAddressOptions = {}): {
+  host: string;
+} {
+  return { host: resolveGatewayBindAddress(options) };
 }
 
-export function getGatewayStartNetworkEnv(): Record<string, string> {
+export function getGatewayStartNetworkEnv(
+  options: ResolveGatewayBindAddressOptions & { bindAddress?: GatewayBindAddress } = {},
+): Record<string, string> {
+  const bindAddress = options.bindAddress ?? resolveGatewayBindAddress(options);
   return {
-    OPENSHELL_BIND_ADDRESS: GATEWAY_BIND_ADDRESS,
+    OPENSHELL_BIND_ADDRESS: bindAddress,
     OPENSHELL_SERVER_PORT: String(GATEWAY_PORT),
-    OPENSHELL_SSH_GATEWAY_HOST: getGatewayConnectHost(),
+    OPENSHELL_SSH_GATEWAY_HOST: getGatewayConnectHost(bindAddress),
     OPENSHELL_SSH_GATEWAY_PORT: String(GATEWAY_PORT),
   };
 }
 
-export function getDockerDriverGatewayEndpoint(): string {
-  return getGatewayHttpEndpoint();
+export function getDockerDriverGatewayEndpoint(
+  options: ResolveGatewayBindAddressOptions & { bindAddress?: GatewayBindAddress } = {},
+): string {
+  const bindAddress = options.bindAddress ?? resolveGatewayBindAddress(options);
+  return getGatewayHttpEndpoint(GATEWAY_PORT, bindAddress);
 }
 
-export function warnIfGatewayWildcardBindAddress(): void {
-  if (GATEWAY_BIND_ADDRESS !== WILDCARD_GATEWAY_BIND_ADDRESS) return;
+export function warnIfGatewayWildcardBindAddress(
+  options: ResolveGatewayBindAddressOptions = {},
+): void {
+  const resolved = resolveGatewayBindAddressWithSource(options);
+  if (resolved.bindAddress !== WILDCARD_GATEWAY_BIND_ADDRESS) return;
+  if (resolved.source === "docker-desktop-wsl") {
+    console.log(
+      "  ! Docker Desktop WSL detected; binding the OpenShell gateway to 0.0.0.0 so sandbox containers can reach host.openshell.internal.",
+    );
+    console.log(
+      "    Set NEMOCLAW_GATEWAY_BIND_ADDRESS=127.0.0.1 to force loopback only, but Docker Desktop WSL sandbox callbacks may fail.",
+    );
+    return;
+  }
   console.log(
     "  ! OpenShell gateway bind address set to 0.0.0.0; the gateway may be reachable from other hosts on this network.",
   );
@@ -82,16 +197,20 @@ export function buildDockerDriverGatewayEnv({
   platform = process.platform,
   stateDir,
   dockerNetworkName = "openshell-docker",
+  gatewayBindAddress,
+  gatewayBindAddressOptions,
   getDockerSupervisorImage,
   resolveSandboxBin,
 }: BuildDockerDriverGatewayEnvOptions): Record<string, string> {
+  const bindAddress =
+    gatewayBindAddress ?? resolveGatewayBindAddress(gatewayBindAddressOptions ?? {});
   const env: Record<string, string> = {
     OPENSHELL_DRIVERS: "docker",
-    ...getGatewayStartNetworkEnv(),
+    ...getGatewayStartNetworkEnv({ bindAddress }),
     OPENSHELL_DISABLE_TLS: "true",
     OPENSHELL_DISABLE_GATEWAY_AUTH: "true",
     OPENSHELL_DB_URL: `sqlite:${path.join(stateDir, "openshell.db")}`,
-    OPENSHELL_GRPC_ENDPOINT: getDockerDriverGatewayEndpoint(),
+    OPENSHELL_GRPC_ENDPOINT: getDockerDriverGatewayEndpoint({ bindAddress }),
     OPENSHELL_DOCKER_NETWORK_NAME: dockerNetworkName,
     OPENSHELL_DOCKER_SUPERVISOR_IMAGE: getDockerSupervisorImage(),
   };
