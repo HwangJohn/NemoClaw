@@ -524,6 +524,7 @@ export function printDockerGpuExternalDnsWarning(
   log(`  Set ${DOCKER_GPU_PATCH_DNS_PROBE_ENV}=0 to skip this post-recreate probe.`);
 }
 
+/** Normalize Docker GPU device selectors to the value accepted by `--gpus`. */
 function normalizeGpuDeviceForDocker(device: string | null | undefined): string {
   const raw = String(device || "").trim();
   if (!raw || raw === "nvidia.com/gpu=all") return "all";
@@ -531,6 +532,7 @@ function normalizeGpuDeviceForDocker(device: string | null | undefined): string 
   return raw;
 }
 
+/** Normalize Docker GPU device selectors to the CDI device name form. */
 function normalizeGpuDeviceForCdi(device: string | null | undefined): string {
   const dockerDevice = normalizeGpuDeviceForDocker(device);
   if (
@@ -543,6 +545,7 @@ function normalizeGpuDeviceForCdi(device: string | null | undefined): string {
   return `nvidia.com/gpu=${dockerDevice || "all"}`;
 }
 
+/** Build one Docker GPU injection mode descriptor from a mode kind and device. */
 export function buildDockerGpuMode(
   kind: DockerGpuPatchModeKind,
   device?: string | null,
@@ -579,6 +582,7 @@ export function buildDockerGpuMode(
   };
 }
 
+/** Return Docker GPU mode candidates in the order NemoClaw should probe them. */
 export function buildDockerGpuModeCandidates(
   device?: string | null,
   options: { cdiAvailable?: boolean; backend?: DockerGpuPatchBackend } = {},
@@ -601,6 +605,7 @@ export function buildDockerGpuModeCandidates(
   return candidates;
 }
 
+/** Decide whether the Docker GPU patch is needed for this sandbox configuration. */
 export function shouldApplyDockerGpuPatch(
   config: { sandboxGpuEnabled: boolean },
   options: {
@@ -633,6 +638,7 @@ export function shouldApplyDockerGpuPatch(
   return !optedOut;
 }
 
+/** Build docker run option fragments that preserve the original sandbox container config. */
 export function buildDockerGpuCloneRunOptions(
   inspect: DockerContainerInspect,
   env: Record<string, string | undefined> = process.env,
@@ -660,6 +666,7 @@ function parseResolvConfNameservers(content: string): string[] {
 // only. Return the first non-loopback nameserver from
 // /run/systemd/resolve/resolv.conf so the caller can inject it via --dns
 // rather than relying on inherited /etc/resolv.conf.
+/** Detect the fallback DNS server Docker should receive when bridge DNS is overridden. */
 export function detectSandboxFallbackDns(
   deps: { readFile?: (path: string) => string | null } = {},
 ): string | null {
@@ -682,6 +689,7 @@ export function detectSandboxFallbackDns(
   return parseResolvConfNameservers(upstreamFile).find((ip) => !/^127\./.test(ip)) ?? null;
 }
 
+/** Resolve the Docker network mode to use when recreating the GPU-enabled sandbox. */
 export function getDockerGpuPatchNetworkMode(
   env: Record<string, string | undefined> = process.env,
 ): "host" | "preserve" {
@@ -693,6 +701,7 @@ export function getDockerGpuPatchNetworkMode(
   return "preserve";
 }
 
+/** Return preserved Docker network aliases for user-defined bridge networks. */
 function dockerNetworkAliases(
   inspect: DockerContainerInspect,
   networkMode: string | null | undefined,
@@ -714,6 +723,7 @@ function dockerNetworkAliases(
     .filter((alias) => !sameContainerId(alias, containerId));
 }
 
+/** Build the full `docker run` argv for the cloned GPU-enabled sandbox container. */
 export function buildDockerGpuCloneRunArgs(
   inspect: DockerContainerInspect,
   mode: DockerGpuPatchMode,
@@ -850,6 +860,7 @@ export function buildDockerGpuCloneRunArgs(
   return args;
 }
 
+/** Parse and validate the container object emitted by `docker inspect`. */
 export function parseDockerInspectJson(output: string): DockerContainerInspect {
   const parsed = JSON.parse(output);
   const inspect = Array.isArray(parsed) ? parsed[0] : parsed;
@@ -859,6 +870,7 @@ export function parseDockerInspectJson(output: string): DockerContainerInspect {
   return inspect as DockerContainerInspect;
 }
 
+/** Find Docker container IDs that OpenShell currently associates with a sandbox. */
 export function findOpenShellDockerSandboxContainerIds(
   sandboxName: string,
   deps: DockerGpuPatchDeps = {},
