@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { printOpenShellStateRpcIssue } from "../../adapters/openshell/gateway-drift";
-import { getSandboxTargetGatewayName } from "./gateway-target";
 import { resolveOpenshell } from "../../adapters/openshell/resolve";
 import * as agentRuntime from "../../agent/runtime";
 import { CLI_DISPLAY_NAME, CLI_NAME } from "../../cli/branding";
@@ -22,6 +21,7 @@ import { getSandboxDockerRuntime } from "./docker-health";
 import { isDockerRuntimeDown, printDockerRuntimeDownGuidance } from "./gateway-failure-classifier";
 import type { SandboxGatewayState } from "./gateway-state";
 import { printGatewayLifecycleHint, printWrongGatewayActiveGuidance } from "./gateway-state";
+import { getSandboxTargetGatewayName } from "./gateway-target";
 import { isSandboxGatewayRunningForStatus } from "./process-recovery";
 import {
   getSandboxStatusPreflight,
@@ -150,7 +150,6 @@ function printMissingLiveSandboxStatusGuidance(
   );
 }
 
-/* eslint-disable complexity */
 /** Render sandbox-scoped status and surface recovery guidance for one registered sandbox. */
 export async function showSandboxStatus(sandboxName: string): Promise<void> {
   const preflight = await getSandboxStatusPreflight(registry.getSandbox(sandboxName));
@@ -488,4 +487,3 @@ export async function showSandboxStatus(sandboxName: string): Promise<void> {
   }
   console.log("");
 }
-/* eslint-enable complexity */

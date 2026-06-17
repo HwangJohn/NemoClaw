@@ -20,12 +20,19 @@ const {
   globalCommandTokens,
   sandboxActionTokens,
 } = require("./command-registry");
-import { normalizeArgv, suggestCommand, type NormalizedSandboxArgv } from "./argv-normalizer";
+
+import {
+  type NormalizedArgv,
+  type NormalizedGlobalArgv,
+  type NormalizedSandboxArgv,
+  normalizeArgv,
+  suggestCommand,
+} from "./argv-normalizer";
 import { getRegisteredOclifCommandMetadata } from "./oclif-metadata";
 import {
+  type PublicTranslationResult,
   translatePublicGlobalArgv,
   translatePublicSandboxArgv,
-  type PublicTranslationResult,
 } from "./public-argv-translation";
 
 // ── Global commands (derived from command registry) ──────────────
@@ -307,19 +314,7 @@ async function runPublicTranslationResult(
 
 // ── Dispatch ─────────────────────────────────────────────────────
 
-/* eslint-disable complexity */
-/** Normalize public argv and route it to oclif or sandbox-first command handlers. */
-export async function dispatchCli(argv: string[] = process.argv.slice(2)): Promise<void> {
-  if (argv[0] === "internal" || argv[0] === "sandbox") {
-    await runNativeOclifArgv(argv);
-    return;
-  }
-
-  const normalized = normalizeArgv(argv, {
-    globalCommands: GLOBAL_COMMANDS,
-    isSandboxConnectFlag: isPublicSandboxConnectFlag,
-  });
-
+async function dispatchNormalizedArgv(normalized: NormalizedArgv, argv: string[]): Promise<void> {
   if (normalized.kind === "rootHelp") {
     await runDirectOclifCommand("root:help", []);
     return;
@@ -331,16 +326,25 @@ export async function dispatchCli(argv: string[] = process.argv.slice(2)): Promi
   }
 
   if (normalized.kind === "global") {
-    if (normalized.command === "status") {
-      const sandboxName = findGlobalStatusSandboxArgument(normalized.args);
-      if (sandboxName) printGlobalStatusScopeHint(sandboxName, normalized.args);
-    }
-    await runPublicTranslationResult(
-      translatePublicGlobalArgv(normalized.command, normalized.args),
-    );
+    await dispatchGlobalArgv(normalized);
     return;
   }
 
+  await dispatchSandboxArgv(normalized, argv);
+}
+
+async function dispatchGlobalArgv(normalized: NormalizedGlobalArgv): Promise<void> {
+  if (normalized.command === "status") {
+    const sandboxName = findGlobalStatusSandboxArgument(normalized.args);
+    if (sandboxName) printGlobalStatusScopeHint(sandboxName, normalized.args);
+  }
+  await runPublicTranslationResult(translatePublicGlobalArgv(normalized.command, normalized.args));
+}
+
+async function dispatchSandboxArgv(
+  normalized: NormalizedSandboxArgv,
+  argv: string[],
+): Promise<void> {
   const cmd = normalized.sandboxName;
   const rawArgsAfterCmd = argv.slice(1);
   const requestedSandboxAction = normalized.action;
@@ -400,7 +404,10 @@ export async function dispatchCli(argv: string[] = process.argv.slice(2)): Promi
     return;
   }
 
-  // Unknown command — suggest
+  printUnknownSandboxOrCommand(cmd);
+}
+
+function printUnknownSandboxOrCommand(cmd: string): never {
   console.error(`  Unknown command: ${cmd}`);
   console.error("");
 
@@ -417,4 +424,19 @@ export async function dispatchCli(argv: string[] = process.argv.slice(2)): Promi
   console.error(`  Run '${CLI_NAME} help' for usage.`);
   process.exit(1);
 }
-/* eslint-enable complexity */
+
+/** Normalize public argv and route it to oclif or sandbox-first command handlers. */
+export async function dispatchCli(argv: string[] = process.argv.slice(2)): Promise<void> {
+  if (argv[0] === "internal" || argv[0] === "sandbox") {
+    await runNativeOclifArgv(argv);
+    return;
+  }
+
+  await dispatchNormalizedArgv(
+    normalizeArgv(argv, {
+      globalCommands: GLOBAL_COMMANDS,
+      isSandboxConnectFlag: isPublicSandboxConnectFlag,
+    }),
+    argv,
+  );
+}
