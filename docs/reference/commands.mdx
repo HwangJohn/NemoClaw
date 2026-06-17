@@ -537,7 +537,7 @@ ssh dgx-spark '$$nemoclaw my-assistant exec --no-stdin -- pwd'
 | `--workdir <dir>` | Working directory inside the sandbox |
 | `--tty` / `--no-tty` | Allocate a pseudo-terminal; defaults to auto-detection (on when stdin and stdout are terminals) |
 | `--timeout <seconds>` | Timeout in seconds (`0` means no timeout) |
-| `--stdin` / `--no-stdin` | Force caller stdin forwarding or closure. Default: forward stdin |
+| `--stdin` / `--no-stdin` | Force caller stdin forwarding or closure (default: forward stdin). |
 
 ### Advanced Sandbox Maintenance Commands
 
@@ -765,7 +765,7 @@ Pass `--stdin` to force forwarding when a wrapper or alias sets `--no-stdin`.
 | `--workdir <dir>` | Set the working directory inside the sandbox |
 | `--tty`, `--no-tty` | Allocate or disable a pseudo-terminal; defaults to auto-detection |
 | `--timeout <s>` | Timeout in seconds. Use `0` for no timeout |
-| `--stdin`, `--no-stdin` | Force caller stdin forwarding or closure. Default: forward stdin |
+| `--stdin`, `--no-stdin` | Force caller stdin forwarding or closure (default: forward stdin). |
 
 ### `$$nemoclaw <name> logs`
 
