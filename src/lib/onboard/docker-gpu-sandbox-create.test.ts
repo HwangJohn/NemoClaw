@@ -190,6 +190,35 @@ describe("createDockerGpuSandboxCreatePatch composed flow", () => {
     expect(onPatchFailureExit).not.toHaveBeenCalled();
   });
 
+  it("passes Docker Desktop WSL mode into the deferred recreate path", () => {
+    const deps = makeDeps();
+    const result = deferredCreateResult();
+    const recreatePatch = vi.fn(() => result);
+    const findContainerIds = vi.fn(() => ["existing-container"]);
+
+    const patch = createDockerGpuSandboxCreatePatch({
+      enabled: true,
+      sandboxName: "alpha",
+      timeoutSecs: 60,
+      dockerDesktopWsl: true,
+      deps,
+      overrides: {
+        findContainerIds,
+        recreatePatch,
+        waitForSupervisor: vi.fn(() => true),
+        finalizeBackup: vi.fn(() => ({ backupRemoved: true, rolledBack: false })),
+        onPatchFailureExit: vi.fn(),
+      },
+    });
+
+    patch.maybeApplyDuringCreate();
+
+    expect(recreatePatch).toHaveBeenCalledWith(
+      expect.objectContaining({ dockerDesktopWsl: true, waitForSupervisor: false }),
+      expect.objectContaining({ runCaptureOpenshell: deps.runCaptureOpenshell }),
+    );
+  });
+
   it("records patchError when recreate throws and exitOnPatchError reports it via printDockerGpuPatchFailureAndExit", () => {
     const deps = makeDeps();
     const recreatePatch = vi.fn(() => {

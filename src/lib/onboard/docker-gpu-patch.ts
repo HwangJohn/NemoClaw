@@ -949,10 +949,18 @@ function probeDockerGpuMode(
 }
 
 export function selectDockerGpuPatchMode(
-  options: { image: string; device?: string | null; backend?: DockerGpuPatchBackend },
+  options: {
+    image: string;
+    device?: string | null;
+    backend?: DockerGpuPatchBackend;
+    dockerDesktopWsl?: boolean;
+  },
   deps: DockerGpuPatchDeps = {},
 ): { mode: DockerGpuPatchMode | null; attempts: DockerGpuPatchModeAttempt[] } {
-  const cdiAvailable = options.backend === "jetson" ? false : dockerReportsNvidiaCdiDevices(deps);
+  const cdiAvailable =
+    options.backend === "jetson" || options.dockerDesktopWsl === true
+      ? false
+      : dockerReportsNvidiaCdiDevices(deps);
   const attempts: DockerGpuPatchModeAttempt[] = [];
   for (const mode of buildDockerGpuModeCandidates(options.device, {
     cdiAvailable,
@@ -1014,6 +1022,7 @@ export function recreateOpenShellDockerSandboxWithGpu(
     waitForSupervisor?: boolean;
     openshellSandboxCommand?: readonly string[] | null;
     backend?: DockerGpuPatchBackend;
+    dockerDesktopWsl?: boolean;
   },
   deps: DockerGpuPatchDeps = {},
 ): DockerGpuPatchResult {
@@ -1037,7 +1046,12 @@ export function recreateOpenShellDockerSandboxWithGpu(
     if (!image) throw new Error("OpenShell sandbox container inspect did not include an image.");
 
     const selection = selectDockerGpuPatchMode(
-      { image, device: options.gpuDevice, backend: options.backend },
+      {
+        image,
+        device: options.gpuDevice,
+        backend: options.backend,
+        dockerDesktopWsl: options.dockerDesktopWsl,
+      },
       deps,
     );
     context.modeAttempts = selection.attempts;
@@ -1046,7 +1060,9 @@ export function recreateOpenShellDockerSandboxWithGpu(
       const modeMessage =
         options.backend === "jetson"
           ? "Docker did not accept the Jetson NVIDIA runtime GPU mode."
-          : "Docker did not accept --gpus, NVIDIA runtime, or CDI GPU modes.";
+          : options.dockerDesktopWsl
+            ? "Docker did not accept Docker Desktop WSL --gpus or NVIDIA runtime GPU modes."
+            : "Docker did not accept --gpus, NVIDIA runtime, or CDI GPU modes.";
       throw new Error(modeMessage);
     }
 
@@ -1183,6 +1199,7 @@ export function applyDockerGpuPatchOrExit(
     // `ensureApplied` fallback path would recreate the container without
     // /dev/nvmap group access.
     backend?: DockerGpuPatchBackend;
+    dockerDesktopWsl?: boolean;
     openshellSandboxCommand?: readonly string[] | null;
   },
   deps: Pick<DockerGpuPatchDeps, "runOpenshell" | "runCaptureOpenshell" | "sleep">,

@@ -461,7 +461,7 @@ describe("docker-gpu-patch", () => {
     // candidate list prefers `cdi` ahead of `--gpus all` on CDI hosts (#4948).
     const readDir = vi.fn((dirPath: string) => (dirPath === "/etc/cdi" ? ["nvidia.yaml"] : null));
     const readFile = vi.fn((filePath: string) =>
-      filePath === "/etc/cdi/nvidia.yaml"
+      filePath.replace(/\\/g, "/") === "/etc/cdi/nvidia.yaml"
         ? "cdiVersion: 0.6.0\nkind: nvidia.com/gpu\ndevices:\n  - name: all\n"
         : null,
     );
@@ -493,7 +493,7 @@ describe("docker-gpu-patch", () => {
       dirPath === "/var/run/cdi" ? ["nvidia.json"] : null,
     );
     const readFile = vi.fn((filePath: string) =>
-      filePath === "/var/run/cdi/nvidia.json"
+      filePath.replace(/\\/g, "/") === "/var/run/cdi/nvidia.json"
         ? JSON.stringify({ cdiVersion: "0.6.0", kind: "nvidia.com/gpu" })
         : null,
     );

@@ -62,6 +62,7 @@ type DockerGpuSandboxCreatePatchOptions = {
   openshellSandboxCommand?: readonly string[] | null;
   timeoutSecs: number;
   backend?: DockerGpuPatchBackend;
+  dockerDesktopWsl?: boolean;
   deps: DockerGpuSandboxCreateDeps;
   /**
    * Test seams. The production composition uses the canonical
@@ -136,6 +137,7 @@ export function createDockerGpuSandboxCreatePatch(
     openshellSandboxCommand: options.openshellSandboxCommand ?? null,
     timeoutSecs: options.timeoutSecs,
     backend: options.backend,
+    dockerDesktopWsl: options.dockerDesktopWsl ?? isDockerDesktopWslRuntime(),
   };
 
   return {

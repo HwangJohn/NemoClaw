@@ -19,7 +19,7 @@ function cdiHostDeps(): DockerGpuPatchDeps {
     dockerCapture: vi.fn(() => JSON.stringify(["/etc/cdi"])),
     readDir: (dir: string) => (dir === "/etc/cdi" ? ["nvidia.yaml"] : null),
     readFile: (file: string) =>
-      file === "/etc/cdi/nvidia.yaml"
+      file.replace(/\\/g, "/") === "/etc/cdi/nvidia.yaml"
         ? "cdiVersion: 0.6.0\nkind: nvidia.com/gpu\ndevices:\n  - name: all\n"
         : null,
     dockerRm: vi.fn(() => ({ status: 0 })),
@@ -143,5 +143,61 @@ describe("docker-gpu-patch CDI-first mode selection (#4948)", () => {
     // The legacy --gpus flag must NOT appear on a CDI host recreate.
     const detachedArgs = (dockerRunDetached.mock.calls[0] as unknown[])[0] as string[];
     expect(detachedArgs).not.toContain("--gpus");
+  });
+});
+
+describe("docker-gpu-patch Docker Desktop WSL mode selection (#5512)", () => {
+  it("prefers --gpus and skips CDI on Docker Desktop WSL even when CDI specs are visible", () => {
+    const dockerRun = vi.fn(() => ({ status: 0, stdout: "probe-id" }));
+    const selected = selectDockerGpuPatchMode(
+      { image: "openshell/sandbox:abc", dockerDesktopWsl: true },
+      { ...cdiHostDeps(), dockerRun },
+    );
+
+    expect(selected.mode?.kind).toBe("gpus");
+    expect(selected.attempts.map((attempt) => attempt.mode.kind)).toEqual(["gpus"]);
+    expect(dockerRun).toHaveBeenCalledWith(
+      expect.arrayContaining(["create", "--gpus", "all"]),
+      expect.objectContaining({ ignoreError: true }),
+    );
+    expect(
+      dockerRun.mock.calls.some(([args]) => (args as readonly string[]).includes("--device")),
+    ).toBe(false);
+  });
+
+  it("passes --gpus to docker run when recreating on Docker Desktop WSL", () => {
+    const dockerCapture = vi.fn((args: readonly string[]) => {
+      if (args[0] === "ps") return "old-container-id\n";
+      if (args[0] === "inspect") return JSON.stringify([inspectFixture()]);
+      if (args[0] === "info") return JSON.stringify(["/etc/cdi"]);
+      return "";
+    });
+    const dockerRunDetached = vi.fn(() => ({ status: 0, stdout: "new-container-id\n" }));
+    const host = cdiHostDeps();
+
+    const result = recreateOpenShellDockerSandboxWithGpu(
+      { sandboxName: "alpha", timeoutSecs: 1, dockerDesktopWsl: true },
+      {
+        dockerCapture,
+        readDir: host.readDir,
+        readFile: host.readFile,
+        dockerRun: vi.fn(() => ({ status: 0, stdout: "probe-id\n" })),
+        dockerRunDetached,
+        dockerRename: vi.fn(() => ({ status: 0 })),
+        dockerStop: vi.fn(() => ({ status: 0 })),
+        dockerRm: vi.fn(() => ({ status: 0 })),
+        runOpenshell: vi.fn(() => ({ status: 0 })),
+        sleep: vi.fn(),
+        now: () => new Date("2026-05-12T00:00:00Z"),
+      },
+    );
+
+    expect(result.mode.kind).toBe("gpus");
+    expect(dockerRunDetached).toHaveBeenCalledWith(
+      expect.arrayContaining(["--name", "openshell-alpha", "--gpus", "all"]),
+      expect.objectContaining({ ignoreError: true }),
+    );
+    const detachedArgs = (dockerRunDetached.mock.calls[0] as unknown[])[0] as string[];
+    expect(detachedArgs).not.toContain("--device");
   });
 });
