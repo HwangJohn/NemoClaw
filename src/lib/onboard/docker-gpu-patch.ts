@@ -448,6 +448,7 @@ function dockerCpusFromNanoCpus(nanoCpus: number): string {
   return (nanoCpus / 1_000_000_000).toFixed(3).replace(/\.?0+$/, "");
 }
 
+/** Return true when the post-recreate DNS probe is explicitly disabled. */
 function dockerGpuPatchDnsProbeDisabled(env: Record<string, string | undefined>): boolean {
   const raw = String(env[DOCKER_GPU_PATCH_DNS_PROBE_ENV] || "")
     .trim()
@@ -455,6 +456,10 @@ function dockerGpuPatchDnsProbeDisabled(env: Record<string, string | undefined>)
   return raw === "0" || raw === "false" || raw === "off" || raw === "no";
 }
 
+/**
+ * Probe external DNS resolution from the recreated GPU-enabled Docker
+ * container without failing the sandbox patch.
+ */
 export function probeDockerGpuExternalDns(
   containerId: string,
   deps: DockerGpuPatchDeps = {},
@@ -500,6 +505,10 @@ export function probeDockerGpuExternalDns(
   }
 }
 
+/**
+ * Print remediation guidance when the recreated GPU container cannot resolve
+ * external DNS through Docker's bridge resolver.
+ */
 export function printDockerGpuExternalDnsWarning(
   result: Extract<DockerGpuExternalDnsProbeResult, { status: "failed" }>,
   log: (message: string) => void = console.warn,
@@ -1082,6 +1091,10 @@ export function getDockerGpuPatchFailureContext(
   return null;
 }
 
+/**
+ * Recreate an existing OpenShell Docker sandbox with NVIDIA GPU access and run
+ * post-recreate diagnostics.
+ */
 export function recreateOpenShellDockerSandboxWithGpu(
   options: {
     sandboxName: string;
