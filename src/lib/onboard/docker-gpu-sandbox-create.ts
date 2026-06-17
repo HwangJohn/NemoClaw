@@ -48,9 +48,11 @@ type RecreatePatchFn = typeof recreateOpenShellDockerSandboxWithGpu;
 type WaitSupervisorFn = typeof waitForOpenShellSupervisorReconnect;
 type FindContainerIdsFn = typeof findOpenShellDockerSandboxContainerIds;
 type FinalizeBackupFn = typeof finalizeDockerGpuPatchBackup;
-// Loosen the override return type from `never` to `void` so tests can pass a
-// plain `vi.fn()` mock. Production wires `printDockerGpuPatchFailureAndExit`
-// which has return type `never`; that is assignable to `void`.
+/**
+ * Loosen the override return type from `never` to `void` so tests can pass a
+ * plain `vi.fn()` mock. Production wires `printDockerGpuPatchFailureAndExit`
+ * which has return type `never`; that is assignable to `void`.
+ */
 type PatchFailureExitFn = (
   sandboxName: string,
   error: unknown,
@@ -93,11 +95,17 @@ type DockerGpuSandboxCreatePlan = {
 };
 
 export type DockerGpuSandboxCreatePatch = {
+  /** Apply the Docker GPU patch after OpenShell creates the sandbox container. */
   maybeApplyDuringCreate: () => void;
+  /** Return a user-facing create failure message when patch application failed. */
   createFailureMessage: () => string | null;
+  /** Exit through the shared patch failure diagnostics when patch application failed. */
   exitOnPatchError: () => void;
+  /** Require the patch result before continuing with GPU verification. */
   ensureApplied: () => void;
+  /** Wait for supervisor reconnect and roll back the patch when reconnect fails. */
   waitForSupervisorReconnectIfNeeded: () => void;
+  /** Return the Docker GPU injection mode selected during patch application. */
   selectedMode: () => DockerGpuPatchMode | null;
   /**
    * Print the Docker GPU readiness-failure block (including the Error-phase
