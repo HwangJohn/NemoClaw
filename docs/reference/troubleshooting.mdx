@@ -179,6 +179,31 @@ docker run --rm busybox nslookup example.com
 
 When the lookup returns an answer, retry onboarding.
 
+### Docker-driver GPU sandbox cannot resolve external domains
+
+On Docker-driver GPU hosts such as DGX Spark, the recreated GPU-enabled sandbox can sometimes resolve the OpenShell host alias while direct external DNS lookups fail:
+
+```bash
+getent hosts host.openshell.internal
+getent hosts example.com
+```
+
+If the host alias resolves but external names do not, Docker's embedded resolver is probably forwarding to an upstream DNS server that the sandbox bridge cannot use.
+Policy-proxied inference, messaging, and search can still work because those calls resolve on the host side, but tools that perform their own DNS lookup inside the sandbox fail before they can connect.
+
+First, fix Docker daemon DNS so the sandbox can keep normal bridge-network isolation.
+On hosts with VPN or split-DNS software, make sure Docker uses a resolver reachable from containers, then recreate or rebuild the sandbox.
+
+If direct in-sandbox DNS is required immediately, opt into host networking for the Docker GPU recreate path before rerunning onboarding:
+
+```bash
+export NEMOCLAW_DOCKER_GPU_PATCH_NETWORK=host
+$$nemoclaw onboard --resume
+```
+
+Host networking reduces Docker network isolation and can expose host port collisions, so prefer the Docker DNS fix when possible.
+Set `NEMOCLAW_DOCKER_GPU_PATCH_DNS_PROBE=0` only when you need to skip the post-recreate DNS probe.
+
 ### Host DNS resolution is blocked before provider validation
 
 NemoClaw also checks that the host process can resolve the provider host before it starts NVIDIA provider validation.

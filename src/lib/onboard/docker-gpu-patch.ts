@@ -41,6 +41,9 @@ const OPENSHELL_SANDBOX_COMMAND_ENV = "OPENSHELL_SANDBOX_COMMAND";
 const DOCKER_GPU_PATCH_TIMEOUT_MS = 30_000;
 const DOCKER_GPU_PATCH_WAIT_SECS = 180;
 export const DOCKER_GPU_PATCH_NETWORK_ENV = "NEMOCLAW_DOCKER_GPU_PATCH_NETWORK";
+export const DOCKER_GPU_PATCH_DNS_PROBE_ENV = "NEMOCLAW_DOCKER_GPU_PATCH_DNS_PROBE";
+const DOCKER_GPU_PATCH_DNS_PROBE_HOST = "example.com";
+const DOCKER_GPU_PATCH_DNS_PROBE_TIMEOUT_MS = 5_000;
 const MAX_DOCKER_CONTAINER_NAME_LENGTH = 253;
 const GPU_ENV_KEYS = new Set([
   "NVIDIA_VISIBLE_DEVICES",
@@ -140,6 +143,12 @@ export type DockerGpuPatchResult = {
   // its own supervisor wait completes.
   backupRemoved: boolean;
 };
+
+export type DockerGpuExternalDnsProbeResult =
+  | { status: "resolved"; hostname: string }
+  | { status: "failed"; hostname: string; detail: string }
+  | { status: "unavailable"; hostname: string; detail: string | null }
+  | { status: "skipped"; hostname: string };
 
 export type DockerGpuCloneRunOptions = {
   networkMode?: string | null;
@@ -437,6 +446,73 @@ function pushNumberFlag(args: string[], flag: string, value: unknown): void {
 
 function dockerCpusFromNanoCpus(nanoCpus: number): string {
   return (nanoCpus / 1_000_000_000).toFixed(3).replace(/\.?0+$/, "");
+}
+
+function dockerGpuPatchDnsProbeDisabled(env: Record<string, string | undefined>): boolean {
+  const raw = String(env[DOCKER_GPU_PATCH_DNS_PROBE_ENV] || "")
+    .trim()
+    .toLowerCase();
+  return raw === "0" || raw === "false" || raw === "off" || raw === "no";
+}
+
+export function probeDockerGpuExternalDns(
+  containerId: string,
+  deps: DockerGpuPatchDeps = {},
+  env: Record<string, string | undefined> = process.env,
+): DockerGpuExternalDnsProbeResult {
+  const hostname = DOCKER_GPU_PATCH_DNS_PROBE_HOST;
+  if (dockerGpuPatchDnsProbeDisabled(env)) return { status: "skipped", hostname };
+
+  const d = depsWithDefaults(deps);
+  const script = [
+    `getent hosts ${hostname} >/dev/null 2>&1 && echo NEMOCLAW_DNS_OK`,
+    "|| { rc=$?;",
+    "if command -v getent >/dev/null 2>&1; then",
+    'echo "NEMOCLAW_DNS_FAILED:${rc}";',
+    "else",
+    'echo "NEMOCLAW_DNS_UNAVAILABLE";',
+    "fi;",
+    "}",
+  ].join(" ");
+
+  try {
+    const result = d.dockerRun(["exec", containerId, "sh", "-lc", script], {
+      ignoreError: true,
+      suppressOutput: true,
+      timeout: DOCKER_GPU_PATCH_DNS_PROBE_TIMEOUT_MS,
+    });
+    const output = resultText(result);
+    if (!isZeroStatus(result)) {
+      return { status: "unavailable", hostname, detail: output || null };
+    }
+    if (output.includes("NEMOCLAW_DNS_OK")) return { status: "resolved", hostname };
+    if (output.includes("NEMOCLAW_DNS_FAILED")) {
+      const detail = output.match(/NEMOCLAW_DNS_FAILED:\d+/)?.[0] ?? output;
+      return { status: "failed", hostname, detail };
+    }
+    return { status: "unavailable", hostname, detail: output || null };
+  } catch (error) {
+    return {
+      status: "unavailable",
+      hostname,
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+export function printDockerGpuExternalDnsWarning(
+  result: Extract<DockerGpuExternalDnsProbeResult, { status: "failed" }>,
+  log: (message: string) => void = console.warn,
+): void {
+  log(
+    `  Warning: the GPU-enabled sandbox container could not resolve ${result.hostname} after Docker recreate.`,
+  );
+  log("  Docker's embedded resolver may be forwarding to an unreachable upstream DNS server.");
+  log("  Prefer fixing Docker daemon DNS so the sandbox keeps normal bridge-network isolation.");
+  log(
+    `  If direct in-sandbox DNS is required immediately, retry with ${DOCKER_GPU_PATCH_NETWORK_ENV}=host; host networking reduces Docker network isolation.`,
+  );
+  log(`  Set ${DOCKER_GPU_PATCH_DNS_PROBE_ENV}=0 to skip this post-recreate probe.`);
 }
 
 function normalizeGpuDeviceForDocker(device: string | null | undefined): string {
@@ -1121,6 +1197,9 @@ export function recreateOpenShellDockerSandboxWithGpu(
       throw new Error("GPU-enabled sandbox container started, but Docker did not report its ID.");
     }
     context.newContainerId = newContainerId;
+
+    const dnsProbe = probeDockerGpuExternalDns(newContainerId, deps);
+    if (dnsProbe.status === "failed") printDockerGpuExternalDnsWarning(dnsProbe);
 
     const selectedMode = selection.mode;
     const buildPatchResult = (backupRemoved: boolean): DockerGpuPatchResult => ({
