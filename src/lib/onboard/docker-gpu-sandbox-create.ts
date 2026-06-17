@@ -26,6 +26,7 @@ import { detectWslDockerDesktopStatus } from "./wsl-docker-desktop-gpu";
 
 let cachedDockerDesktopWslRuntime: boolean | null = null;
 
+/** Detect whether the current WSL Docker runtime is Docker Desktop backed. */
 export function isDockerDesktopWslRuntime(): boolean {
   if (cachedDockerDesktopWslRuntime === null) {
     cachedDockerDesktopWslRuntime = detectWslDockerDesktopStatus({}) === "docker-desktop";
@@ -33,6 +34,7 @@ export function isDockerDesktopWslRuntime(): boolean {
   return cachedDockerDesktopWslRuntime;
 }
 
+/** Clear the cached Docker Desktop WSL runtime probe result for tests. */
 export function resetIsDockerDesktopWslRuntimeCache(): void {
   cachedDockerDesktopWslRuntime = null;
 }
@@ -115,6 +117,10 @@ export type DockerGpuSandboxCreatePatch = {
   ) => SandboxGpuProofResult;
 };
 
+/**
+ * Build the create-time Docker GPU patch hooks that recreate a sandbox once
+ * OpenShell has materialized its Docker container.
+ */
 export function createDockerGpuSandboxCreatePatch(
   options: DockerGpuSandboxCreatePatchOptions,
 ): DockerGpuSandboxCreatePatch {

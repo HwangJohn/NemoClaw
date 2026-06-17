@@ -948,6 +948,10 @@ function probeDockerGpuMode(
   }
 }
 
+/**
+ * Choose the first Docker GPU injection mode accepted by the runtime for the
+ * sandbox image.
+ */
 export function selectDockerGpuPatchMode(
   options: {
     image: string;
@@ -1014,6 +1018,10 @@ export function getDockerGpuPatchFailureContext(
   return null;
 }
 
+/**
+ * Recreate an existing OpenShell Docker sandbox with the selected NVIDIA GPU
+ * access mode applied.
+ */
 export function recreateOpenShellDockerSandboxWithGpu(
   options: {
     sandboxName: string;
@@ -1188,6 +1196,10 @@ function printDockerGpuPatchCleanup(sandboxName: string): void {
   }
 }
 
+/**
+ * Apply the Docker GPU sandbox recreation path and print actionable recovery
+ * guidance before exiting on failure.
+ */
 export function applyDockerGpuPatchOrExit(
   options: {
     sandboxName: string;
