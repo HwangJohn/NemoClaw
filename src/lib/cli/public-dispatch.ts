@@ -199,6 +199,29 @@ function printDispatchUsageError(
   process.exit(1);
 }
 
+function findGlobalStatusSandboxArgument(args: readonly string[]): string | null {
+  for (const arg of args) {
+    if (arg === "--json") {
+      continue;
+    }
+    if (arg.startsWith("-")) {
+      return null;
+    }
+    return arg;
+  }
+  return null;
+}
+
+function printGlobalStatusScopeHint(sandboxName: string, args: readonly string[]): never {
+  const jsonFlag = args.includes("--json") ? " --json" : "";
+  console.error(`  '${CLI_NAME} status' shows the global sandbox/service overview.`);
+  console.error(`  It does not take a sandbox name.`);
+  console.error("");
+  console.error(`  Run: ${CLI_NAME} ${sandboxName} status${jsonFlag}`);
+  console.error(`  Or for global JSON: ${CLI_NAME} status --json`);
+  process.exit(2);
+}
+
 async function recoverRequestedSandboxIfNeeded(
   sandboxName: string,
   action: string,
@@ -305,6 +328,10 @@ export async function dispatchCli(argv: string[] = process.argv.slice(2)): Promi
   }
 
   if (normalized.kind === "global") {
+    if (normalized.command === "status") {
+      const sandboxName = findGlobalStatusSandboxArgument(normalized.args);
+      if (sandboxName) printGlobalStatusScopeHint(sandboxName, normalized.args);
+    }
     await runPublicTranslationResult(
       translatePublicGlobalArgv(normalized.command, normalized.args),
     );

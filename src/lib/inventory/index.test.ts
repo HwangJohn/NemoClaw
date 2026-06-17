@@ -599,6 +599,7 @@ describe("inventory commands", () => {
       log: (message = "") => lines.push(message),
     });
 
+    expect(lines).toContain("  Global status (registered sandboxes and host services):");
     expect(lines).toContain("  Sandboxes:");
     // Default sandbox shows the live gateway model (#2369), annotated with
     // the onboarded model when they differ.

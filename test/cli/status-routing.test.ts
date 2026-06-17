@@ -13,7 +13,8 @@ describe("CLI status routing", () => {
     const r = run("status --help");
     expect(r.code).toBe(0);
     expect(r.out).toContain("status [--json]");
-    expect(r.out).toContain("Show sandbox list and service status");
+    expect(r.out).toContain("Show global sandbox and host service status");
+    expect(r.out).toContain("Use `<name> status` for one sandbox");
   });
 
   it("sandbox status --help advertises --json flag", () => {
@@ -23,6 +24,7 @@ describe("CLI status routing", () => {
     expect(r.code).toBe(0);
     expect(r.out).toContain("--json");
     expect(r.out).toContain("$ nemoclaw sandbox status <name> [--json]");
+    expect(r.out).toContain("$ nemoclaw alpha status");
     expect(r.out).toContain("$ nemoclaw sandbox status alpha --json");
 
     const alias = runWithEnv("alpha status --help", { HOME: home });
@@ -39,7 +41,14 @@ describe("CLI status routing", () => {
   it("status rejects unexpected positional arguments through current dispatch path", () => {
     const r = run("status bogus");
     expect(r.code).toBe(2);
-    expect(r.out).toContain("Unexpected argument: bogus");
+    expect(r.out).toContain("'nemoclaw status' shows the global sandbox/service overview");
+    expect(r.out).toContain("Run: nemoclaw bogus status");
+  });
+
+  it("status preserves --json in wrong-form sandbox status guidance", () => {
+    const r = run("status --json alpha");
+    expect(r.code).toBe(2);
+    expect(r.out).toContain("Run: nemoclaw alpha status --json");
   });
 
   it("sandbox-first status rejects unexpected positional arguments through command-id dispatch", () => {

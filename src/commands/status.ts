@@ -9,8 +9,9 @@ export default class StatusCommand extends NemoClawCommand {
   static id = "status";
   static strict = true;
   static enableJsonFlag = true;
-  static summary = "Show sandbox list and service status";
-  static description = "Show registered sandboxes, live inference, services, and messaging health.";
+  static summary = "Show global sandbox and host service status";
+  static description =
+    "Show the global overview across registered sandboxes, live inference, host services, and messaging health. Use `<name> status` for one sandbox.";
   static usage = ["status [--json]"];
   static examples = ["<%= config.bin %> status", "<%= config.bin %> status --json"];
   static flags = {};

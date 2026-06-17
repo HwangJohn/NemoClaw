@@ -181,6 +181,7 @@ export async function showSandboxStatus(sandboxName: string): Promise<void> {
   }
   if (sb) {
     console.log("");
+    console.log(`  Sandbox-scoped status for '${sb.name}':`);
     console.log(`  Sandbox: ${sb.name}`);
     console.log(`    Model:    ${currentModel}`);
     console.log(`    Provider: ${currentProvider}`);
