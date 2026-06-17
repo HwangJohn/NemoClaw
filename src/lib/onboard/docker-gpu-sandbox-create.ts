@@ -147,6 +147,7 @@ export function createDockerGpuSandboxCreatePatch(
   };
 
   return {
+    /** Apply the Docker GPU patch immediately after OpenShell creates its container. */
     maybeApplyDuringCreate() {
       if (!options.enabled || result || patchError) return;
       const containerIds = findContainerIds(options.sandboxName);
@@ -166,11 +167,13 @@ export function createDockerGpuSandboxCreatePatch(
       }
     },
 
+    /** Return the create-phase patch failure summary for the onboarding wait loop. */
     createFailureMessage() {
       if (!patchError) return null;
       return "Docker GPU patch failed while OpenShell sandbox create was still waiting.";
     },
 
+    /** Exit with Docker GPU patch diagnostics when the deferred create patch failed. */
     exitOnPatchError() {
       if (!patchError) return;
       onPatchFailureExit(options.sandboxName, patchError, {
@@ -179,11 +182,13 @@ export function createDockerGpuSandboxCreatePatch(
       });
     },
 
+    /** Apply the Docker GPU patch after create if it was not already applied. */
     ensureApplied() {
       if (!options.enabled || result) return;
       result = applyDockerGpuPatchOrExit(applyOptions, options.deps);
     },
 
+    /** Wait for supervisor reconnect and roll back the patch if reconnect fails. */
     waitForSupervisorReconnectIfNeeded() {
       if (!needsSupervisorWait) return;
       const supervisorReconnectTimeoutSecs = getDockerGpuSupervisorReconnectTimeoutSecs(
@@ -231,10 +236,12 @@ export function createDockerGpuSandboxCreatePatch(
       });
     },
 
+    /** Return the selected Docker GPU injection mode, if the patch ran. */
     selectedMode() {
       return result?.mode ?? null;
     },
 
+    /** Print readiness diagnostics when onboarding failed after the patch was enabled. */
     printReadinessFailureIfEnabled() {
       if (!options.enabled) return;
       printDockerGpuReadinessFailure(options.sandboxName, result?.mode ?? null, {
@@ -244,6 +251,7 @@ export function createDockerGpuSandboxCreatePatch(
       });
     },
 
+    /** Run the sandbox GPU proof and surface Docker GPU diagnostics on failure. */
     verifyGpuOrExit(verifyDirectSandboxGpu) {
       // Before issuing GPU proof commands through `openshell sandbox exec`,
       // confirm the sandbox is still in a live phase. A sandbox that
@@ -292,6 +300,7 @@ export function createDockerGpuSandboxCreatePatch(
   };
 }
 
+/** Build the shared Docker GPU patch failure context used by diagnostics. */
 function buildFailureContext(
   sandboxName: string,
   result: DockerGpuPatchResult | null,
@@ -308,6 +317,7 @@ function buildFailureContext(
   };
 }
 
+/** Decide whether sandbox creation should use the Docker GPU patch flow. */
 export function shouldUseDockerGpuPatchForCreate(
   config: DockerGpuSandboxConfig,
   options: {
@@ -331,6 +341,7 @@ export function shouldUseDockerGpuPatchForCreate(
   return enabled;
 }
 
+/** Resolve the create-time Docker GPU patch plan and user-facing log message. */
 export function resolveDockerGpuSandboxCreatePlan(
   config: DockerGpuSandboxConfig,
   options: {
