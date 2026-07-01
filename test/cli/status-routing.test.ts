@@ -51,6 +51,19 @@ describe("CLI status routing", () => {
     expect(r.out).toContain("Run: nemoclaw alpha status --json");
   });
 
+  it("status preserves --json when the flag follows the sandbox name", () => {
+    const r = run("status bogus --json");
+    expect(r.code).toBe(2);
+    expect(r.out).toContain("Run: nemoclaw bogus status --json");
+  });
+
+  it("status surfaces an unknown flag rather than the scope hint when a name follows it", () => {
+    const r = run("status --bogus alpha");
+    expect(r.code).toBe(2);
+    expect(r.out).toContain("Nonexistent flag: --bogus");
+    expect(r.out).not.toContain("does not take a sandbox name");
+  });
+
   it("sandbox-first status rejects unexpected positional arguments through command-id dispatch", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-cli-sandbox-status-extra-"));
     writeSandboxRegistry(home);
