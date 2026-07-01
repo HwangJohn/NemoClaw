@@ -17,11 +17,12 @@
  */
 
 import { listMessagingCredentialMetadata } from "../messaging/channels";
-import { SECRET_PATTERNS, TOKEN_PREFIX_PATTERNS } from "./secret-patterns";
+import { SECRET_BLOCK_PATTERNS, SECRET_PATTERNS, TOKEN_PREFIX_PATTERNS } from "./secret-patterns";
 
 const SENSITIVE_ENV_ASSIGNMENT_KEYS = [
   "NVIDIA_INFERENCE_API_KEY",
   "NVIDIA_API_KEY",
+  "NEMOCLAW_PROVIDER_KEY",
   "NOUS_API_KEY",
   "OPENAI_API_KEY",
   "ANTHROPIC_API_KEY",
@@ -29,6 +30,7 @@ const SENSITIVE_ENV_ASSIGNMENT_KEYS = [
   "COMPATIBLE_API_KEY",
   "COMPATIBLE_ANTHROPIC_API_KEY",
   "BRAVE_API_KEY",
+  "TAVILY_API_KEY",
   ...listMessagingCredentialMetadata().map((credential) => credential.providerEnvKey),
 ];
 
@@ -107,7 +109,15 @@ const FULL_REDACT_PATTERNS: [RegExp, string][] = [
     /(NVIDIA_INFERENCE_API_KEY|NVIDIA_API_KEY|API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|_KEY)=\S+/gi,
     "$1=<REDACTED>",
   ],
+  [
+    /((?:"|')?(?:api[_-]?key|token|secret|password|credential)(?:"|')?\s*[:=]\s*(?:"|')?)[^"',}\s]+((?:"|')?)/gi,
+    "$1<REDACTED>$2",
+  ],
   ...TOKEN_PREFIX_PATTERNS.map((p): [RegExp, string] => [
+    new RegExp(p.source, p.flags),
+    "<REDACTED>",
+  ]),
+  ...SECRET_BLOCK_PATTERNS.map((p): [RegExp, string] => [
     new RegExp(p.source, p.flags),
     "<REDACTED>",
   ]),
@@ -131,7 +141,7 @@ export function redactSensitiveText(value: unknown): string | null {
   let result = value
     .replace(SENSITIVE_ENV_ASSIGNMENT_PATTERN, "$1=<REDACTED>")
     .replace(/Bearer\s+\S+/gi, "Bearer <REDACTED>");
-  for (const pattern of TOKEN_PREFIX_PATTERNS) {
+  for (const pattern of [...TOKEN_PREFIX_PATTERNS, ...SECRET_BLOCK_PATTERNS]) {
     pattern.lastIndex = 0;
     result = result.replace(pattern, "<REDACTED>");
   }

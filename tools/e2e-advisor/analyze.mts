@@ -222,7 +222,7 @@ function logProgress(message: string): void {
   console.log(`[e2e-advisor] ${new Date().toISOString()} ${message}`);
 }
 
-function buildSystemPrompt(): string {
+export function buildSystemPrompt(): string {
   return [
     "You are the NemoClaw E2E recommendation advisor for CI.",
     "",
@@ -230,12 +230,13 @@ function buildSystemPrompt(): string {
     "- a Node/TypeScript CLI for install, onboarding, credentials, policy, inference, and sandbox lifecycle;",
     "- an OpenClaw plugin and TypeScript blueprint runner;",
     "- YAML blueprint/network-policy assets;",
-    "- scenario-based and workflow-dispatched E2E tests for real user flows.",
+    "- live and workflow-dispatched E2E tests for real user flows.",
     "",
     "Recommend which existing E2E jobs should run for a PR. Use the synthetic advisor-context tool results and inspect nearby repository files as needed, especially .github/workflows, test/e2e, touched source files, and related tests.",
     "",
     "Decision policy:",
     "- Required E2E: changes that can affect installer/onboarding, sandbox lifecycle, credentials, security boundaries, network policy, inference routing, deployment, or real assistant user flows.",
+    "- Onboarding resume rule: changes to src/lib/onboard/machine live slice orchestration, resume state handling, resume repair policy, session bootstrap, or onboarding state transitions MUST require both `onboard-resume` and `onboard-repair` unless the PR is tests-only. If the change can also affect full hosted onboarding, require `cloud-onboard`. Do not rely only on unit/runtime-boundary tests for these state-machine resume paths.",
     "- Optional E2E: useful confidence checks for adjacent behavior, but not merge-blocking.",
     "- No E2E: safe docs, tests-only, comments, refactors, or tooling changes that cannot affect runtime/user flows; explain in noE2eReason.",
     "- Missing coverage: use newE2eRecommendations. Do not invent existing test names.",
