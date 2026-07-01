@@ -38,6 +38,7 @@ import {
 // ── Global commands (derived from command registry) ──────────────
 
 const GLOBAL_COMMANDS = globalCommandTokens();
+const NATIVE_OCLIF_NAMESPACES = new Set(["internal", "sandbox"]);
 
 type RegistryModule = typeof import("../state/registry");
 type RegistryRecoveryModule = typeof import("../registry-recovery-action");
@@ -214,6 +215,9 @@ function printDispatchUsageError(
 function findGlobalStatusSandboxArgument(args: readonly string[]): string | null {
   const positionals = args.filter((arg) => !["--json", "--help", "-h"].includes(arg));
   if (positionals.some((arg) => arg.startsWith("-")) || positionals.length !== 1) return null;
+  if (GLOBAL_COMMANDS.has(positionals[0]) || NATIVE_OCLIF_NAMESPACES.has(positionals[0])) {
+    return null;
+  }
   try {
     validateName(positionals[0], "sandbox name");
     return positionals[0];
@@ -224,10 +228,8 @@ function findGlobalStatusSandboxArgument(args: readonly string[]): string | null
 
 /** Prints the correction for `status <name>` and exits with the usage-error status code. */
 function printGlobalStatusScopeHint(sandboxName: string, args: readonly string[]): never {
-  const forwardedFlags = [
-    ...(args.includes("--json") ? ["--json"] : []),
-    ...(args.some((arg) => arg === "--help" || arg === "-h") ? ["--help"] : []),
-  ];
+  const helpRequested = hasHelpFlag(args);
+  const forwardedFlags = helpRequested ? ["--help"] : args.includes("--json") ? ["--json"] : [];
   const flagSuffix = forwardedFlags.length > 0 ? ` ${forwardedFlags.join(" ")}` : "";
   console.error(`  '${CLI_NAME} status' shows the global sandbox/service overview.`);
   console.error(`  It does not take a sandbox name.`);
@@ -442,7 +444,7 @@ function printUnknownSandboxOrCommand(cmd: string): never {
 
 /** Normalize public argv and route it to oclif or sandbox-first command handlers. */
 export async function dispatchCli(argv: string[] = process.argv.slice(2)): Promise<void> {
-  if (argv[0] === "internal" || argv[0] === "sandbox") {
+  if (argv[0] && NATIVE_OCLIF_NAMESPACES.has(argv[0])) {
     await runNativeOclifArgv(argv);
     return;
   }

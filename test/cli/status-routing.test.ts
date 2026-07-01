@@ -84,6 +84,28 @@ describe("CLI status routing", () => {
     expect(r.out).toContain("Run: nemoclaw alpha status --help");
   });
 
+  it.each([
+    "status",
+    "help",
+    "sandbox",
+    "internal",
+  ])("status does not suggest reserved command token %s as a sandbox name", (token) => {
+    const r = run(`status ${token}`);
+    expect(r.code).toBe(2);
+    expect(r.out).toContain(`Unexpected argument: ${token}`);
+    expect(r.out).not.toContain("Run:");
+  });
+
+  it.each([
+    "status alpha --json --help",
+    "status alpha --help --json",
+  ])("status gives help precedence in combined-flag scope guidance for %s", (command) => {
+    const r = run(command);
+    expect(r.code).toBe(2);
+    expect(r.out).toContain("Run: nemoclaw alpha status --help");
+    expect(r.out).not.toContain("Run: nemoclaw alpha status --json --help");
+  });
+
   it("status never emits an unsafe sandbox token in a copy-paste command", () => {
     const r = run("status 'alpha;echo pwned'");
     expect(r.code).toBe(2);
