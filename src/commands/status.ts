@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getStatusReport, showStatusCommand } from "../lib/inventory/index";
 import { NemoClawCommand } from "../lib/cli/nemoclaw-oclif-command";
+import { getStatusReport, showStatusCommand } from "../lib/inventory/index";
 import { buildStatusCommandDeps } from "../lib/status-command-deps";
 
 export default class StatusCommand extends NemoClawCommand {

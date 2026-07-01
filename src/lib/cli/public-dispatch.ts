@@ -212,25 +212,27 @@ function printDispatchUsageError(
 
 /** Returns the sandbox-like positional argument passed to global `status`, if one exists. */
 function findGlobalStatusSandboxArgument(args: readonly string[]): string | null {
-  for (const arg of args) {
-    if (arg === "--json") {
-      continue;
-    }
-    if (arg.startsWith("-")) {
-      return null;
-    }
-    return arg;
+  const positionals = args.filter((arg) => !["--json", "--help", "-h"].includes(arg));
+  if (positionals.some((arg) => arg.startsWith("-")) || positionals.length !== 1) return null;
+  try {
+    validateName(positionals[0], "sandbox name");
+    return positionals[0];
+  } catch {
+    return null;
   }
-  return null;
 }
 
 /** Prints the correction for `status <name>` and exits with the usage-error status code. */
 function printGlobalStatusScopeHint(sandboxName: string, args: readonly string[]): never {
-  const jsonFlag = args.includes("--json") ? " --json" : "";
+  const forwardedFlags = [
+    ...(args.includes("--json") ? ["--json"] : []),
+    ...(args.some((arg) => arg === "--help" || arg === "-h") ? ["--help"] : []),
+  ];
+  const flagSuffix = forwardedFlags.length > 0 ? ` ${forwardedFlags.join(" ")}` : "";
   console.error(`  '${CLI_NAME} status' shows the global sandbox/service overview.`);
   console.error(`  It does not take a sandbox name.`);
   console.error("");
-  console.error(`  Run: ${CLI_NAME} ${sandboxName} status${jsonFlag}`);
+  console.error(`  Run: ${CLI_NAME} ${sandboxName} status${flagSuffix}`);
   console.error(`  Or for global JSON: ${CLI_NAME} status --json`);
   process.exit(2);
 }

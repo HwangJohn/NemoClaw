@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { describe, expect, it } from "vitest";
 
 import { run, runWithEnv, writeSandboxRegistry } from "./helpers";
 
@@ -62,6 +62,33 @@ describe("CLI status routing", () => {
     expect(r.code).toBe(2);
     expect(r.out).toContain("Nonexistent flag: --bogus");
     expect(r.out).not.toContain("does not take a sandbox name");
+  });
+
+  it("status surfaces an unknown flag rather than the scope hint when it follows a name", () => {
+    const r = run("status alpha --bogus");
+    expect(r.code).toBe(2);
+    expect(r.out).toContain("Nonexistent flag: --bogus");
+    expect(r.out).not.toContain("does not take a sandbox name");
+  });
+
+  it("status leaves multiple unexpected names to the strict parser", () => {
+    const r = run("status alpha beta");
+    expect(r.code).toBe(2);
+    expect(r.out).toContain("Unexpected arguments: alpha, beta");
+    expect(r.out).not.toContain("does not take a sandbox name");
+  });
+
+  it("status preserves help when correcting a sandbox-like argument", () => {
+    const r = run("status alpha --help");
+    expect(r.code).toBe(2);
+    expect(r.out).toContain("Run: nemoclaw alpha status --help");
+  });
+
+  it("status never emits an unsafe sandbox token in a copy-paste command", () => {
+    const r = run("status 'alpha;echo pwned'");
+    expect(r.code).toBe(2);
+    expect(r.out).toContain("Unexpected argument: alpha;echo pwned");
+    expect(r.out).not.toContain("Run:");
   });
 
   it("sandbox-first status rejects unexpected positional arguments through command-id dispatch", () => {

@@ -29,7 +29,7 @@ describe("root help", () => {
     renderRootHelp();
 
     const output = log.mock.calls.map(([line]) => String(line)).join("\n");
-    expect(output).toContain("Global commands inspect host-wide state");
+    expect(output).toContain("Global commands run without a sandbox-name prefix");
     expect(output).toContain("sandbox commands start with a sandbox name");
     expect(output).toContain("nemoclaw status");
     expect(output).toContain("nemoclaw <name> status");
