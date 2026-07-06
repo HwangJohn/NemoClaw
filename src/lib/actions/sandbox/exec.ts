@@ -1,15 +1,17 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { type StdioOptions, spawn, spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { spawnExitCode } from "../../core/process-exit";
-import { isStdinTty } from "../../core/stdin";
 import type {
   MutableConfigPermsInspection,
   MutableConfigRepairResult,
 } from "../../shields/mutable-config-perms";
 import type { SandboxEntry } from "../../state/registry";
 import { type ExecPolicyHintDeps, preparePolicyHint } from "./exec-policy-hint-integration";
+import { buildSandboxExecStdio } from "./exec-stdio";
+
+export { buildSandboxExecStdio, shouldInheritSandboxExecStdin } from "./exec-stdio";
 
 export type SandboxExecOptions = {
   workdir?: string;
@@ -186,23 +188,6 @@ export function computeExitCode(result: SpawnLikeResult): {
     return { code: 1, errorMessage: result.error.message };
   }
   return { code: spawnExitCode(result) };
-}
-
-export function shouldInheritSandboxExecStdin(
-  requested: boolean | undefined,
-  stdinIsTty: boolean | undefined,
-): boolean {
-  if (typeof requested === "boolean") return requested;
-  return stdinIsTty === true;
-}
-
-export function buildSandboxExecStdio(
-  options: SandboxExecOptions = {},
-  stdinIsTty: boolean | undefined = isStdinTty(),
-): StdioOptions {
-  return shouldInheritSandboxExecStdin(options.stdin, stdinIsTty)
-    ? "inherit"
-    : ["ignore", "inherit", "inherit"];
 }
 
 function repairFailureDetail(
