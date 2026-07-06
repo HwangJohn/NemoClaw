@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { spawn, spawnSync, type StdioOptions } from "node:child_process";
+import { type StdioOptions, spawn, spawnSync } from "node:child_process";
 import { spawnExitCode } from "../../core/process-exit";
+import { isStdinTty } from "../../core/stdin";
 import type {
   MutableConfigPermsInspection,
   MutableConfigRepairResult,
@@ -161,7 +162,7 @@ export function multilineExecMessage(
     `error: command argument ${position} (${describeMultilineArg(command[index])}) contains a newline or carriage return, which OpenShell exec does not accept.`,
     "Multi-line commands (for example heredocs) cannot be passed through exec argv. Instead:",
     `  - join statements with semicolons: ${cliName} ${sandboxName} exec -- bash -lc "cmd1; cmd2"`,
-    `  - pipe the script into the sandbox shell over stdin: printf 'cmd1\\ncmd2\\n' | ${cliName} ${sandboxName} exec -- bash`,
+    `  - pipe the script into the sandbox shell over stdin: printf 'cmd1\\ncmd2\\n' | ${cliName} ${sandboxName} exec --stdin -- bash`,
     `  - or write the script to a file in the sandbox and run it: ${cliName} ${sandboxName} exec -- bash <script-path>`,
   ].join("\n");
 }
@@ -187,8 +188,21 @@ export function computeExitCode(result: SpawnLikeResult): {
   return { code: spawnExitCode(result) };
 }
 
-export function buildSandboxExecStdio(options: SandboxExecOptions = {}): StdioOptions {
-  return options.stdin === false ? ["ignore", "inherit", "inherit"] : "inherit";
+export function shouldInheritSandboxExecStdin(
+  requested: boolean | undefined,
+  stdinIsTty: boolean | undefined,
+): boolean {
+  if (typeof requested === "boolean") return requested;
+  return stdinIsTty === true;
+}
+
+export function buildSandboxExecStdio(
+  options: SandboxExecOptions = {},
+  stdinIsTty: boolean | undefined = isStdinTty(),
+): StdioOptions {
+  return shouldInheritSandboxExecStdin(options.stdin, stdinIsTty)
+    ? "inherit"
+    : ["ignore", "inherit", "inherit"];
 }
 
 function repairFailureDetail(

@@ -8,7 +8,7 @@ vi.mock("../../lib/actions/sandbox/exec", () => ({
   execSandbox: execSandboxMock,
 }));
 
-import SandboxExecCommand, { shouldInheritSandboxExecStdin } from "./exec";
+import SandboxExecCommand from "./exec";
 
 const rootDir = process.cwd();
 
@@ -25,7 +25,7 @@ describe("SandboxExecCommand oclif parse path", () => {
     expect(execSandboxMock).toHaveBeenCalledWith(
       "alpha",
       ["openclaw", "agent", "--agent", "main", "-m", "hi"],
-      { workdir: undefined, tty: null, timeoutSeconds: undefined, stdin: true },
+      { workdir: undefined, tty: null, timeoutSeconds: undefined, stdin: undefined },
     );
   });
 
@@ -38,7 +38,7 @@ describe("SandboxExecCommand oclif parse path", () => {
       workdir: "/sandbox/workspace",
       tty: null,
       timeoutSeconds: undefined,
-      stdin: true,
+      stdin: undefined,
     });
   });
 
@@ -52,6 +52,7 @@ describe("SandboxExecCommand oclif parse path", () => {
       workdir: undefined,
       tty: null,
       timeoutSeconds: undefined,
+      stdin: undefined,
     });
   });
 
@@ -63,7 +64,7 @@ describe("SandboxExecCommand oclif parse path", () => {
     expect(execSandboxMock).toHaveBeenCalledWith(
       "alpha",
       ["bash", "-lc", "echo line1; echo line2"],
-      { workdir: undefined, tty: null, timeoutSeconds: undefined },
+      { workdir: undefined, tty: null, timeoutSeconds: undefined, stdin: undefined },
     );
   });
 
@@ -75,7 +76,7 @@ describe("SandboxExecCommand oclif parse path", () => {
     expect(execSandboxMock).toHaveBeenCalledWith(
       "alpha",
       ["bash", "-lc", "echo line1; echo line2"],
-      { workdir: "/sandbox", tty: null, timeoutSeconds: undefined },
+      { workdir: "/sandbox", tty: null, timeoutSeconds: undefined, stdin: undefined },
     );
   });
 
@@ -85,7 +86,7 @@ describe("SandboxExecCommand oclif parse path", () => {
       workdir: undefined,
       tty: true,
       timeoutSeconds: 30,
-      stdin: true,
+      stdin: undefined,
     });
     execSandboxMock.mockReset();
 
@@ -94,7 +95,7 @@ describe("SandboxExecCommand oclif parse path", () => {
       workdir: undefined,
       tty: false,
       timeoutSeconds: undefined,
-      stdin: true,
+      stdin: undefined,
     });
   });
 
@@ -118,24 +119,13 @@ describe("SandboxExecCommand oclif parse path", () => {
     });
   });
 
-  it("keeps stdin inherited by default when caller stdin is a TTY", async () => {
+  it("leaves stdin mode unset for the production spawner to auto-detect", async () => {
     await SandboxExecCommand.run(["alpha", "--", "bash"], rootDir);
     expect(execSandboxMock).toHaveBeenCalledWith("alpha", ["bash"], {
       workdir: undefined,
       tty: null,
       timeoutSeconds: undefined,
-      stdin: true,
+      stdin: undefined,
     });
-  });
-});
-
-describe("shouldInheritSandboxExecStdin", () => {
-  it("uses explicit stdin flags when provided", () => {
-    expect(shouldInheritSandboxExecStdin(true)).toBe(true);
-    expect(shouldInheritSandboxExecStdin(false)).toBe(false);
-  });
-
-  it("inherits stdin by default to preserve existing command behavior", () => {
-    expect(shouldInheritSandboxExecStdin(undefined)).toBe(true);
   });
 });
