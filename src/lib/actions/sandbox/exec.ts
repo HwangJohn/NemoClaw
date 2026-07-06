@@ -10,8 +10,10 @@ import type {
 import type { SandboxEntry } from "../../state/registry";
 import { type ExecPolicyHintDeps, preparePolicyHint } from "./exec-policy-hint-integration";
 import { buildSandboxExecStdio } from "./exec-stdio";
+import { wrapExecCommandWithRuntimeEnv } from "./runtime-env";
 
 export { buildSandboxExecStdio, shouldInheritSandboxExecStdin } from "./exec-stdio";
+export { wrapExecCommandWithRuntimeEnv } from "./runtime-env";
 
 export type SandboxExecOptions = {
   workdir?: string;
@@ -418,7 +420,7 @@ export async function execSandbox(
   const completion = await runSandboxExecCommand(
     binary,
     sandboxName,
-    command,
+    wrapExecCommandWithRuntimeEnv(command),
     options,
     deps.run ?? ((runBinary, runArgs) => runSandboxExecChild(runBinary, runArgs, options)),
     deps.cleanupDeps ?? {
