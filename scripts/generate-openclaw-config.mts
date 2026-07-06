@@ -9,16 +9,18 @@
 //
 // Main inputs:
 //   CHAT_UI_URL, NEMOCLAW_DASHBOARD_PORT, NEMOCLAW_MODEL,
-//   NEMOCLAW_PROVIDER_KEY, NEMOCLAW_PRIMARY_MODEL_REF,
+//   NEMOCLAW_PROVIDER_KEY, NEMOCLAW_UPSTREAM_PROVIDER, NEMOCLAW_PRIMARY_MODEL_REF,
 //   NEMOCLAW_INFERENCE_BASE_URL, NEMOCLAW_INFERENCE_API,
 //   NEMOCLAW_INFERENCE_INPUTS, NEMOCLAW_CONTEXT_WINDOW,
 //   NEMOCLAW_MAX_TOKENS, NEMOCLAW_REASONING,
+//   NEMOCLAW_TOOL_DISCLOSURE,
 //   NEMOCLAW_AGENT_TIMEOUT, NEMOCLAW_AGENT_HEARTBEAT_EVERY,
 //   NEMOCLAW_INFERENCE_COMPAT_B64,
 //   NEMOCLAW_DISABLE_DEVICE_AUTH,
 //   NEMOCLAW_EXTRA_AGENTS_JSON_B64,
 //   NEMOCLAW_PROXY_HOST, NEMOCLAW_PROXY_PORT,
 //   NEMOCLAW_OPENCLAW_MANAGED_PROXY, NEMOCLAW_WEB_SEARCH_ENABLED,
+//   NEMOCLAW_WEB_SEARCH_PROVIDER,
 //   NEMOCLAW_OPENCLAW_OTEL, NEMOCLAW_OPENCLAW_OTEL_ENDPOINT,
 //   NEMOCLAW_OPENCLAW_OTEL_SERVICE_NAME, NEMOCLAW_OPENCLAW_OTEL_SAMPLE_RATE.
 
@@ -33,6 +35,7 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { readToolDisclosureEnv } from "../src/lib/tool-disclosure.ts";
 
 type Env = Record<string, string | undefined>;
 type JsonObject = Record<string, any>;
@@ -45,7 +48,38 @@ const MODEL_SETUP_EFFECT_KEYS: Record<string, Set<string>> = {
 const DEFAULT_DASHBOARD_PORT = 18789;
 const MIN_DASHBOARD_PORT = 1024;
 const MAX_DASHBOARD_PORT = 65535;
+
+// Local Ollama small-context compaction policy (NemoClaw #5468).
+//
+// OpenClaw 2026.5.x auto-compaction reserves `reserveTokensFloor` tokens at the
+// tail of the context window for reply generation (default 20_000, see the
+// pinned openclaw package's pi-settings), then clamps that reserve so at least
+// OPENCLAW_MIN_PROMPT_BUDGET_TOKENS (8_000) of the window stays available for
+// prompt content. NemoClaw floors a Local Ollama runtime window to 16_384
+// (ollama-runtime-context.ts), so the default 20k reserve is clamped down and
+// the prompt budget is pinned at ~8k — too small for OpenClaw's base prompt +
+// tool catalogue (~7.4k tokens). The first user turn overflows and preemptive
+// compaction, with no prior history to compact, fails with
+// "Auto-compaction could not recover this turn".
+//
+// Below SMALL_OLLAMA_CONTEXT_THRESHOLD we lower both reserveTokens and
+// reserveTokensFloor to the model's own reply budget (maxTokens) so the prompt
+// budget becomes `contextWindow - reserve` and the first turn fits. Above the
+// threshold OpenClaw's default reserve already leaves an ample prompt budget, so
+// its safeguard is left untouched. Both keys must be set: OpenClaw applies
+// max(reserveTokens, reserveTokensFloor), so lowering the floor alone would let
+// the 20k default pull the reserve back up.
+const OPENCLAW_DEFAULT_RESERVE_TOKENS_FLOOR = 20_000;
+const OPENCLAW_MIN_PROMPT_BUDGET_TOKENS = 8_000;
+const SMALL_OLLAMA_CONTEXT_THRESHOLD =
+  OPENCLAW_DEFAULT_RESERVE_TOKENS_FLOOR + OPENCLAW_MIN_PROMPT_BUDGET_TOKENS;
+const LOCAL_OLLAMA_UPSTREAM_PROVIDER = "ollama-local";
 const FALSE_VALUES = new Set(["0", "false", "no", "off"]);
+const WEB_SEARCH_PROVIDERS = {
+  brave: { credentialEnv: "BRAVE_API_KEY" },
+  tavily: { credentialEnv: "TAVILY_API_KEY" },
+} as const;
+type WebSearchProvider = keyof typeof WEB_SEARCH_PROVIDERS;
 const DEFAULT_OPENCLAW_OTEL_ENDPOINT = "http://host.openshell.internal:4318";
 const DEFAULT_OPENCLAW_OTEL_SERVICE_NAME = "openclaw-gateway";
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
@@ -53,6 +87,14 @@ const SCRIPT_DIR = dirname(SCRIPT_PATH);
 
 function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function resolveWebSearchProvider(env: Env): WebSearchProvider {
+  const provider = (env.NEMOCLAW_WEB_SEARCH_PROVIDER || "brave").trim();
+  if (provider === "brave" || provider === "tavily") return provider;
+  throw new Error(
+    `NEMOCLAW_WEB_SEARCH_PROVIDER must be "brave" or "tavily", got ${JSON.stringify(provider)}`,
+  );
 }
 
 function unique<T>(values: Iterable<T>): T[] {
@@ -362,8 +404,14 @@ function validateSelectedAgentEffects(
           `${manifestPath}: unknown effects.openclawTools keys: ${unknownToolKeys.join(", ")}`,
         );
       }
+      // Source: openclaw@2026.5.27 ToolSearchSchema and resolveToolSearchConfig
+      // (`src/config/zod-schema.agent-runtime.ts`, `src/agents/tool-search.ts`).
+      // Keep the registry override narrower than the runtime config: false
+      // disables Tool Search, while true selects its default code bridge.
       if ("toolSearch" in tools && typeof tools.toolSearch !== "boolean") {
-        throw new Error(`${manifestPath}: effects.openclawTools.toolSearch must be a boolean`);
+        throw new Error(
+          `${manifestPath}: effects.openclawTools.toolSearch must be a boolean override`,
+        );
       }
     }
 
@@ -832,13 +880,17 @@ function validateExtraAgents(value: unknown, primaryProvider: string): ExtraAgen
     const canonicalPaths: Record<string, string> = {};
     for (const pathKey of ["workspace", "agentDir"] as const) {
       const pathValue = entry[pathKey];
+      const expected = expectedAgentPath(pathKey, id);
+      if (pathValue === undefined) {
+        canonicalPaths[pathKey] = expected;
+        continue;
+      }
       if (typeof pathValue !== "string" || pathValue.length === 0) {
-        throw new Error(`${label}.${pathKey} must be a non-empty string`);
+        throw new Error(`${label}.${pathKey} must be a non-empty string when present`);
       }
       if (!isAbsolute(pathValue)) {
         throw new Error(`${label}.${pathKey} must be an absolute path, got "${pathValue}"`);
       }
-      const expected = expectedAgentPath(pathKey, id);
       if (resolve(pathValue) !== expected) {
         throw new Error(
           `${label}.${pathKey} must equal "${expected}" for agent id "${id}", got "${pathValue}"`,
@@ -945,6 +997,27 @@ function decodeJsonEnv(env: Env, name: string, defaultValue: string): any {
   return JSON.parse(Buffer.from(raw, "base64").toString("utf-8"));
 }
 
+// Build the agents.defaults.compaction override for a Local Ollama small-context
+// window, or undefined when it does not apply. See the policy constants above.
+export function buildLocalOllamaSmallContextCompaction(
+  upstreamProvider: string | undefined,
+  contextWindow: number,
+  maxTokens: number,
+): JsonObject | undefined {
+  if ((upstreamProvider || "").trim() !== LOCAL_OLLAMA_UPSTREAM_PROVIDER) {
+    return undefined;
+  }
+  if (!Number.isFinite(contextWindow) || contextWindow > SMALL_OLLAMA_CONTEXT_THRESHOLD) {
+    return undefined;
+  }
+  // Reserve the model's reply budget, but never so much that the remaining
+  // prompt budget drops below OpenClaw's own minimum — mirrors OpenClaw's clamp
+  // so a pathological maxTokens cannot make the window worse than the default.
+  const maxReserve = Math.max(0, contextWindow - OPENCLAW_MIN_PROMPT_BUDGET_TOKENS);
+  const reserveTokens = Math.max(0, Math.min(maxTokens, maxReserve));
+  return { reserveTokens, reserveTokensFloor: reserveTokens };
+}
+
 export function buildConfig(env: Env = process.env): JsonObject {
   const proxyHost = env.NEMOCLAW_PROXY_HOST || "10.200.0.1";
   const proxyPort = env.NEMOCLAW_PROXY_PORT || "3128";
@@ -966,6 +1039,7 @@ export function buildConfig(env: Env = process.env): JsonObject {
   const inferenceApi = env.NEMOCLAW_INFERENCE_API as string;
   const contextWindow = coercePositiveInt(env, "NEMOCLAW_CONTEXT_WINDOW", 131072);
   const maxTokens = coercePositiveInt(env, "NEMOCLAW_MAX_TOKENS", 4096);
+  const toolDisclosure = readToolDisclosureEnv(env);
 
   const reasoning = (env.NEMOCLAW_REASONING || "false") === "true";
   const inferenceInputs = (env.NEMOCLAW_INFERENCE_INPUTS || "text")
@@ -1023,7 +1097,27 @@ export function buildConfig(env: Env = process.env): JsonObject {
       openclawToolOverrides,
     );
   }
-  const openclawTools: JsonObject = { toolSearch: true, ...openclawToolOverrides };
+  // OpenClaw v2026.5.27 accepts either a boolean shorthand or this object form.
+  // Model-specific manifests intentionally remain boolean-only and replace this
+  // value wholesale: false disables Tool Search; true restores upstream code
+  // mode. Do not shallow-merge a boolean override into the structured object.
+  const structuredToolSearch: JsonObject = {
+    mode: "tools",
+    searchDefaultLimit: 8,
+    maxSearchLimit: 20,
+  };
+  const openclawTools: JsonObject = {
+    ...openclawToolOverrides,
+    // An explicit direct request is authoritative. Compatibility manifests may
+    // downgrade progressive mode to false, but may never re-enable search over
+    // a user's direct selection.
+    toolSearch:
+      toolDisclosure === "direct"
+        ? false
+        : "toolSearch" in openclawToolOverrides
+          ? openclawToolOverrides.toolSearch
+          : structuredToolSearch,
+  };
 
   if (providerKey === "ollama" || providerKey === "ollama-local") {
     inferenceCompat.supportsUsageInStreaming ??= true;
@@ -1105,28 +1199,8 @@ export function buildConfig(env: Env = process.env): JsonObject {
   };
 
   const pluginEntries: JsonObject = {
-    acpx: { enabled: false },
     bonjour: { enabled: false },
-    qqbot: { enabled: false },
   };
-  const bundledProviderPlugins: Record<string, Set<string>> = {
-    "amazon-bedrock": new Set(["amazon-bedrock", "bedrock"]),
-    "amazon-bedrock-mantle": new Set(["amazon-bedrock-mantle"]),
-    anthropic: new Set(["anthropic"]),
-    "anthropic-vertex": new Set(["anthropic-vertex"]),
-    fireworks: new Set(["fireworks"]),
-    google: new Set(["google", "google-gemini-cli"]),
-    kimi: new Set(["kimi"]),
-    lmstudio: new Set(["lmstudio"]),
-    ollama: new Set(["ollama", "ollama-local"]),
-    openai: new Set(["openai"]),
-    xai: new Set(["xai"]),
-  };
-  for (const [pluginId, providerKeys] of Object.entries(bundledProviderPlugins)) {
-    if (!providerKeys.has(providerKey)) {
-      pluginEntries[pluginId] = { enabled: false };
-    }
-  }
   const openclawOtel = buildOpenClawOtelConfig(env);
   if (openclawOtel) {
     pluginEntries["diagnostics-otel"] = { enabled: true };
@@ -1155,6 +1229,15 @@ export function buildConfig(env: Env = process.env): JsonObject {
     agentDefaults.subagents = extraAgentsPayload.defaults.subagents;
   }
 
+  const smallOllamaCompaction = buildLocalOllamaSmallContextCompaction(
+    env.NEMOCLAW_UPSTREAM_PROVIDER,
+    contextWindow,
+    maxTokens,
+  );
+  if (smallOllamaCompaction) {
+    agentDefaults.compaction = smallOllamaCompaction;
+  }
+
   const config: JsonObject = {
     agents: {
       defaults: agentDefaults,
@@ -1175,6 +1258,19 @@ export function buildConfig(env: Env = process.env): JsonObject {
       },
       trustedProxies: ["127.0.0.1", "::1"],
       auth: { token: "" },
+      // Restart-class config changes (plugins.installs, models.pricing,
+      // unrecognized keys, ...) must not let the gateway SIGUSR1-restart
+      // itself: in containers the in-process restart path can fail and park
+      // the process alive with no HTTP listener, which the PID-wait respawn
+      // loop in nemoclaw-start.sh cannot observe (#4710). Hot mode makes the
+      // gateway ignore plan-driven restarts; NemoClaw applies restart-class
+      // changes through sandbox rebuild or `nemoclaw <name> recover` instead.
+      // Removal condition (also for the serving watchdog in
+      // nemoclaw-start.sh): once the pinned OpenClaw release exits non-zero
+      // when a failed in-process restart cannot re-bind its listener — so the
+      // respawn loop sees the death — this pin can revert to the default
+      // reload mode after a wedge drill proves no regression.
+      reload: { mode: "hot" },
     },
   };
 
@@ -1197,18 +1293,16 @@ export function buildConfig(env: Env = process.env): JsonObject {
   tools.web.fetch = { enabled: true, useTrustedEnvProxy: true };
 
   if (env.NEMOCLAW_WEB_SEARCH_ENABLED === "1") {
-    // OpenClaw 2026.5.x: web-search providers are external plugins. The
-    // provider-owned apiKey lives under plugins.entries.<plugin>.config,
-    // not inline in tools.web.search. Writing the legacy inline shape makes
-    // the build-time `openclaw plugins install` exit non-zero during its
-    // pre-install config validation (the brave plugin is not installed yet),
-    // aborting the image build under `set -eu` before `doctor --fix` can
-    // migrate it. Emit the current schema directly so install validates
-    // cleanly. See NemoClaw #5266 (follow-up to #4955 / #3948).
-    tools.web.search = { enabled: true, provider: "brave" };
-    config.plugins.entries.brave = {
+    // OpenClaw 2026.5.x keeps provider-owned credentials under
+    // plugins.entries.<provider>.config rather than inline on tools.web.search.
+    // Brave is installed externally during the image build; Tavily ships as a
+    // bundled OpenClaw extension. Both use the same plugin-scoped config shape.
+    const webSearchProvider = resolveWebSearchProvider(env);
+    const credentialEnv = WEB_SEARCH_PROVIDERS[webSearchProvider].credentialEnv;
+    tools.web.search = { enabled: true, provider: webSearchProvider };
+    config.plugins.entries[webSearchProvider] = {
       enabled: true,
-      config: { webSearch: { apiKey: "openshell:resolve:env:BRAVE_API_KEY" } },
+      config: { webSearch: { apiKey: `openshell:resolve:env:${credentialEnv}` } },
     };
   }
 

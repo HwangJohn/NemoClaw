@@ -2,11 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { dockerListImagesFormat, dockerRmi } from "../adapters/docker";
-import {
-  detectOpenShellStateRpcPreflightIssue,
-  detectOpenShellStateRpcResultIssue,
-  printOpenShellStateRpcIssue,
-} from "../adapters/openshell/gateway-drift";
 import { CLI_NAME } from "../cli/branding";
 import { prompt as askPrompt } from "../credentials/store";
 import {
@@ -14,10 +9,7 @@ import {
   normalizeGarbageCollectImagesOptions,
 } from "../domain/lifecycle/options";
 import { findOrphanedSandboxImages, parseSandboxImageRows } from "../domain/maintenance/images";
-import {
-  captureSandboxListWithGatewayRecovery,
-  printSandboxListFailureWithRecoveryContext,
-} from "../openshell-sandbox-list";
+import { captureSandboxListWithGatewayPreflightOrExit } from "../openshell-sandbox-list";
 import { parseReadySandboxNames } from "../runtime-recovery";
 import * as registry from "../state/registry";
 import * as sandboxState from "../state/sandbox";
@@ -31,6 +23,10 @@ const R = useColor ? "\x1b[0m" : "";
 const RD = useColor ? "\x1b[1;31m" : "";
 const YW = useColor ? "\x1b[1;33m" : "";
 
+export function shouldSkipUnreachableSandboxBackup(env: NodeJS.ProcessEnv): boolean {
+  return env.NEMOCLAW_SKIP_UNREACHABLE_SANDBOX_BACKUP === "1";
+}
+
 export async function backupAll(): Promise<void> {
   const { sandboxes } = registry.listSandboxes();
   if (sandboxes.length === 0) {
@@ -38,34 +34,17 @@ export async function backupAll(): Promise<void> {
     return;
   }
 
-  const preflightIssue = detectOpenShellStateRpcPreflightIssue();
-  if (preflightIssue) {
-    printOpenShellStateRpcIssue(preflightIssue, {
-      action: "backing up registered sandboxes",
-      command: `${CLI_NAME} backup-all`,
-    });
-    process.exit(1);
-  }
-
-  const liveListRecovery = await captureSandboxListWithGatewayRecovery();
-  const liveList = liveListRecovery.result;
-  const resultIssue = detectOpenShellStateRpcResultIssue(liveList);
-  if (resultIssue) {
-    printOpenShellStateRpcIssue(resultIssue, {
-      action: "backing up registered sandboxes",
-      command: `${CLI_NAME} backup-all`,
-    });
-    process.exit(1);
-  }
-  if (liveList.status !== 0) {
-    printSandboxListFailureWithRecoveryContext(liveListRecovery);
-    process.exit(liveList.status || 1);
-  }
+  const liveList = await captureSandboxListWithGatewayPreflightOrExit({
+    action: "backing up registered sandboxes",
+    command: `${CLI_NAME} backup-all`,
+  });
   const readyNames = parseReadySandboxNames(liveList.output || "");
 
+  const skipUnreachable = shouldSkipUnreachableSandboxBackup(process.env);
   let backed = 0;
   let failed = 0;
   let skipped = 0;
+  let unreachableRunning = 0;
   for (const sb of sandboxes) {
     if (!readyNames.has(sb.name)) {
       console.log(`  ${D}Skipping '${sb.name}' (not running)${R}`);
@@ -73,13 +52,65 @@ export async function backupAll(): Promise<void> {
       continue;
     }
     console.log(`  Backing up '${sb.name}'...`);
-    const result = sandboxState.backupSandboxState(sb.name);
+    let result: sandboxState.BackupResult;
+    try {
+      result = sandboxState.backupSandboxState(sb.name);
+    } catch (err: unknown) {
+      // Source-of-truth review (#5734 / #5819):
+      //
+      // - Invalid state: a sandbox in the registry references an agent whose
+      //   manifest no longer exists on disk (orphan after a higher-version
+      //   install replaced the manifest tree). loadAgent() at
+      //   src/lib/agent/defs.ts:365-372 throws `Agent '<name>' not found:
+      //   <manifestPath>` when this happens.
+      // - Source boundary: the orphan is owned upstream by the install/upgrade
+      //   flow that mutates the agents/ directory without reconciling the
+      //   registry. The narrow skip here exists purely so the pre-upgrade
+      //   backup-all loop survives until the upgrade itself reinstalls the
+      //   missing manifest.
+      // - Source-fix constraint: the registry cannot be reconciled before the
+      //   backup runs because the backup IS what gates the upgrade that ships
+      //   the reconciled manifests. A registry-side fix at boot or post-install
+      //   would solve the root cause but is out of scope here.
+      // - Regression test: maintenance.test.ts covers the orphan-skip,
+      //   skipped-not-failed counter, non-orphan re-throw (EACCES), and the
+      //   `: <path>`-suffixed shape boundary so widening or eliminating the
+      //   matcher fails CI.
+      // - Removal condition: drop this catch when the registry is reconciled
+      //   on install/upgrade and orphan sandboxes can no longer reach
+      //   backup-all (or when backupSandboxState surfaces a typed
+      //   MissingAgentManifestError that the caller can identify without
+      //   string matching).
+      //
+      // Anchored to the exact loadAgent() throw shape. Requiring the
+      // `: <path>` suffix prevents accidentally catching unrelated
+      // "Agent '...' not found" messages from other layers that should still
+      // abort the backup batch (disk full, SSH timeout, permission denied,
+      // programming bugs all propagate).
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!/^Agent '[^']+' not found: .+\/manifest\.yaml$/.test(msg)) {
+        throw err;
+      }
+      console.log(`  ${YW}⚠${R} Skipped '${sb.name}' (orphan manifest): ${msg}`);
+      skipped++;
+      continue;
+    }
     if (result.success) {
       console.log(
         `  ${G}✓${R} ${sb.name}: ${result.backedUpDirs.length} dirs, ${result.backedUpFiles.length} files → ${result.manifest?.backupPath || "unknown"}`,
       );
       backed++;
     } else {
+      if (result.unreachable) {
+        if (skipUnreachable) {
+          console.log(
+            `  ${YW}⚠${R} Skipped '${sb.name}' (running but SSH-unreachable; NEMOCLAW_SKIP_UNREACHABLE_SANDBOX_BACKUP=1 set). Any uncommitted state since the last successful backup will be lost.`,
+          );
+          skipped++;
+          continue;
+        }
+        unreachableRunning++;
+      }
       const failedItems = [...result.failedDirs, ...result.failedFiles];
       console.error(`  ${RD}✗${R} ${sb.name}: backup failed (${failedItems.join(", ")})`);
       failed++;
@@ -91,6 +122,18 @@ export async function backupAll(): Promise<void> {
     console.log(`  Backups stored in: ~/.nemoclaw/rebuild-backups/`);
   }
   if (failed > 0) {
+    if (unreachableRunning > 0) {
+      console.error("");
+      console.error(
+        `  ${unreachableRunning} running sandbox(es) could not be backed up because their in-sandbox SSH endpoint did not answer.`,
+      );
+      console.error(
+        `  To upgrade now and recover them afterwards from their latest validated backup, re-run with NEMOCLAW_SKIP_UNREACHABLE_SANDBOX_BACKUP=1. Any uncommitted state since the last successful backup will be lost.`,
+      );
+      console.error(
+        `  To preserve their current state first, stop the affected container (so it is skipped as not running) or restore its gateway health, then run '${CLI_NAME} backup-all' again.`,
+      );
+    }
     process.exit(1);
   }
 }

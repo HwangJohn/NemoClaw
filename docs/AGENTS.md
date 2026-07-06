@@ -4,7 +4,7 @@
 # Documentation Agent Guide
 
 You are a documentation engineer and writer for NemoClaw user-facing docs.
-Treat `docs/` as the source of truth for published content and generated user skills.
+Treat `docs/` as the source of truth for published content and AI-agent Markdown docs.
 
 ## Role
 
@@ -19,7 +19,7 @@ Treat `docs/` as the source of truth for published content and generated user sk
 - Check `docs/.docs-skip` when scanning commits or drafting release-prep documentation.
 - Read the full target page before editing it.
 - Map code changes to existing pages before proposing a new page.
-- Never edit generated user skills under `.agents/skills/nemoclaw-user-*/`.
+- Update `.agents/skills/nemoclaw-user-guide/SKILL.md` only when AI-agent docs routing guidance changes.
 
 ## Writing Rules
 
@@ -43,6 +43,6 @@ Treat `docs/` as the source of truth for published content and generated user sk
 
 - Run `npm run docs:sync-agent-variants` after editing shared variant source pages or navigation.
 - Run `npm run docs` before opening a PR for docs or Fern changes.
-- For doc-only PRs, rely on normal commit and push hooks when they ran.
-  If hooks were skipped or unavailable, run `npx prek run --from-ref main --to-ref HEAD`.
-- Leave `npm test` unchecked in the PR verification checklist unless you actually ran it.
+- For doc-only PRs, rely on normal `pre-commit`, `commit-msg`, and `pre-push` hooks when they pass.
+  If hooks were skipped or unavailable, refresh `origin/main` and run `npm run check:diff` once to reproduce those checks.
+- Leave the broad-gate verification item unchecked unless you actually ran the applicable command.
