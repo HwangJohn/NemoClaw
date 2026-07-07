@@ -15,7 +15,6 @@ import {
   captureDockerGpuPatchSandboxSnapshot,
   classifyDockerGpuPatchFailure,
   collectDockerGpuPatchDiagnostics,
-  DOCKER_GPU_PATCH_DNS_PROBE_ENV,
   type DockerContainerInspect,
   detectSandboxFallbackDns,
   detectTegraDeviceGroupGids,
@@ -23,8 +22,6 @@ import {
   formatDockerInspectNetworkSummary,
   getDockerGpuPatchNetworkMode,
   getDockerGpuSupervisorReconnectTimeoutSecs,
-  printDockerGpuExternalDnsWarning,
-  probeDockerGpuExternalDns,
   recreateOpenShellDockerSandboxWithGpu,
   selectDockerGpuPatchMode,
   shouldApplyDockerGpuPatch,
@@ -32,10 +29,6 @@ import {
 } from "../../../dist/lib/onboard/docker-gpu-patch";
 import { waitForCreatedSandboxReadyWithTrace } from "../../../dist/lib/onboard/sandbox-readiness-tracing";
 import { getSandboxFailurePhase, isSandboxReady } from "../../../dist/lib/state/gateway";
-
-function posixPathForTest(filePath: string): string {
-  return filePath.replace(/\\/g, "/");
-}
 
 function inspectFixture(): DockerContainerInspect {
   return {
@@ -468,7 +461,7 @@ describe("docker-gpu-patch", () => {
     // candidate list prefers `cdi` ahead of `--gpus all` on CDI hosts (#4948).
     const readDir = vi.fn((dirPath: string) => (dirPath === "/etc/cdi" ? ["nvidia.yaml"] : null));
     const readFile = vi.fn((filePath: string) =>
-      posixPathForTest(filePath) === "/etc/cdi/nvidia.yaml"
+      filePath === "/etc/cdi/nvidia.yaml"
         ? "cdiVersion: 0.6.0\nkind: nvidia.com/gpu\ndevices:\n  - name: all\n"
         : null,
     );
@@ -500,7 +493,7 @@ describe("docker-gpu-patch", () => {
       dirPath === "/var/run/cdi" ? ["nvidia.json"] : null,
     );
     const readFile = vi.fn((filePath: string) =>
-      posixPathForTest(filePath) === "/var/run/cdi/nvidia.json"
+      filePath === "/var/run/cdi/nvidia.json"
         ? JSON.stringify({ cdiVersion: "0.6.0", kind: "nvidia.com/gpu" })
         : null,
     );
@@ -800,94 +793,6 @@ describe("docker-gpu-patch sandbox DNS fallback (#3579)", () => {
     // has a loopback-only resolver.
     expect(args).not.toEqual(expect.arrayContaining(["--network", "host"]));
     expect(args).toEqual(expect.arrayContaining(["--dns", "8.8.8.8"]));
-  });
-
-  it("reports a failed external DNS probe from the recreated GPU container (#5520)", () => {
-    const dockerRun = vi.fn((args: readonly string[]) => {
-      if (args[0] === "exec") return { status: 0, stdout: "NEMOCLAW_DNS_FAILED:2\n" };
-      return { status: 0, stdout: "" };
-    });
-
-    const result = probeDockerGpuExternalDns("new-container-id", { dockerRun });
-
-    expect(result).toEqual({
-      status: "failed",
-      hostname: "example.com",
-      detail: "NEMOCLAW_DNS_FAILED:2",
-    });
-    expect(dockerRun).toHaveBeenCalledWith(
-      expect.arrayContaining(["exec", "new-container-id", "sh", "-lc"]),
-      expect.objectContaining({ ignoreError: true, timeout: 5000 }),
-    );
-  });
-
-  it("lets operators skip the external DNS probe with NEMOCLAW_DOCKER_GPU_PATCH_DNS_PROBE=0", () => {
-    const dockerRun = vi.fn(() => ({ status: 0, stdout: "NEMOCLAW_DNS_FAILED:2\n" }));
-
-    const result = probeDockerGpuExternalDns(
-      "new-container-id",
-      { dockerRun },
-      { [DOCKER_GPU_PATCH_DNS_PROBE_ENV]: "0" },
-    );
-
-    expect(result).toEqual({ status: "skipped", hostname: "example.com" });
-    expect(dockerRun).not.toHaveBeenCalled();
-  });
-
-  it("prints Docker DNS remediation without changing network mode automatically (#5520)", () => {
-    const lines: string[] = [];
-    printDockerGpuExternalDnsWarning(
-      { status: "failed", hostname: "example.com", detail: "NEMOCLAW_DNS_FAILED:2" },
-      (line) => lines.push(line),
-    );
-
-    expect(lines.join("\n")).toContain("could not resolve example.com");
-    expect(lines.join("\n")).toContain("NEMOCLAW_DOCKER_GPU_PATCH_NETWORK=host");
-    expect(lines.join("\n")).toContain("reduces Docker network isolation");
-  });
-
-  it("warns when the recreate path confirms direct external DNS is broken (#5520)", () => {
-    const dockerCapture = vi.fn((args: readonly string[]) => {
-      if (args[0] === "ps") return "old-container-id\n";
-      if (args[0] === "inspect") return JSON.stringify([inspectFixture()]);
-      if (args[0] === "info") return "";
-      return "";
-    });
-    const dockerRun = vi.fn((args: readonly string[]) => {
-      if (args[0] === "create") return { status: 0, stdout: "probe-id\n" };
-      if (args[0] === "exec") return { status: 0, stdout: "NEMOCLAW_DNS_FAILED:2\n" };
-      return { status: 0, stdout: "" };
-    });
-    const dockerRunDetached = vi.fn(() => ({ status: 0, stdout: "new-container-id\n" }));
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    let warnLines: string[] = [];
-
-    try {
-      recreateOpenShellDockerSandboxWithGpu(
-        { sandboxName: "alpha", timeoutSecs: 1, waitForSupervisor: false },
-        {
-          dockerCapture,
-          dockerRun,
-          dockerRunDetached,
-          dockerRename: vi.fn(() => ({ status: 0 })),
-          dockerStop: vi.fn(() => ({ status: 0 })),
-          dockerRm: vi.fn(() => ({ status: 0 })),
-          runOpenshell: vi.fn(() => ({ status: 0 })),
-          sleep: vi.fn(),
-          now: () => new Date("2026-05-15T00:00:00Z"),
-          detectSandboxFallbackDns: () => null,
-        },
-      );
-      warnLines = warn.mock.calls.map((call) => String(call[0]));
-    } finally {
-      warn.mockRestore();
-    }
-
-    expect(warnLines).toEqual(expect.arrayContaining([expect.stringContaining("example.com")]));
-    expect(dockerRunDetached).toHaveBeenCalledWith(
-      expect.not.arrayContaining(["--network", "host"]),
-      expect.objectContaining({ ignoreError: true }),
-    );
   });
 });
 

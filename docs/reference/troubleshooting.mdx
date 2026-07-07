@@ -179,30 +179,26 @@ docker run --rm busybox nslookup example.com
 
 When the lookup returns an answer, retry onboarding.
 
-### Docker-driver GPU sandbox cannot resolve external domains
+### Direct DNS lookups fail in a Docker-driver GPU sandbox
 
-On Docker-driver GPU hosts such as DGX Spark, the recreated GPU-enabled sandbox can sometimes resolve the OpenShell host alias while direct external DNS lookups fail:
+Egress covered by OpenShell network policies resolves destinations through the gateway.
+A direct DNS lookup inside the agent network namespace can fail on Docker-driver GPU hosts such as DGX Spark even when policy-covered inference, messaging, and search work normally.
+Direct in-sandbox DNS depends on Docker and the host resolver and is not a supported NemoClaw network-policy path, so NemoClaw does not use it as a sandbox health check.
 
-```bash
-getent hosts host.openshell.internal
-getent hosts example.com
-```
-
-If the host alias resolves but external names do not, Docker's embedded resolver is probably forwarding to an upstream DNS server that the sandbox bridge cannot use.
-Policy-proxied inference, messaging, and search can still work because those calls resolve on the host side, but tools that perform their own DNS lookup inside the sandbox fail before they can connect.
-
-First, fix Docker daemon DNS so the sandbox can keep normal bridge-network isolation.
-On hosts with VPN or split-DNS software, make sure Docker uses a resolver reachable from containers, then recreate or rebuild the sandbox.
-
-If direct in-sandbox DNS is required immediately, opt into host networking for the Docker GPU recreate path before rerunning onboarding:
+Run a manual lookup only when you are diagnosing a custom tool that performs its own DNS resolution:
 
 ```bash
-export NEMOCLAW_DOCKER_GPU_PATCH_NETWORK=host
-$$nemoclaw onboard --resume
+openshell sandbox exec --name <sandbox-name> -- getent hosts host.openshell.internal
+openshell sandbox exec --name <sandbox-name> -- getent hosts example.com
 ```
 
-Host networking reduces Docker network isolation and can expose host port collisions, so prefer the Docker DNS fix when possible.
-Set `NEMOCLAW_DOCKER_GPU_PATCH_DNS_PROBE=0` only when you need to skip the post-recreate DNS probe.
+If the host alias resolves but the external name does not, Docker's embedded resolver may be forwarding to an upstream DNS server that the sandbox bridge cannot use.
+Do not treat this result as evidence that a policy-covered feature is unhealthy.
+Test the affected inference, messaging, or search request through its normal policy path and inspect denied requests with `openshell term`.
+
+If a custom tool requires direct DNS, configure the Docker daemon to use a resolver that containers can reach.
+On hosts with VPN or split-DNS software, use an upstream resolver that remains reachable from the Docker bridge, then recreate or rebuild the sandbox.
+Keep bridge networking enabled so the sandbox retains its normal Docker network isolation.
 
 ### Host DNS resolution is blocked before provider validation
 

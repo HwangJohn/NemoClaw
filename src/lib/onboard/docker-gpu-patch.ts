@@ -41,9 +41,6 @@ const OPENSHELL_SANDBOX_COMMAND_ENV = "OPENSHELL_SANDBOX_COMMAND";
 const DOCKER_GPU_PATCH_TIMEOUT_MS = 30_000;
 const DOCKER_GPU_PATCH_WAIT_SECS = 180;
 export const DOCKER_GPU_PATCH_NETWORK_ENV = "NEMOCLAW_DOCKER_GPU_PATCH_NETWORK";
-export const DOCKER_GPU_PATCH_DNS_PROBE_ENV = "NEMOCLAW_DOCKER_GPU_PATCH_DNS_PROBE";
-const DOCKER_GPU_PATCH_DNS_PROBE_HOST = "example.com";
-const DOCKER_GPU_PATCH_DNS_PROBE_TIMEOUT_MS = 5_000;
 const MAX_DOCKER_CONTAINER_NAME_LENGTH = 253;
 const GPU_ENV_KEYS = new Set([
   "NVIDIA_VISIBLE_DEVICES",
@@ -143,12 +140,6 @@ export type DockerGpuPatchResult = {
   // its own supervisor wait completes.
   backupRemoved: boolean;
 };
-
-export type DockerGpuExternalDnsProbeResult =
-  | { status: "resolved"; hostname: string }
-  | { status: "failed"; hostname: string; detail: string }
-  | { status: "unavailable"; hostname: string; detail: string | null }
-  | { status: "skipped"; hostname: string };
 
 export type DockerGpuCloneRunOptions = {
   networkMode?: string | null;
@@ -448,83 +439,6 @@ function dockerCpusFromNanoCpus(nanoCpus: number): string {
   return (nanoCpus / 1_000_000_000).toFixed(3).replace(/\.?0+$/, "");
 }
 
-/** Return true when the post-recreate DNS probe is explicitly disabled. */
-function dockerGpuPatchDnsProbeDisabled(env: Record<string, string | undefined>): boolean {
-  const raw = String(env[DOCKER_GPU_PATCH_DNS_PROBE_ENV] || "")
-    .trim()
-    .toLowerCase();
-  return raw === "0" || raw === "false" || raw === "off" || raw === "no";
-}
-
-/**
- * Probe external DNS resolution from the recreated GPU-enabled Docker
- * container without failing the sandbox patch.
- */
-export function probeDockerGpuExternalDns(
-  containerId: string,
-  deps: DockerGpuPatchDeps = {},
-  env: Record<string, string | undefined> = process.env,
-): DockerGpuExternalDnsProbeResult {
-  const hostname = DOCKER_GPU_PATCH_DNS_PROBE_HOST;
-  if (dockerGpuPatchDnsProbeDisabled(env)) return { status: "skipped", hostname };
-
-  const d = depsWithDefaults(deps);
-  const script = [
-    `getent hosts ${hostname} >/dev/null 2>&1 && echo NEMOCLAW_DNS_OK`,
-    "|| { rc=$?;",
-    "if command -v getent >/dev/null 2>&1; then",
-    'echo "NEMOCLAW_DNS_FAILED:${rc}";',
-    "else",
-    'echo "NEMOCLAW_DNS_UNAVAILABLE";',
-    "fi;",
-    "}",
-  ].join(" ");
-
-  try {
-    const result = d.dockerRun(["exec", containerId, "sh", "-lc", script], {
-      ignoreError: true,
-      suppressOutput: true,
-      timeout: DOCKER_GPU_PATCH_DNS_PROBE_TIMEOUT_MS,
-    });
-    const output = resultText(result);
-    if (!isZeroStatus(result)) {
-      return { status: "unavailable", hostname, detail: output || null };
-    }
-    if (output.includes("NEMOCLAW_DNS_OK")) return { status: "resolved", hostname };
-    if (output.includes("NEMOCLAW_DNS_FAILED")) {
-      const detail = output.match(/NEMOCLAW_DNS_FAILED:\d+/)?.[0] ?? output;
-      return { status: "failed", hostname, detail };
-    }
-    return { status: "unavailable", hostname, detail: output || null };
-  } catch (error) {
-    return {
-      status: "unavailable",
-      hostname,
-      detail: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
-
-/**
- * Print remediation guidance when the recreated GPU container cannot resolve
- * external DNS through Docker's bridge resolver.
- */
-export function printDockerGpuExternalDnsWarning(
-  result: Extract<DockerGpuExternalDnsProbeResult, { status: "failed" }>,
-  log: (message: string) => void = console.warn,
-): void {
-  log(
-    `  Warning: the GPU-enabled sandbox container could not resolve ${result.hostname} after Docker recreate.`,
-  );
-  log("  Docker's embedded resolver may be forwarding to an unreachable upstream DNS server.");
-  log("  Prefer fixing Docker daemon DNS so the sandbox keeps normal bridge-network isolation.");
-  log(
-    `  If direct in-sandbox DNS is required immediately, retry with ${DOCKER_GPU_PATCH_NETWORK_ENV}=host; host networking reduces Docker network isolation.`,
-  );
-  log(`  Set ${DOCKER_GPU_PATCH_DNS_PROBE_ENV}=0 to skip this post-recreate probe.`);
-}
-
-/** Normalize Docker GPU device selectors to the value accepted by `--gpus`. */
 function normalizeGpuDeviceForDocker(device: string | null | undefined): string {
   const raw = String(device || "").trim();
   if (!raw || raw === "nvidia.com/gpu=all") return "all";
@@ -532,7 +446,6 @@ function normalizeGpuDeviceForDocker(device: string | null | undefined): string 
   return raw;
 }
 
-/** Normalize Docker GPU device selectors to the CDI device name form. */
 function normalizeGpuDeviceForCdi(device: string | null | undefined): string {
   const dockerDevice = normalizeGpuDeviceForDocker(device);
   if (
@@ -545,7 +458,6 @@ function normalizeGpuDeviceForCdi(device: string | null | undefined): string {
   return `nvidia.com/gpu=${dockerDevice || "all"}`;
 }
 
-/** Build one Docker GPU injection mode descriptor from a mode kind and device. */
 export function buildDockerGpuMode(
   kind: DockerGpuPatchModeKind,
   device?: string | null,
@@ -582,7 +494,6 @@ export function buildDockerGpuMode(
   };
 }
 
-/** Return Docker GPU mode candidates in the order NemoClaw should probe them. */
 export function buildDockerGpuModeCandidates(
   device?: string | null,
   options: { cdiAvailable?: boolean; backend?: DockerGpuPatchBackend } = {},
@@ -605,7 +516,6 @@ export function buildDockerGpuModeCandidates(
   return candidates;
 }
 
-/** Decide whether the Docker GPU patch is needed for this sandbox configuration. */
 export function shouldApplyDockerGpuPatch(
   config: { sandboxGpuEnabled: boolean },
   options: {
@@ -638,7 +548,6 @@ export function shouldApplyDockerGpuPatch(
   return !optedOut;
 }
 
-/** Build docker run option fragments that preserve the original sandbox container config. */
 export function buildDockerGpuCloneRunOptions(
   inspect: DockerContainerInspect,
   env: Record<string, string | undefined> = process.env,
@@ -666,7 +575,6 @@ function parseResolvConfNameservers(content: string): string[] {
 // only. Return the first non-loopback nameserver from
 // /run/systemd/resolve/resolv.conf so the caller can inject it via --dns
 // rather than relying on inherited /etc/resolv.conf.
-/** Detect the fallback DNS server Docker should receive when bridge DNS is overridden. */
 export function detectSandboxFallbackDns(
   deps: { readFile?: (path: string) => string | null } = {},
 ): string | null {
@@ -689,7 +597,6 @@ export function detectSandboxFallbackDns(
   return parseResolvConfNameservers(upstreamFile).find((ip) => !/^127\./.test(ip)) ?? null;
 }
 
-/** Resolve the Docker network mode to use when recreating the GPU-enabled sandbox. */
 export function getDockerGpuPatchNetworkMode(
   env: Record<string, string | undefined> = process.env,
 ): "host" | "preserve" {
@@ -701,7 +608,6 @@ export function getDockerGpuPatchNetworkMode(
   return "preserve";
 }
 
-/** Return preserved Docker network aliases for user-defined bridge networks. */
 function dockerNetworkAliases(
   inspect: DockerContainerInspect,
   networkMode: string | null | undefined,
@@ -723,7 +629,6 @@ function dockerNetworkAliases(
     .filter((alias) => !sameContainerId(alias, containerId));
 }
 
-/** Build the full `docker run` argv for the cloned GPU-enabled sandbox container. */
 export function buildDockerGpuCloneRunArgs(
   inspect: DockerContainerInspect,
   mode: DockerGpuPatchMode,
@@ -860,7 +765,6 @@ export function buildDockerGpuCloneRunArgs(
   return args;
 }
 
-/** Parse and validate the container object emitted by `docker inspect`. */
 export function parseDockerInspectJson(output: string): DockerContainerInspect {
   const parsed = JSON.parse(output);
   const inspect = Array.isArray(parsed) ? parsed[0] : parsed;
@@ -870,7 +774,6 @@ export function parseDockerInspectJson(output: string): DockerContainerInspect {
   return inspect as DockerContainerInspect;
 }
 
-/** Find Docker container IDs that OpenShell currently associates with a sandbox. */
 export function findOpenShellDockerSandboxContainerIds(
   sandboxName: string,
   deps: DockerGpuPatchDeps = {},
@@ -1103,10 +1006,6 @@ export function getDockerGpuPatchFailureContext(
   return null;
 }
 
-/**
- * Recreate an existing OpenShell Docker sandbox with NVIDIA GPU access and run
- * post-recreate diagnostics.
- */
 export function recreateOpenShellDockerSandboxWithGpu(
   options: {
     sandboxName: string;
@@ -1222,9 +1121,6 @@ export function recreateOpenShellDockerSandboxWithGpu(
       throw new Error("GPU-enabled sandbox container started, but Docker did not report its ID.");
     }
     context.newContainerId = newContainerId;
-
-    const dnsProbe = probeDockerGpuExternalDns(newContainerId, deps);
-    if (dnsProbe.status === "failed") printDockerGpuExternalDnsWarning(dnsProbe);
 
     const selectedMode = selection.mode;
     const buildPatchResult = (backupRemoved: boolean): DockerGpuPatchResult => ({
