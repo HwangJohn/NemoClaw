@@ -57,6 +57,15 @@ _ECMASCRIPT_NON_WHITESPACE_SECRET_CHAR = (
     r"[^\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029"
     r"\u202f\u205f\u3000\ufeff'\"]"
 )
+_MANAGED_OBSERVABILITY_ENDPOINTS = {
+    "OTEL_EXPORTER_OTLP_ENDPOINT": {
+        "http://host.openshell.internal:4318",
+        "http://host.openshell.internal:4318/v1/traces",
+    },
+    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": {
+        "http://host.openshell.internal:4318/v1/traces",
+    },
+}
 _OPENSHELL_ENV_PLACEHOLDER_PREFIX = "openshell:resolve:env:"
 _UPSTREAM_PROVIDER_ENV = "NEMOCLAW_UPSTREAM_PROVIDER"
 _MANAGED_ADAPTER_PROVIDER = "openai"
@@ -200,6 +209,9 @@ def _is_managed_value(name: str, value: str) -> bool:
         return value == "nemoclaw-managed-inference"
     if name == "OPENSHELL_TLS_KEY":
         return value == "/etc/openshell/tls/client/tls.key"
+    if name in _MANAGED_OBSERVABILITY_ENDPOINTS:
+        normalized_value = value.removesuffix("/")
+        return normalized_value in _MANAGED_OBSERVABILITY_ENDPOINTS[name]
     if name == "SLACK_BOT_TOKEN":
         return bool(re.fullmatch(r"xoxb-[A-Za-z0-9_-]{10,}", value)) and not _contains_other_platform_secret(value, "slack")
     if name == "SLACK_APP_TOKEN":

@@ -119,6 +119,9 @@ run_dcode() {
 #       TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN) are allowed only when the value
 #       matches the platform-specific token shape AND does not embed a
 #       non-platform canonical secret prefix.
+#     * Managed observability endpoint values are allowed only for the
+#       credential-free local OpenShell OTLP collector and only from the
+#       runtime environment. Mutable .env files still fail closed.
 #     * The env-file parser strips a leading `export ` keyword (mirroring
 #       python-dotenv) and rejects values containing dotenv expansion ($VAR,
 #       ${VAR}), command substitution ($(...) or backticks), because upstream
@@ -261,6 +264,23 @@ is_managed_token_value_for_name() {
       ;;
   esac
   return 1
+}
+
+is_managed_observability_endpoint_value() {
+  local name="$1"
+  local value="${2%/}"
+  case "$name" in
+    OTEL_EXPORTER_OTLP_ENDPOINT)
+      [ "$value" = "http://host.openshell.internal:4318" ] \
+        || [ "$value" = "http://host.openshell.internal:4318/v1/traces" ]
+      ;;
+    OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
+      [ "$value" = "http://host.openshell.internal:4318/v1/traces" ]
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 trim_whitespace() {
@@ -440,6 +460,9 @@ assert_no_secret_runtime_env() {
       refuse_invalid_openshell_placeholder "runtime environment variable" "$name"
     fi
     if is_managed_token_value_for_name "$name" "$value"; then
+      continue
+    fi
+    if is_managed_observability_endpoint_value "$name" "$value"; then
       continue
     fi
     if is_secret_shaped_value "$value"; then

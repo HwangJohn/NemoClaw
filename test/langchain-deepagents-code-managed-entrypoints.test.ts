@@ -153,6 +153,25 @@ describe("LangChain Deep Agents Code managed entrypoints", () => {
   });
 
   it.each([
+    ["OTEL_EXPORTER_OTLP_ENDPOINT", "http://host.openshell.internal:4318"],
+    ["OTEL_EXPORTER_OTLP_ENDPOINT", "http://host.openshell.internal:4318/"],
+    ["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://host.openshell.internal:4318/v1/traces"],
+  ])("allows the local managed OTLP collector endpoint in %s", (name, value) => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-otel-endpoint-"));
+    const { wrapperPath, ranMarker } = makeWrapperFixture(tempDir);
+    const result = spawnSync("bash", [wrapperPath, "-n", "hi"], {
+      env: {
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
+        [name]: value,
+      },
+      encoding: "utf8",
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(fs.existsSync(ranMarker)).toBe(true);
+  });
+
+  it.each([
     "LANGSMITH_RUNS_ENDPOINTS",
     "LANGCHAIN_RUNS_ENDPOINTS",
     "OTEL_EXPORTER_OTLP_ENDPOINT",

@@ -368,6 +368,8 @@ check("disabled", False)
         LANGCHAIN_TRACING: "true",
         LANGCHAIN_TRACING_V2: "true",
         OTEL_ENABLED: "true",
+        OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.openshell.internal:4318",
+        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://host.openshell.internal:4318/v1/traces",
       },
       encoding: "utf8",
     });
