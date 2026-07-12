@@ -31,7 +31,15 @@
       "status": "tested",
       "prd_priority": "P0",
       "ci_tested": true,
-      "notes": "Primary tested path. Ubuntu 24.04 is the validated distro in production source (`DEFAULT_COMPAT_IMAGE` in `src/lib/onboard/docker-driver-gateway-compat.ts:16` and the preflight tests pin 24.04 only); the installer's package-manager probes assume apt-get. Other distros (Ubuntu 22.04, Fedora, Rocky, Alma, NixOS, Arch) may work but are not validated."
+      "notes": "Primary tested path. Ubuntu 24.04 is the validated distro in production source (`DEFAULT_COMPAT_IMAGE` in `src/lib/onboard/docker-driver-gateway-compat.ts:16`). Ubuntu 26.04 has fixture-only tracking coverage and is listed as deferred in the full platform support matrix until QA validates it; the installer's package-manager probes assume apt-get. Other distros (Ubuntu 22.04, Fedora, Rocky, Alma, NixOS, Arch) may work but are not validated."
+    },
+    {
+      "name": "Ubuntu 26.04 (tracking)",
+      "runtimes": ["Docker"],
+      "status": "deferred",
+      "prd_priority": "P0",
+      "ci_tested": false,
+      "notes": "Tracking row for the next Ubuntu LTS. NemoClaw does not validate or support Ubuntu 26.04 yet; current coverage is fixture-only for generic Linux Docker and installer preflight input shapes. Keep 26.04 out of support claims until CI or QA validates install and onboard end-to-end."
     },
     {
       "name": "macOS (Apple Silicon)",

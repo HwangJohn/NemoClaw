@@ -530,6 +530,40 @@ describe("assessHost", () => {
     expect(result.hasNestedOverlayConflict).toBe(true);
   });
 
+  it("tracks Ubuntu 26.04 Docker 29 as a generic Linux preflight fixture without support promotion (#3245)", () => {
+    const result = assessHost({
+      platform: "linux",
+      env: {},
+      release: "6.17.0-10-generic",
+      readFileImpl: () => "Linux version 6.17.0-10-generic (buildd@lcy02-amd64)",
+      dockerInfoOutput: JSON.stringify({
+        ServerVersion: "29.3.1",
+        OperatingSystem: "Ubuntu 26.04 LTS",
+        Driver: "overlayfs",
+        DriverStatus: [["driver-type", "io.containerd.snapshotter.v1"]],
+        CgroupVersion: "2",
+      }),
+      commandExistsImpl: (name: string) =>
+        name === "docker" || name === "apt-get" || name === "systemctl",
+      runCaptureImpl: (command: readonly string[]) => {
+        if (command.join(" ") === 'sh -c command -v "$1" -- apt-get') return "/usr/bin/apt-get";
+        if (command.join(" ") === 'sh -c command -v "$1" -- systemctl') return "/usr/bin/systemctl";
+        if (command.join(" ") === "systemctl is-active docker") return "active";
+        if (command.join(" ") === "systemctl is-enabled docker") return "enabled";
+        return "";
+      },
+    });
+
+    expect(result.runtime).toBe("docker");
+    expect(result.packageManager).toBe("apt");
+    expect(result.dockerInfoSummary).toBe("29.3.1 · Ubuntu 26.04 LTS");
+    expect(result.dockerCgroupVersion).toBe("v2");
+    expect(result.dockerStorageDriver).toBe("overlayfs");
+    expect(result.dockerUsesContainerdSnapshotter).toBe(true);
+    expect(result.hasNestedOverlayConflict).toBe(true);
+    expect(result.requiresHostCgroupnsFix).toBe(false);
+  });
+
   it("does not flag the legacy overlay2 driver as a conflict", () => {
     const result = assessHost({
       platform: "linux",
