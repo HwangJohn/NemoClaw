@@ -155,7 +155,7 @@ export interface SetupNimFlowDeps {
   ): Promise<{ ok: boolean }>;
   handleVllmSelection(
     state: SetupNimSelectionState,
-    options?: { managedInstall?: boolean },
+    options?: { managedInstall?: boolean; sparkHost?: boolean },
   ): Promise<SetupNimSelectionResult>;
   handleRoutedSelection(state: SetupNimSelectionState): Promise<SetupNimSelectionResult>;
   coerceAgentInferenceApi(
