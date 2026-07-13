@@ -793,9 +793,7 @@ describe("createSetupNim", () => {
 
     await setupNim(null);
 
-    expect(log).toHaveBeenCalledWith(
-      expect.stringContaining("existing vLLM server is running"),
-    );
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("existing vLLM server is running"));
     expect(installVllm).toHaveBeenCalledOnce();
   });
 });
