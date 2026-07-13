@@ -697,6 +697,38 @@ describe("createSetupNim", () => {
     });
   });
 
+  it("passes sparkHost:true when detected GPU is Spark (firmware-unknown GB10 threading)", async () => {
+    const handleVllmSelection = vi.fn<SetupNimFlowDeps["handleVllmSelection"]>(async (state) => {
+      state.provider = "vllm-local";
+      state.endpointUrl = "http://127.0.0.1:8000/v1";
+      state.credentialEnv = null;
+      state.preferredInferenceApi = "openai-completions";
+      return "selected";
+    });
+    const sparkGpu = { type: "nvidia", spark: true, platform: "spark" } as ReturnType<
+      typeof import("../inference/nim").detectGpu
+    >;
+    const setupNim = createSetupNim(
+      makeDeps({
+        isNonInteractive: () => true,
+        getNonInteractiveProvider: () => "vllm",
+        detectInferenceProviderHostState: () =>
+          makeHostState({
+            vllmRunning: true,
+            vllmEntries: [{ key: "vllm", label: "Local vLLM — running" }],
+          }),
+        handleVllmSelection,
+      }),
+    );
+
+    await setupNim(sparkGpu);
+
+    expect(handleVllmSelection).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ sparkHost: true }),
+    );
+  });
+
   it("validates DCode custom Anthropic selections on the OpenAI surface (#6294)", async () => {
     const agent = {
       name: "langchain-deepagents-code",
