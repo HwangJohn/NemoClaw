@@ -3036,11 +3036,7 @@ type OllamaModelSelectionOutcome =
 async function selectAndValidateOllamaModel(
   gpu: ReturnType<typeof nim.detectGpu>,
   provider: string,
-  defaults: {
-    requestedModel: string | null;
-    recoveredModel: string | null;
-    lockedModel?: string | null;
-  },
+  defaults: OllamaModelSelectionDefaults,
   onModelSelected?: (model: string) => void,
 ): Promise<OllamaModelSelectionOutcome> {
   const { requestedModel, recoveredModel, lockedModel } = defaults;
@@ -3129,13 +3125,15 @@ async function selectAndValidateOllamaModel(
         "  ℹ Using chat completions API (Ollama tool calls require /v1/chat/completions)",
       );
     }
-    localInference.applyOllamaRuntimeContextWindow(selectedModel);
+    localInference.applyOllamaRuntimeContextWindow(selectedModel, defaults);
     return { outcome: "selected", model: selectedModel, allowToolsIncompatible };
   }
 }
 
 type SetupNimSelectionState =
   import("./onboard/setup-nim-selection").SetupNimSelectionState<HermesAuthMethod>;
+type OllamaModelSelectionDefaults =
+  import("./onboard/setup-nim-selection").OllamaModelSelectionDefaults;
 type SetupNimSelectionResult = "selected" | "retry-selection";
 
 // biome-ignore format: keep src/lib/onboard.ts net-neutral for growth guardrail.

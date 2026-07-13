@@ -5,7 +5,9 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   applyOllamaRuntimeContextWindow,
+  getOllamaContextWindowFloorForAgent,
   MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW,
+  MIN_HERMES_OLLAMA_CONTEXT_WINDOW,
   parseOllamaRuntimeContextLength,
   probeOllamaRuntimeModelStatus,
   resetOllamaRuntimeContextWindowAutoState,
@@ -119,6 +121,32 @@ describe("Ollama runtime context helpers", () => {
     applyOllamaRuntimeContextWindow("llama3.2:3b", getOllamaHost, options);
     expect(env.NEMOCLAW_CONTEXT_WINDOW).toBe(String(MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW));
     expect(messages.some((m) => m.includes("Raising Ollama runtime context window"))).toBe(true);
+  });
+
+  it("keeps the OpenClaw Ollama floor at 16384 and raises Hermes to its 64000-token floor", () => {
+    expect(getOllamaContextWindowFloorForAgent(null)).toBe(MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW);
+    expect(getOllamaContextWindowFloorForAgent("openclaw")).toBe(
+      MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW,
+    );
+    expect(getOllamaContextWindowFloorForAgent("hermes")).toBe(MIN_HERMES_OLLAMA_CONTEXT_WINDOW);
+
+    const env: NodeJS.ProcessEnv = {};
+    const messages: string[] = [];
+    applyOllamaRuntimeContextWindow("llama3.2:1b", getOllamaHost, {
+      env,
+      contextWindowFloor: MIN_HERMES_OLLAMA_CONTEXT_WINDOW,
+      logger: {
+        log: (message: string) => messages.push(message),
+        warn: (message: string) => messages.push(message),
+      },
+      runCaptureImpl: () =>
+        JSON.stringify({
+          models: [{ name: "llama3.2:1b", context_length: 16_384, processor: "100% GPU" }],
+        }),
+    });
+
+    expect(env.NEMOCLAW_CONTEXT_WINDOW).toBe(String(MIN_HERMES_OLLAMA_CONTEXT_WINDOW));
+    expect(messages.some((m) => m.includes("64000-token agent floor"))).toBe(true);
   });
 
   it("preserves a daemon-reported context window above the agent floor", () => {

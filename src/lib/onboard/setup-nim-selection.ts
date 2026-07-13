@@ -11,6 +11,13 @@ export { createNvidiaFeaturedModelSession } from "./nvidia-featured-model-select
 
 export type SetupNimSelectionBackNavigation = Readonly<{ kind: "NEMOCLAW_BACK_TO_SELECTION" }>;
 
+export type OllamaModelSelectionDefaults = {
+  requestedModel: string | null;
+  recoveredModel: string | null;
+  lockedModel?: string | null;
+  contextWindowFloor?: number;
+};
+
 export type SetupNimSelectionState<THermesAuthMethod = unknown> = {
   model: string | SetupNimSelectionBackNavigation | null;
   provider: string;
@@ -22,6 +29,7 @@ export type SetupNimSelectionState<THermesAuthMethod = unknown> = {
   compatibleEndpointReasoning?: string | null;
   nimContainer: string | null;
   allowToolsIncompatible: boolean;
+  ollamaContextWindowFloor?: number;
   skipHostInferenceSmoke?: boolean;
   /** Public addresses approved for the selected custom endpoint. */
   endpointPinnedAddresses?: string[];

@@ -45,7 +45,7 @@ Hermes accepts `NEMOCLAW_CONTEXT_WINDOW` as its model-limit override.
 
 | Variable | Values | Default |
 |---|---|---|
-| `NEMOCLAW_CONTEXT_WINDOW` | Positive integer in tokens | Unset so Hermes auto-detects |
+| `NEMOCLAW_CONTEXT_WINDOW` | Positive integer, at least `64000` tokens | Unset so Hermes auto-detects |
 
 ```bash
 export NEMOCLAW_CONTEXT_WINDOW=65536
@@ -54,6 +54,7 @@ $$nemoclaw onboard
 
 When onboarding resolves a valid value, NemoClaw writes it as `model.context_length` in `/sandbox/.hermes/config.yaml`.
 If no explicit or probed value is available, the field remains unset so Hermes can auto-detect it from the endpoint.
+For Local Ollama, NemoClaw raises auto-detected values below `64000` to `64000`; an explicit smaller value fails config generation.
 
 </AgentOnly>
 

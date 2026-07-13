@@ -6,7 +6,7 @@ import nodePath from "node:path";
 
 import { OLLAMA_PORT } from "../core/ports";
 import { sleepSeconds } from "../core/wait";
-import { MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW } from "../inference/ollama-runtime-context";
+import { resolveOllamaContextWindowFloor } from "../inference/ollama-runtime-context";
 import { cleanupTempDir, secureTempFile } from "./temp-files";
 
 const { runCapture, runShell, shellQuote }: typeof import("../runner") = require("../runner");
@@ -24,6 +24,7 @@ export type OllamaLoopbackSystemdOverrideState = "not-applicable" | "ready" | "f
 type OllamaLoopbackSystemdOverrideOptions = {
   isNonInteractive?: () => boolean;
   enableService?: boolean;
+  contextWindowFloor?: number;
   detectNvidiaPlatformImpl?: () => string;
   hasOllamaCudaV13LibraryImpl?: () => boolean;
   /**
@@ -257,6 +258,7 @@ export function ensureOllamaLoopbackSystemdOverride(
     console.log(`  Configuring Ollama ${libraryOverride} backend override for DGX Spark...`);
   }
   const dropInBody = mergeOllamaLoopbackSystemdOverride(existingDropIn, {
+    contextWindowFloor: options.contextWindowFloor,
     libraryOverride,
   });
   const tmpDropIn = secureTempFile("nemoclaw-ollama-override", ".conf");
@@ -366,10 +368,11 @@ function rewriteEnvironmentLineWithoutManagedAssignments(
 
 export function mergeOllamaLoopbackSystemdOverride(
   existingDropIn: string,
-  options: { libraryOverride?: string | null } = {},
+  options: { contextWindowFloor?: number; libraryOverride?: string | null } = {},
 ): string {
   const desiredLine = `Environment="OLLAMA_HOST=127.0.0.1:${OLLAMA_PORT}"`;
-  const desiredContextLine = `Environment="OLLAMA_CONTEXT_LENGTH=${MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW}"`;
+  const contextWindowFloor = resolveOllamaContextWindowFloor(options.contextWindowFloor);
+  const desiredContextLine = `Environment="OLLAMA_CONTEXT_LENGTH=${contextWindowFloor}"`;
   const desiredLibraryLine = options.libraryOverride
     ? `Environment="OLLAMA_LLM_LIBRARY=${options.libraryOverride}"`
     : null;
@@ -409,7 +412,7 @@ export function mergeOllamaLoopbackSystemdOverride(
   const existingHigherContext = serviceBody
     .filter((line) => !/^\s*[#;]/.test(line) && /\bOLLAMA_CONTEXT_LENGTH=/.test(line))
     .map(parseContextValue)
-    .filter((v): v is number => v !== null && v > MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW)
+    .filter((v): v is number => v !== null && v >= contextWindowFloor)
     .sort((a, b) => b - a)[0];
   const contextLine = existingHigherContext
     ? `Environment="OLLAMA_CONTEXT_LENGTH=${existingHigherContext}"`

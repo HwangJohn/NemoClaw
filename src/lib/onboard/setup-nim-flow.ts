@@ -7,6 +7,7 @@ import {
   resolveAgentProviderInferenceApi,
 } from "../inference/config";
 import type { GatewayRouteDiscoveryConstraints } from "../inference/gateway-route-compatibility";
+import { getOllamaContextWindowFloorForAgent } from "../inference/ollama-runtime-context";
 import type { VllmProfile } from "../inference/vllm";
 import { isBackToSelection } from "../navigation";
 import type { HermesAuthMethod } from "./hermes-auth";
@@ -268,6 +269,7 @@ export function createSetupNim(
         compatibleEndpointReasoning,
         nimContainer,
         allowToolsIncompatible,
+        ollamaContextWindowFloor: getOllamaContextWindowFloorForAgent(agent?.name ?? null),
         ...(endpointPinnedAddresses ? { endpointPinnedAddresses } : {}),
         inferenceCapabilityCache,
         nvidiaFeaturedModels,

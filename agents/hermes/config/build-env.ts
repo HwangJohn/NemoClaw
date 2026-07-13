@@ -9,6 +9,8 @@ import { isObjectRecord } from "./object-record.ts";
 
 export type HermesWebSearchProvider = "tavily";
 
+export const MIN_HERMES_CONTEXT_WINDOW = 64_000;
+
 export type HermesBuildSettings = {
   model: string;
   baseUrl: string;
@@ -57,7 +59,13 @@ function readContextWindow(env: NodeJS.ProcessEnv): number | null {
   const raw = (env.NEMOCLAW_CONTEXT_WINDOW || "").trim();
   if (!/^[1-9][0-9]*$/.test(raw)) return null;
   const parsed = Number(raw);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) return null;
+  if (parsed < MIN_HERMES_CONTEXT_WINDOW) {
+    throw new Error(
+      `Hermes NEMOCLAW_CONTEXT_WINDOW must be at least ${MIN_HERMES_CONTEXT_WINDOW} tokens, got ${parsed}`,
+    );
+  }
+  return parsed;
 }
 
 function readWebSearchProvider(env: NodeJS.ProcessEnv): HermesWebSearchProvider | null {

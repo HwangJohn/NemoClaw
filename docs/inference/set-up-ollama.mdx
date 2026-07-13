@@ -84,6 +84,12 @@ If the validation probe times out, NemoClaw retries with a larger timeout before
 Each Ollama-backed OpenClaw passthrough checks whether the selected model is still loaded and sends a bounded warm-up request when necessary.
 </AgentOnly>
 
+<AgentOnly variant="hermes">
+When Ollama reports a loaded-model context length, NemoClaw uses it for the `model.context_length` written to `/sandbox/.hermes/config.yaml` unless you set `NEMOCLAW_CONTEXT_WINDOW`.
+Hermes requires at least `64000` tokens, so NemoClaw raises lower auto-detected Ollama values to `64000` before the sandbox is built.
+An explicit `NEMOCLAW_CONTEXT_WINDOW` below `64000` stops config generation instead of producing a sandbox that fails on first inference.
+</AgentOnly>
+
 ## Use Windows-Host Ollama from WSL
 
 When NemoClaw runs in WSL, the provider menu can offer these Windows-host actions:
@@ -195,6 +201,10 @@ It does not make the larger models usable on N1X, reject an explicitly selected 
 
 <AgentOnly variant="openclaw">
 When Ollama reports a context length below `16384` and `NEMOCLAW_CONTEXT_WINDOW` is unset, NemoClaw writes a `contextWindow` of `16384` so the agent prompt and tool definitions fit better than the stock daemon default.
+</AgentOnly>
+
+<AgentOnly variant="hermes">
+When Ollama reports a context length below `64000` and `NEMOCLAW_CONTEXT_WINDOW` is unset, NemoClaw writes `model.context_length: 64000` so Hermes meets its minimum context requirement.
 </AgentOnly>
 
 If the initial validation times out during a cold load, NemoClaw retries once with a 300-second probe budget.

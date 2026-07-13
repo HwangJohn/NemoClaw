@@ -30,6 +30,7 @@ export interface OllamaRuntimeModelStatus {
 
 export interface ApplyOllamaRuntimeContextWindowOptions {
   env?: NodeJS.ProcessEnv;
+  contextWindowFloor?: number;
   logger?: Pick<Console, "log" | "warn">;
   runCaptureImpl?: OllamaRuntimeRunCaptureFn;
 }
@@ -45,6 +46,10 @@ export const MAX_AUTODETECTED_OLLAMA_CONTEXT_WINDOW = 4_194_304;
 // an explicit override, NemoClaw raises NEMOCLAW_CONTEXT_WINDOW to the floor so
 // downstream prompt budgeting reflects a workable window.
 export const MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW = 16_384;
+
+// Hermes Agent rejects model context windows below 64,000 tokens. Keep this
+// floor consumer-specific so OpenClaw's Local Ollama defaults stay unchanged.
+export const MIN_HERMES_OLLAMA_CONTEXT_WINDOW = 64_000;
 
 function normalizeOllamaModelName(value: unknown): string {
   return String(value || "").trim();
@@ -62,6 +67,21 @@ export function parsePositiveInteger(value: unknown): number | null {
 
 export function hasExplicitContextWindow(value: unknown): boolean {
   return String(value ?? "").trim() !== "";
+}
+
+export function getOllamaContextWindowFloorForAgent(agentName: string | null | undefined): number {
+  return String(agentName ?? "")
+    .trim()
+    .toLowerCase() === "hermes"
+    ? MIN_HERMES_OLLAMA_CONTEXT_WINDOW
+    : MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW;
+}
+
+export function resolveOllamaContextWindowFloor(value: unknown): number {
+  const parsed = parsePositiveInteger(value);
+  return parsed && parsed > MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW
+    ? parsed
+    : MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW;
 }
 
 /**
@@ -192,6 +212,7 @@ export function applyOllamaRuntimeContextWindow(
 ): void {
   const env = options.env ?? process.env;
   const logger = options.logger ?? console;
+  const contextWindowFloor = resolveOllamaContextWindowFloor(options.contextWindowFloor);
   const currentContextWindow = env.NEMOCLAW_CONTEXT_WINDOW;
   const currentIsPreviousAuto =
     !!currentContextWindow &&
@@ -214,14 +235,14 @@ export function applyOllamaRuntimeContextWindow(
   }
   if (runtimeStatus.loaded && runtimeStatus.contextLength) {
     const detected = runtimeStatus.contextLength;
-    const adopted = Math.max(detected, MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW);
+    const adopted = Math.max(detected, contextWindowFloor);
     const value = String(adopted);
     env.NEMOCLAW_CONTEXT_WINDOW = value;
     autoDetectedOllamaContextWindow = value;
     if (adopted > detected) {
       logger.log(
         `  ✓ Raising Ollama runtime context window to ${adopted} tokens ` +
-          `(daemon reported ${detected}, below the ${MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW}-token agent floor). ` +
+          `(daemon reported ${detected}, below the ${contextWindowFloor}-token agent floor). ` +
           `Set OLLAMA_CONTEXT_LENGTH host-side to raise the daemon default and silence this autoset.`,
       );
     } else {
