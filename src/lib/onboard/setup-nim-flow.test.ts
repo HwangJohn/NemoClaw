@@ -684,6 +684,10 @@ describe("createSetupNim", () => {
       credentialEnv: null,
     });
     expect(handleVllmSelection).toHaveBeenCalledOnce();
+    expect(handleVllmSelection).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "vllm-model" }),
+      { managedInstall: true },
+    );
     expect(result).toMatchObject({
       model: "vllm-model",
       provider: "vllm",

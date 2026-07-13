@@ -42,6 +42,13 @@ When vLLM exposes runtime metadata such as `max_model_len`, NemoClaw uses that v
 
 Start vLLM with the model you want before onboarding because NemoClaw uses the model already served by the endpoint.
 
+<Warning>
+On DGX Spark, an existing vLLM server is operator-managed.
+If it serves a large unquantized checkpoint or an unusually long context window, it can leave too little unified-memory headroom for the host and surface as `NVRM NV_ERR_NO_MEMORY`, SSH loss, or a hard host freeze under agent/tool load.
+Prefer the managed Spark vLLM path when you want NemoClaw to use the validated Spark recipe, or restart your existing server with lower `--gpu-memory-utilization`, `--max-model-len`, `--max-num-seqs`, and `--max-num-batched-tokens` before onboarding.
+For full diagnostics and recovery steps, refer to [DGX Spark troubleshooting](../../reference/troubleshooting#dgx-spark).
+</Warning>
+
 ## Configure Structured Tool Calls
 
 Start vLLM with automatic tool choice and the tool-call parser that matches the model family when the model serves a tool-using agent.

@@ -3,7 +3,12 @@
 
 import type { SetupNimSelectionResult, SetupNimSelectionState } from "./setup-nim-flow";
 
-type VllmModels = { data?: Array<{ id?: unknown }> };
+type VllmModelEntry = { id?: unknown; max_model_len?: unknown };
+type VllmModels = { data?: VllmModelEntry[] };
+
+export interface SetupNimVllmSelectionOptions {
+  managedInstall?: boolean;
+}
 
 export interface SetupNimVllmDeps {
   VLLM_PORT: number;
@@ -19,14 +24,77 @@ export interface SetupNimVllmDeps {
     credentialEnv: string | null,
   ): Promise<{ ok: boolean; retry?: string; api?: string | null }>;
   applyVllmRuntimeContextWindow(models: VllmModels, model: string): void;
+  isDgxSparkHost?: () => boolean;
   exitProcess(code: number): never;
+}
+
+const SPARK_LONG_CONTEXT_WARNING_THRESHOLD = 131_072;
+const LARGE_MODEL_SIZE_PATTERN = /(?:^|[-_/])(\d+(?:\.\d+)?)b(?:$|[-_/])/gi;
+const LARGE_MODEL_SIZE_THRESHOLD_B = 30;
+const LARGE_MODEL_KEYWORD_PATTERN = /(?:^|[-_/])super(?:$|[-_/])/i;
+const QUANTIZED_MODEL_PATTERN =
+  /(?:^|[-_/])(?:nvfp4|fp4|fp8|awq|gptq|int4|int8|modelopt|quant)(?:$|[-_/])/i;
+
+function parsePositiveInteger(value: unknown): number | null {
+  const normalized = typeof value === "number" ? value : Number(String(value ?? "").trim());
+  return Number.isSafeInteger(normalized) && normalized > 0 ? normalized : null;
+}
+
+function findVllmModelEntry(models: VllmModels, detectedModel: string): VllmModelEntry | null {
+  const entries = Array.isArray(models.data) ? models.data : [];
+  return (
+    entries.find((entry) => String(entry?.id ?? "").trim() === detectedModel) ??
+    (entries.length === 1 ? entries[0] : null)
+  );
+}
+
+function isLargeModelId(model: string): boolean {
+  for (const match of model.matchAll(LARGE_MODEL_SIZE_PATTERN)) {
+    const sizeBillions = Number(match[1]);
+    if (Number.isFinite(sizeBillions) && sizeBillions >= LARGE_MODEL_SIZE_THRESHOLD_B) {
+      return true;
+    }
+  }
+  return LARGE_MODEL_KEYWORD_PATTERN.test(model);
+}
+
+export function buildDgxSparkExistingVllmHeadroomWarning(
+  models: VllmModels,
+  detectedModel: string,
+): string | null {
+  const model = detectedModel.trim();
+  if (!model) return null;
+  const largeModel = isLargeModelId(model);
+  const quantizedModel = QUANTIZED_MODEL_PATTERN.test(model);
+  if (!largeModel || quantizedModel) return null;
+
+  const maxModelLen = parsePositiveInteger(findVllmModelEntry(models, model)?.max_model_len);
+  const contextText = maxModelLen ? ` with max_model_len=${String(maxModelLen)}` : "";
+  const contextHint =
+    maxModelLen && maxModelLen >= SPARK_LONG_CONTEXT_WARNING_THRESHOLD
+      ? " The reported context window is very large for a unified-memory host."
+      : "";
+
+  return (
+    `  ! Existing vLLM on DGX Spark is serving '${model}'${contextText}. ` +
+    "Large unquantized checkpoints can leave too little unified-memory headroom and may surface " +
+    "as NVRM NV_ERR_NO_MEMORY or a hard host freeze under agent/tool load." +
+    contextHint +
+    " Prefer the managed Spark vLLM path (NEMOCLAW_PROVIDER=install-vllm) or restart vLLM " +
+    "with lower --gpu-memory-utilization, --max-model-len, --max-num-seqs, and " +
+    "--max-num-batched-tokens before onboarding."
+  );
 }
 
 export function createSetupNimVllmHandler(
   deps: SetupNimVllmDeps,
-): (state: SetupNimSelectionState) => Promise<SetupNimSelectionResult> {
+): (
+  state: SetupNimSelectionState,
+  options?: SetupNimVllmSelectionOptions,
+) => Promise<SetupNimSelectionResult> {
   return async function handleVllmSelection(
     state: SetupNimSelectionState,
+    options: SetupNimVllmSelectionOptions = {},
   ): Promise<SetupNimSelectionResult> {
     console.log(`  ✓ Using existing vLLM on localhost:${deps.VLLM_PORT}`);
     state.provider = "vllm-local";
@@ -73,6 +141,10 @@ export function createSetupNimVllmHandler(
     state.model = detectedModel;
     state.assertRouteCompatible?.();
     console.log(`  Detected model: ${state.model}`);
+    if (!options.managedInstall && deps.isDgxSparkHost?.()) {
+      const warning = buildDgxSparkExistingVllmHeadroomWarning(models, detectedModel);
+      if (warning) console.warn(warning);
+    }
 
     const validationBaseUrl = deps.getLocalProviderValidationBaseUrl(state.provider);
     if (!validationBaseUrl) {

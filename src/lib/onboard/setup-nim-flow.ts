@@ -153,7 +153,10 @@ export interface SetupNimFlowDeps {
       beforeInstall?: (modelId: string) => void;
     },
   ): Promise<{ ok: boolean }>;
-  handleVllmSelection(state: SetupNimSelectionState): Promise<SetupNimSelectionResult>;
+  handleVllmSelection(
+    state: SetupNimSelectionState,
+    options?: { managedInstall?: boolean },
+  ): Promise<SetupNimSelectionResult>;
   handleRoutedSelection(state: SetupNimSelectionState): Promise<SetupNimSelectionResult>;
   coerceAgentInferenceApi(
     agent: AgentDefinition | null,
@@ -582,7 +585,9 @@ export function createSetupNim(
         if (selected.key === "vllm") {
           const state = preparedVllmState ?? createSelectionState();
           state.model = preparedVllmState?.model ?? requestedModel ?? recoveredModel;
-          const result = await deps.handleVllmSelection(state);
+          const result = await deps.handleVllmSelection(state, {
+            managedInstall: preparedVllmState !== null,
+          });
           ({
             model,
             provider,
