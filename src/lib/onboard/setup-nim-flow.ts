@@ -557,6 +557,11 @@ export function createSetupNim(
             if (deps.isNonInteractive()) deps.exitProcess(1);
             continue selectionLoop;
           }
+          if (vllmRunning) {
+            deps.log(
+              "  ! An existing vLLM server is running on the managed port. Stop it before using the managed install path to avoid port conflicts.",
+            );
+          }
           const vllmState = createSelectionState();
           preparedVllmState = vllmState;
           const result = await deps.installVllm(vllmProfile, {
@@ -585,8 +590,14 @@ export function createSetupNim(
         if (selected.key === "vllm") {
           const state = preparedVllmState ?? createSelectionState();
           state.model = preparedVllmState?.model ?? requestedModel ?? recoveredModel;
+          // managedInstall suppresses the Spark headroom warning for the current session's
+          // managed vLLM handoff. It does not persist across sessions: on re-onboard, a
+          // previously managed server is treated as BYO. This is intentional — the warning
+          // remains advisory and re-onboard operators see the vLLM-running indicator in
+          // the menu. Durable ownership tracking is a separate concern (follow-up issue).
           const result = await deps.handleVllmSelection(state, {
             managedInstall: preparedVllmState !== null,
+            sparkHost: gpu?.spark === true,
           });
           ({
             model,

@@ -686,7 +686,7 @@ describe("createSetupNim", () => {
     expect(handleVllmSelection).toHaveBeenCalledOnce();
     expect(handleVllmSelection).toHaveBeenCalledWith(
       expect.objectContaining({ model: "vllm-model" }),
-      { managedInstall: true },
+      { managedInstall: true, sparkHost: false },
     );
     expect(result).toMatchObject({
       model: "vllm-model",
@@ -726,5 +726,44 @@ describe("createSetupNim", () => {
 
     expect(handleRemoteProviderSelection).toHaveBeenCalledOnce();
     expect(result.preferredInferenceApi).toBe("openai-completions");
+  });
+
+  it("logs an occupied-port warning when install-vllm is selected and vLLM is already running", async () => {
+    const profile = { name: "DGX Spark" } as VllmProfile;
+    const log = vi.fn();
+    const installVllm = vi.fn<SetupNimFlowDeps["installVllm"]>(async (_profile, options) => {
+      options.beforeInstall?.("vllm-model");
+      return { ok: true };
+    });
+    const handleVllmSelection = vi.fn<SetupNimFlowDeps["handleVllmSelection"]>(async (state) => {
+      state.provider = "vllm";
+      state.endpointUrl = "http://127.0.0.1:8000/v1";
+      state.credentialEnv = null;
+      state.preferredInferenceApi = "openai-completions";
+      return "selected";
+    });
+    const setupNim = createSetupNim(
+      makeDeps({
+        isNonInteractive: () => true,
+        getNonInteractiveProvider: () => "install-vllm",
+        log,
+        detectInferenceProviderHostState: () =>
+          makeHostState({
+            vllmRunning: true,
+            vllmProfile: profile,
+            hasVllmImage: true,
+            vllmEntries: [{ key: "install-vllm", label: "Start vLLM (DGX Spark)" }],
+          }),
+        installVllm,
+        handleVllmSelection,
+      }),
+    );
+
+    await setupNim(null);
+
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining("existing vLLM server is running"),
+    );
+    expect(installVllm).toHaveBeenCalledOnce();
   });
 });

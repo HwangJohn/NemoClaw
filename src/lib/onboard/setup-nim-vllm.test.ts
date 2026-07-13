@@ -89,6 +89,22 @@ describe("setupNim vLLM route containment", () => {
     expect(validate).not.toHaveBeenCalled();
   });
 
+  it("warns on DGX Spark identified via GPU name (firmware-unknown GB10 host)", async () => {
+    const selection = state(null);
+    const handler = createSetupNimVllmHandler(
+      deps({
+        isDgxSparkHost: () => false, // firmware says linux — should be overridden by sparkHost
+        runCapture: () =>
+          JSON.stringify({ data: [{ id: "Qwen/Qwen3-30B-A3B", max_model_len: 32768 }] }),
+      }),
+    );
+
+    await expect(handler(selection, { sparkHost: true })).resolves.toBe("selected");
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining("Existing vLLM on DGX Spark"),
+    );
+  });
+
   it("warns on DGX Spark when an existing vLLM serves a large unquantized model", async () => {
     const selection = state(null);
     const handler = createSetupNimVllmHandler(
@@ -126,13 +142,58 @@ describe("setupNim vLLM route containment", () => {
 });
 
 describe("DGX Spark existing vLLM headroom warning", () => {
-  it("does not warn for quantized Spark model IDs", () => {
+  it("does not warn for quantized Spark model IDs without long context", () => {
+    expect(
+      buildDgxSparkExistingVllmHeadroomWarning(
+        { data: [{ id: "nvidia/Qwen3.6-35B-A3B-NVFP4", max_model_len: 32768 }] },
+        "nvidia/Qwen3.6-35B-A3B-NVFP4",
+      ),
+    ).toBeNull();
+  });
+
+  it("warns for quantized model with very long context (KV cache exhausts unified memory)", () => {
     expect(
       buildDgxSparkExistingVllmHeadroomWarning(
         { data: [{ id: "nvidia/Qwen3.6-35B-A3B-NVFP4", max_model_len: 262144 }] },
         "nvidia/Qwen3.6-35B-A3B-NVFP4",
       ),
+    ).toContain("High-context configurations");
+  });
+
+  it("warns for small unquantized model at the long-context threshold", () => {
+    expect(
+      buildDgxSparkExistingVllmHeadroomWarning(
+        { data: [{ id: "Qwen/Qwen2.5-14B-Instruct", max_model_len: 131072 }] },
+        "Qwen/Qwen2.5-14B-Instruct",
+      ),
+    ).toContain("High-context configurations");
+  });
+
+  it("does not warn for small model just under the long-context threshold", () => {
+    expect(
+      buildDgxSparkExistingVllmHeadroomWarning(
+        { data: [{ id: "Qwen/Qwen2.5-14B-Instruct", max_model_len: 131071 }] },
+        "Qwen/Qwen2.5-14B-Instruct",
+      ),
     ).toBeNull();
+  });
+
+  it("does not warn for arbitrary alias with no size indicator or long context", () => {
+    expect(
+      buildDgxSparkExistingVllmHeadroomWarning(
+        { data: [{ id: "my-custom-model", max_model_len: 32768 }] },
+        "my-custom-model",
+      ),
+    ).toBeNull();
+  });
+
+  it("warns for arbitrary alias that looks large without quantization marker", () => {
+    expect(
+      buildDgxSparkExistingVllmHeadroomWarning(
+        { data: [{ id: "company/finetune-70b-v2", max_model_len: 32768 }] },
+        "company/finetune-70b-v2",
+      ),
+    ).not.toBeNull();
   });
 
   it("includes the reported max_model_len when available", () => {

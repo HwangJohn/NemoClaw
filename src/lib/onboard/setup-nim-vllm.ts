@@ -8,6 +8,8 @@ type VllmModels = { data?: VllmModelEntry[] };
 
 export interface SetupNimVllmSelectionOptions {
   managedInstall?: boolean;
+  /** True when the already-detected GPU confirms DGX Spark (covers firmware-unknown GB10 hosts). */
+  sparkHost?: boolean;
 }
 
 export interface SetupNimVllmDeps {
@@ -32,6 +34,11 @@ const SPARK_LONG_CONTEXT_WARNING_THRESHOLD = 131_072;
 const LARGE_MODEL_SIZE_PATTERN = /(?:^|[-_/])(\d+(?:\.\d+)?)b(?:$|[-_/])/gi;
 const LARGE_MODEL_SIZE_THRESHOLD_B = 30;
 const LARGE_MODEL_KEYWORD_PATTERN = /(?:^|[-_/])super(?:$|[-_/])/i;
+// Heuristic: suppress the large-model warning when the served-model alias contains
+// a well-known quantization marker. Aliases are not authoritative — vLLM allows
+// arbitrary names — but explicit quantization suffixes (nvfp4, fp8, awq, gptq,
+// int4, int8) are a strong conventional signal. Long-context (max_model_len) is
+// evaluated independently and can still trigger a warning even for quantized names.
 const QUANTIZED_MODEL_PATTERN =
   /(?:^|[-_/])(?:nvfp4|fp4|fp8|awq|gptq|int4|int8|modelopt|quant)(?:$|[-_/])/i;
 
@@ -64,20 +71,29 @@ export function buildDgxSparkExistingVllmHeadroomWarning(
 ): string | null {
   const model = detectedModel.trim();
   if (!model) return null;
+
   const largeModel = isLargeModelId(model);
   const quantizedModel = QUANTIZED_MODEL_PATTERN.test(model);
-  if (!largeModel || quantizedModel) return null;
-
   const maxModelLen = parsePositiveInteger(findVllmModelEntry(models, model)?.max_model_len);
+  const longContext = !!maxModelLen && maxModelLen >= SPARK_LONG_CONTEXT_WARNING_THRESHOLD;
+
+  // Warn when the model is heuristically large+unquantized, OR when the reported
+  // context window is very large (independent of model size — KV cache alone can
+  // exhaust unified memory on DGX Spark regardless of parameter count).
+  const riskyLargeModel = largeModel && !quantizedModel;
+  if (!riskyLargeModel && !longContext) return null;
+
   const contextText = maxModelLen ? ` with max_model_len=${String(maxModelLen)}` : "";
-  const contextHint =
-    maxModelLen && maxModelLen >= SPARK_LONG_CONTEXT_WARNING_THRESHOLD
-      ? " The reported context window is very large for a unified-memory host."
-      : "";
+  const contextHint = longContext
+    ? " The reported context window is very large for a unified-memory host."
+    : "";
+  const riskDescription = riskyLargeModel
+    ? "Large, heuristically-classified unquantized checkpoints"
+    : "High-context configurations";
 
   return (
     `  ! Existing vLLM on DGX Spark is serving '${model}'${contextText}. ` +
-    "Large unquantized checkpoints can leave too little unified-memory headroom and may surface " +
+    `${riskDescription} can leave too little unified-memory headroom and may surface ` +
     "as NVRM NV_ERR_NO_MEMORY or a hard host freeze under agent/tool load." +
     contextHint +
     " Prefer the managed Spark vLLM path (NEMOCLAW_PROVIDER=install-vllm) or restart vLLM " +
@@ -141,7 +157,11 @@ export function createSetupNimVllmHandler(
     state.model = detectedModel;
     state.assertRouteCompatible?.();
     console.log(`  Detected model: ${state.model}`);
-    if (!options.managedInstall && deps.isDgxSparkHost?.()) {
+    // options.sparkHost carries the already-detected GPU result (covers firmware-unknown
+    // GB10 hosts that detectNvidiaPlatform() alone would miss); fall back to the dep.
+    const isSparkHost =
+      options.sparkHost !== undefined ? options.sparkHost : (deps.isDgxSparkHost?.() ?? false);
+    if (!options.managedInstall && isSparkHost) {
       const warning = buildDgxSparkExistingVllmHeadroomWarning(models, detectedModel);
       if (warning) console.warn(warning);
     }
