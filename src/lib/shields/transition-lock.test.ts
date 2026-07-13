@@ -116,7 +116,7 @@ describe("host shields transition lock", () => {
     const result = locker.withShieldsTransitionLock("alpha", "nemoclaw alpha shields up", () => {
       const snapshot = readLockFileSnapshot(lockPath);
       const written = JSON.parse(snapshot.contents);
-      expect(snapshot.mode).toBe(0o600n);
+      expect(process.platform === "win32" || snapshot.mode === 0o600n).toBe(true);
       expect(written).toEqual({
         version: 1,
         sandboxName: "alpha",
@@ -377,54 +377,111 @@ describe("host shields transition lock", () => {
     expect(fs.existsSync(lockPath)).toBe(true);
   });
 
-  it("fails closed with recovery guidance when the recorded holder is dead", () => {
+  it("recovers a stale lock when the parsed holder is dead", () => {
     const recorded = owner("alpha", 202, "proc:dead-holder");
     const lockPath = writeOwner("alpha", recorded);
-    const liveness = vi.fn((pid: number) => pid === SELF_PID);
+    const locker = manager();
+
+    expect(
+      locker.withShieldsTransitionLock("alpha", "nemoclaw alpha shields up", () => {
+        const replacement = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+        expect(replacement).toMatchObject({
+          sandboxName: "alpha",
+          pid: SELF_PID,
+          processStartIdentity: SELF_IDENTITY,
+          command: "nemoclaw alpha shields up",
+        });
+        return "acquired";
+      }),
+    ).toBe("acquired");
+
+    expect(fs.existsSync(lockPath)).toBe(false);
+    expect(fs.readdirSync(stateDir)).toEqual([]);
+  });
+
+  it("enforces the wait timeout when stale recovery retries without progress", () => {
+    const recorded = owner("alpha", 202, "proc:dead-holder");
+    const lockPath = writeOwner("alpha", recorded);
     let nowMs = 2_000;
+    let raced = false;
     const locker = manager({
       now: () => nowMs,
-      sleep: (milliseconds) => {
-        nowMs += milliseconds;
+      isProcessAlive: (pid) => {
+        runWhen(pid === 202 && !raced, () => {
+          raced = true;
+          fs.unlinkSync(lockPath);
+          nowMs += 3;
+        });
+        return pid === SELF_PID;
       },
-      isProcessAlive: liveness,
     });
-    const unlink = vi.spyOn(fs, "unlinkSync");
 
     expect(() =>
       locker.withShieldsTransitionLock("alpha", "nemoclaw alpha shields up", () => undefined, {
         waitTimeoutMs: 2,
         pollIntervalMs: 1,
       }),
-    ).toThrow(/will not remove a stale lock pathname automatically.*remove '.*' manually/s);
-
-    expect(liveness).toHaveBeenCalledWith(202);
-    expect(unlink).not.toHaveBeenCalledWith(lockPath);
-    expect(JSON.parse(fs.readFileSync(lockPath, "utf8"))).toEqual(recorded);
+    ).toThrow(/Timed out after 2ms waiting for shields transition lock .*recorded owner PID 202/s);
   });
 
-  it("fails closed with recovery guidance when a live PID has been reused", () => {
+  it("recovers a stale lock asynchronously when a live PID has been reused", async () => {
     const holderPid = 202;
     const recorded = owner("alpha", holderPid, "proc:original");
     const lockPath = writeOwner("alpha", recorded);
-    let nowMs = 2_000;
+    const sleepAsync = vi.fn(async () => {});
     const locker = manager({
-      now: () => nowMs,
-      sleep: (milliseconds) => {
-        nowMs += milliseconds;
-      },
+      sleepAsync,
       isProcessAlive: (pid) => pid === holderPid || pid === SELF_PID,
       readProcessStartIdentity: (pid) =>
         pid === SELF_PID ? SELF_IDENTITY : pid === holderPid ? "proc:reused" : null,
     });
 
+    await expect(
+      locker.withShieldsTransitionLockAsync("alpha", "timer restore", async () => {
+        const replacement = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+        expect(replacement).toMatchObject({
+          sandboxName: "alpha",
+          pid: SELF_PID,
+          processStartIdentity: SELF_IDENTITY,
+          command: "timer restore",
+        });
+        return "acquired";
+      }),
+    ).resolves.toBe("acquired");
+    expect(sleepAsync).not.toHaveBeenCalled();
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it("fails closed when stale lock recovery observes a replacement race", () => {
+    const original = owner("alpha", 202, "proc:dead-holder");
+    const replacement = owner("alpha", 303, "proc:replacement", "replacement holder");
+    const lockPath = writeOwner("alpha", original);
+    const displacedPath = `${lockPath}.displaced`;
+    const originalRenameSync = fs.renameSync;
+    let raced = false;
+    vi.spyOn(fs, "renameSync").mockImplementation((source, destination) => {
+      runWhen(String(source) === lockPath && !raced, () => {
+        raced = true;
+        originalRenameSync(lockPath, displacedPath);
+        fs.writeFileSync(lockPath, JSON.stringify(replacement), { mode: 0o600 });
+      });
+      originalRenameSync(source, destination);
+    });
+    const locker = manager({
+      isProcessAlive: (pid) => pid === SELF_PID || pid === 303,
+      readProcessStartIdentity: (pid) =>
+        pid === SELF_PID ? SELF_IDENTITY : pid === 303 ? "proc:replacement" : null,
+    });
+
     expect(() =>
-      locker.withShieldsTransitionLock("alpha", "timer restore", () => undefined, {
+      locker.withShieldsTransitionLock("alpha", "nemoclaw alpha shields up", () => undefined, {
         waitTimeoutMs: 2,
         pollIntervalMs: 1,
       }),
-    ).toThrow(/now has process-start identity 'proc:reused'.*remove '.*' manually/s);
-    expect(JSON.parse(fs.readFileSync(lockPath, "utf8"))).toEqual(recorded);
+    ).toThrow(/a replacement was preserved during recovery.*remove '.*' manually/s);
+
+    expect(JSON.parse(fs.readFileSync(lockPath, "utf8"))).toEqual(replacement);
+    expect(JSON.parse(fs.readFileSync(displacedPath, "utf8"))).toEqual(original);
   });
 
   it("waits on a recent malformed owner record", () => {
@@ -471,18 +528,23 @@ describe("host shields transition lock", () => {
     expect(fs.readFileSync(lockPath, "utf8")).toBe("{incomplete");
   });
 
-  it("rejects symbolic-link and non-regular lock paths", () => {
+  it.skipIf(process.platform === "win32")("rejects symbolic-link lock paths", () => {
     const target = path.join(root, "target");
     fs.writeFileSync(target, "{}", { mode: 0o600 });
     const symlinkPath = shieldsTransitionLockPath("symlinked", stateDir);
     fs.symlinkSync(target, symlinkPath);
-    const directoryPath = shieldsTransitionLockPath("directory", stateDir);
-    fs.mkdirSync(directoryPath);
     const locker = manager();
 
     expect(() =>
       locker.withShieldsTransitionLock("symlinked", "shields up", () => undefined),
     ).toThrow(/symbolic links are not allowed/);
+  });
+
+  it("rejects non-regular lock paths", () => {
+    const directoryPath = shieldsTransitionLockPath("directory", stateDir);
+    fs.mkdirSync(directoryPath);
+    const locker = manager();
+
     expect(() =>
       locker.withShieldsTransitionLock("directory", "shields up", () => undefined),
     ).toThrow(/path is not a regular file/);
