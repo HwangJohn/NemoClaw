@@ -101,14 +101,14 @@ function vllmContainerRow(
 
 function mockSuccessfulVllmInstall(
   containerName: string,
-  ownershipResponses: readonly (Error | string)[] = ["", ""],
+  ownershipResponses: readonly (() => string)[] = [() => "", () => ""],
 ): void {
-  const captureByCommand: Record<string, string> = {
+  const runCaptureByCommand: Record<string, string> = {
     curl: '{"data":[]}',
     sh: "/usr/bin/tool\n",
   };
   mocks.runCapture.mockImplementation(
-    (cmd: readonly string[]) => captureByCommand[cmd[0] ?? ""] ?? "",
+    (cmd: readonly string[]) => runCaptureByCommand[cmd[0] ?? ""] ?? "",
   );
   mocks.dockerPullWithProgressWatchdog.mockResolvedValue({
     status: 0,
@@ -119,15 +119,14 @@ function mockSuccessfulVllmInstall(
   });
   mocks.dockerSpawn.mockReturnValue(mockDockerSpawnSuccess());
   mocks.dockerRunDetached.mockReturnValue({ status: 0, stdout: "", stderr: "", error: null });
-  let ownershipIndex = 0;
-  mocks.dockerCapture.mockImplementation((args: readonly string[]) => {
-    if (args[0] === "container" && args[1] === "ls") {
-      const response = ownershipResponses[ownershipIndex++] ?? "";
-      if (response instanceof Error) throw response;
-      return response;
-    }
-    return args[0] === "ps" ? `${containerName}\n` : "";
-  });
+  const ownershipQueue = [...ownershipResponses];
+  const dockerCaptureByCommand = new Map<string, () => string>([
+    ["container", () => (ownershipQueue.shift() ?? (() => ""))()],
+    ["ps", () => `${containerName}\n`],
+  ]);
+  mocks.dockerCapture.mockImplementation((args: readonly string[]) =>
+    (dockerCaptureByCommand.get(args[0] ?? "") ?? (() => ""))(),
+  );
 }
 
 function mockInconclusiveDockerStorage(): void {
@@ -1076,7 +1075,7 @@ describe("installVllm model resolution", () => {
   it("replaces only an existing managed container by its inspected ID", async () => {
     const profile = detectVllmProfile({ platform: "spark", type: "nvidia" })!;
     const managed = vllmContainerRow(profile.containerName);
-    mockSuccessfulVllmInstall(profile.containerName, [managed, managed]);
+    mockSuccessfulVllmInstall(profile.containerName, [() => managed, () => managed]);
     mocks.dockerImageInspectFormat.mockReturnValue("sha256:cached-image");
 
     const result = await installVllm(profile, {
@@ -1100,7 +1099,7 @@ describe("installVllm model resolution", () => {
   ])("preserves a same-name container with managed label %j before downloads", async (label) => {
     const profile = detectVllmProfile({ platform: "spark", type: "nvidia" })!;
     mockSuccessfulVllmInstall(profile.containerName, [
-      vllmContainerRow(profile.containerName, { label }),
+      () => vllmContainerRow(profile.containerName, { label }),
     ]);
 
     const result = await installVllm(profile, {
@@ -1118,8 +1117,13 @@ describe("installVllm model resolution", () => {
   });
 
   it.each([
-    ["Docker inspection failure", new Error("docker unavailable")],
-    ["malformed ownership output", "malformed"],
+    [
+      "Docker inspection failure",
+      (): string => {
+        throw new Error("docker unavailable");
+      },
+    ],
+    ["malformed ownership output", (): string => "malformed"],
   ] as const)("fails closed on %s", async (_name, ownershipResponse) => {
     const profile = detectVllmProfile({ platform: "spark", type: "nvidia" })!;
     mockSuccessfulVllmInstall(profile.containerName, [ownershipResponse]);
@@ -1142,8 +1146,8 @@ describe("installVllm model resolution", () => {
   it("rechecks ownership after downloads and preserves a replacement container", async () => {
     const profile = detectVllmProfile({ platform: "spark", type: "nvidia" })!;
     mockSuccessfulVllmInstall(profile.containerName, [
-      vllmContainerRow(profile.containerName),
-      vllmContainerRow(profile.containerName, { label: "" }),
+      () => vllmContainerRow(profile.containerName),
+      () => vllmContainerRow(profile.containerName, { label: "" }),
     ]);
     mocks.dockerImageInspectFormat.mockReturnValue("sha256:cached-image");
 
