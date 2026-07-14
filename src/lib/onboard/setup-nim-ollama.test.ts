@@ -136,7 +136,11 @@ describe("createSetupNimOllamaHandlers", () => {
         isNonInteractive: () => false,
         process: {
           ...process,
-          env: { ...process.env, NEMOCLAW_PROVIDER_MODEL: "qwen3.6:35b" },
+          env: {
+            ...process.env,
+            NEMOCLAW_MODEL: undefined,
+            NEMOCLAW_PROVIDER_MODEL: "qwen3.6:35b",
+          },
         } as NodeJS.Process,
         selectAndValidateOllamaModel: selectModel,
       }),

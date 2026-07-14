@@ -309,6 +309,9 @@ function isHostedInferenceProviderKeyCredentialCandidate(value) {
 
 const isProviderKeyCredentialCandidate = isHostedInferenceProviderKeyCredentialCandidate;
 
+/**
+ * Resolve the requested model from the preferred env var or its compatibility fallback.
+ */
 function getRequestedModelEnv(env = process.env) {
   const model = (env[MODEL_ENV] || "").trim();
   if (model) return { value: model, source: MODEL_ENV };
@@ -317,6 +320,9 @@ function getRequestedModelEnv(env = process.env) {
   return { value: "", source: null };
 }
 
+/**
+ * Return the requested model value without exposing which env var supplied it.
+ */
 function getRequestedModelFromEnv(env = process.env) {
   return getRequestedModelEnv(env).value || null;
 }
