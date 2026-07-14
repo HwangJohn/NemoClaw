@@ -392,7 +392,7 @@ describe("onboard provider helpers", () => {
     );
   });
 
-  it("uses NEMOCLAW_PROVIDER_MODEL as a non-interactive model fallback", () => {
+  it("supports the NVIDIA QA non-interactive provider-model contract (#6869)", () => {
     withProviderEnv(
       {
         NEMOCLAW_PROVIDER: "ollama",

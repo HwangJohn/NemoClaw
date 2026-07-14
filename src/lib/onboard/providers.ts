@@ -30,6 +30,8 @@ const HOSTED_INFERENCE_PROVIDER_KEY_ENV = "NEMOCLAW_PROVIDER_KEY";
 const HOSTED_INFERENCE_CREDENTIAL_ENV = "COMPATIBLE_API_KEY";
 const HOSTED_INFERENCE_ENDPOINT_URL = "https://inference-api.nvidia.com/v1";
 const MODEL_ENV = "NEMOCLAW_MODEL";
+// Compatibility for the NVIDIA QA non-interactive Ollama invocation tracked
+// in #6869. Remove after that workflow migrates to NEMOCLAW_MODEL.
 const PROVIDER_MODEL_ENV = "NEMOCLAW_PROVIDER_MODEL";
 // Private CI-compatible Inference Hub endpoint model IDs use the
 // provider/namespace/model convention. This endpoint is staged as a custom
