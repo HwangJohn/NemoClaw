@@ -31,6 +31,7 @@ import {
 } from "./ollama-model-registry";
 import type {
   ApplyOllamaRuntimeContextWindowOptions,
+  ApplyOllamaRuntimeContextWindowResult,
   OllamaRuntimeModelStatus,
 } from "./ollama-runtime-context";
 import {
@@ -843,8 +844,8 @@ export { resetOllamaRuntimeContextWindowAutoState };
 export function applyOllamaRuntimeContextWindow(
   selectedModel: string,
   options: Pick<ApplyOllamaRuntimeContextWindowOptions, "contextWindowFloor"> = {},
-): void {
-  applyOllamaRuntimeContextWindowWithHost(selectedModel, getResolvedOllamaHost, options);
+): ApplyOllamaRuntimeContextWindowResult {
+  return applyOllamaRuntimeContextWindowWithHost(selectedModel, getResolvedOllamaHost, options);
 }
 
 export function applyVllmRuntimeContextWindow(

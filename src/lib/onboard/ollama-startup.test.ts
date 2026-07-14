@@ -7,6 +7,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { MIN_HERMES_OLLAMA_CONTEXT_WINDOW } from "../inference/ollama-runtime-context";
 import {
   isOllamaProviderPinned,
   runOllamaStartupOrGate,
@@ -169,6 +170,35 @@ describe("runOllamaStartupOrGate steer hint (#4365)", () => {
       expect(errSpy).not.toHaveBeenCalled();
     } finally {
       errSpy.mockRestore();
+      restore();
+    }
+  });
+
+  it("starts a NemoClaw-owned Hermes daemon with its required context length", () => {
+    delete process.env.NEMOCLAW_PROVIDER;
+    wait.waitForHttp = () => true;
+    let command = "";
+    runner.runShell = (value: string) => {
+      command = value;
+      return { status: 0 };
+    };
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      const outcome = runOllamaStartupOrGate({
+        ollamaReady: false,
+        ollamaPort: 11434,
+        getLocalProviderBaseUrl: () => "http://host.openshell.internal:11435/v1",
+        isNonInteractive: () => false,
+        contextWindowFloor: MIN_HERMES_OLLAMA_CONTEXT_WINDOW,
+      });
+
+      expect(outcome).toEqual({ kind: "ready" });
+      expect(command).toBe(
+        "OLLAMA_CONTEXT_LENGTH=64000 OLLAMA_HOST=127.0.0.1:11434 ollama serve > /dev/null 2>&1 &",
+      );
+    } finally {
+      logSpy.mockRestore();
       restore();
     }
   });

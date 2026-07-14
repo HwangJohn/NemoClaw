@@ -22,6 +22,7 @@ type SetupNimOllamaDeps = {
     ollamaPort: number;
     getLocalProviderBaseUrl: (provider: string) => string | null;
     isNonInteractive: () => boolean;
+    contextWindowFloor?: number;
   }) => OllamaStartupOutcome;
   shouldFrontOllamaWithProxy: () => boolean;
   startOllamaAuthProxy: () => boolean;
@@ -266,6 +267,7 @@ export function createSetupNimOllamaHandlers(deps: SetupNimOllamaDeps): {
       ollamaPort: deps.OLLAMA_PORT,
       getLocalProviderBaseUrl: deps.getLocalProviderBaseUrl,
       isNonInteractive: deps.isNonInteractive,
+      contextWindowFloor: state.ollamaContextWindowFloor,
     });
     // Source boundary: ollama-startup owns this closed outcome contract. If a
     // stale package or test double presents an unknown kind, fail closed before

@@ -164,6 +164,7 @@ describe("createSetupNimOllamaHandlers", () => {
     const state = makeState();
     state.ollamaContextWindowFloor = MIN_HERMES_OLLAMA_CONTEXT_WINDOW;
     const ensureOverride = vi.fn(() => "unchanged");
+    const runStartup = vi.fn(() => ({ kind: "ready" as const }));
     const selectModel = vi.fn(async (_gpu, _provider, args) => {
       expect(args.contextWindowFloor).toBe(MIN_HERMES_OLLAMA_CONTEXT_WINDOW);
       return { outcome: "selected" as const, model: "llama3.2:1b", allowToolsIncompatible: false };
@@ -171,6 +172,7 @@ describe("createSetupNimOllamaHandlers", () => {
     const { handleRunningOllamaSelection } = createSetupNimOllamaHandlers(
       makeDeps({
         ensureOllamaLoopbackSystemdOverride: ensureOverride,
+        runOllamaStartupOrGate: runStartup,
         selectAndValidateOllamaModel: selectModel,
       }),
     );
@@ -179,6 +181,13 @@ describe("createSetupNimOllamaHandlers", () => {
 
     expect(result).toBe("selected");
     expect(ensureOverride).toHaveBeenCalledWith({
+      isNonInteractive: expect.any(Function),
+      contextWindowFloor: MIN_HERMES_OLLAMA_CONTEXT_WINDOW,
+    });
+    expect(runStartup).toHaveBeenCalledWith({
+      ollamaReady: true,
+      ollamaPort: 11434,
+      getLocalProviderBaseUrl: expect.any(Function),
       isNonInteractive: expect.any(Function),
       contextWindowFloor: MIN_HERMES_OLLAMA_CONTEXT_WINDOW,
     });

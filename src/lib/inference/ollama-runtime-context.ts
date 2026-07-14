@@ -36,6 +36,8 @@ export interface ApplyOllamaRuntimeContextWindowOptions {
   runCaptureImpl?: OllamaRuntimeRunCaptureFn;
 }
 
+export type ApplyOllamaRuntimeContextWindowResult = { ok: true } | { ok: false; message: string };
+
 // Four million tokens is intentionally above today's practical local-model
 // context windows while still rejecting obviously broken daemon responses.
 export const MAX_AUTODETECTED_OLLAMA_CONTEXT_WINDOW = 4_194_304;
@@ -43,9 +45,8 @@ export const MAX_AUTODETECTED_OLLAMA_CONTEXT_WINDOW = 4_194_304;
 // Floor for auto-adopted runtime context windows. Ollama's stock daemon serves
 // `num_ctx=4096` until OLLAMA_CONTEXT_LENGTH is set host-side, which cannot fit
 // an agent base prompt + tool catalogue (~7.4 k tokens) plus a single user turn.
-// When the probed runtime length is below this floor and the user has not set
-// an explicit override, NemoClaw raises NEMOCLAW_CONTEXT_WINDOW to the floor so
-// downstream prompt budgeting reflects a workable window.
+// OpenClaw preserves the legacy prompt-budgeting fallback at this floor. Agents
+// with a higher floor must prove that the loaded daemon actually provides it.
 export const MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW = 16_384;
 
 /**
@@ -213,17 +214,19 @@ export function resetOllamaRuntimeContextWindowAutoState(): void {
 }
 
 /**
- * Adopt the loaded Ollama model's runtime context length when no explicit
- * `NEMOCLAW_CONTEXT_WINDOW` is set, raising it to the selected agent floor.
+ * Adopt the loaded Ollama model's runtime context length. Agent floors above
+ * the legacy minimum are strict: the loaded daemon must report at least the
+ * required length even when `NEMOCLAW_CONTEXT_WINDOW` is explicitly set.
  */
 export function applyOllamaRuntimeContextWindow(
   selectedModel: string,
   getOllamaHost: () => string,
   options: ApplyOllamaRuntimeContextWindowOptions = {},
-): void {
+): ApplyOllamaRuntimeContextWindowResult {
   const env = options.env ?? process.env;
   const logger = options.logger ?? console;
   const contextWindowFloor = resolveOllamaContextWindowFloor(options.contextWindowFloor);
+  const strictRuntimeFloor = contextWindowFloor > MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW;
   const currentContextWindow = env.NEMOCLAW_CONTEXT_WINDOW;
   const currentIsPreviousAuto =
     !!currentContextWindow &&
@@ -231,9 +234,9 @@ export function applyOllamaRuntimeContextWindow(
     currentContextWindow === autoDetectedOllamaContextWindow;
   const userContextWindow = currentIsPreviousAuto ? null : currentContextWindow;
 
-  if (hasExplicitContextWindow(userContextWindow)) {
+  if (!strictRuntimeFloor && hasExplicitContextWindow(userContextWindow)) {
     logger.log(`  ℹ Keeping configured context window: ${userContextWindow} tokens`);
-    return;
+    return { ok: true };
   }
 
   const runtimeStatus = probeOllamaRuntimeModelStatus(
@@ -244,6 +247,68 @@ export function applyOllamaRuntimeContextWindow(
   if (runtimeStatus.contextLengthWarning) {
     logger.warn(`  ⚠ ${runtimeStatus.contextLengthWarning}`);
   }
+
+  if (strictRuntimeFloor) {
+    const configuredContextWindow = hasExplicitContextWindow(userContextWindow)
+      ? parsePositiveInteger(userContextWindow)
+      : null;
+    const requiredContextWindow = Math.max(
+      contextWindowFloor,
+      configuredContextWindow ?? contextWindowFloor,
+    );
+    const clearPreviousAuto = () => {
+      if (!currentIsPreviousAuto) return;
+      delete env.NEMOCLAW_CONTEXT_WINDOW;
+      autoDetectedOllamaContextWindow = null;
+    };
+    const remediation =
+      `Configure or restart the host Ollama daemon with OLLAMA_CONTEXT_LENGTH=${requiredContextWindow}, ` +
+      "then rerun onboarding.";
+
+    if (hasExplicitContextWindow(userContextWindow) && !configuredContextWindow) {
+      clearPreviousAuto();
+      return {
+        ok: false,
+        message:
+          `NEMOCLAW_CONTEXT_WINDOW must be a positive integer at least ${contextWindowFloor} ` +
+          `for this agent. ${remediation}`,
+      };
+    }
+    if (configuredContextWindow !== null && configuredContextWindow < contextWindowFloor) {
+      clearPreviousAuto();
+      return {
+        ok: false,
+        message:
+          `NEMOCLAW_CONTEXT_WINDOW=${configuredContextWindow} is below this agent's required ` +
+          `${contextWindowFloor}-token floor. ${remediation}`,
+      };
+    }
+    if (!runtimeStatus.loaded || !runtimeStatus.contextLength) {
+      clearPreviousAuto();
+      return {
+        ok: false,
+        message:
+          `Ollama did not report a valid runtime context_length for loaded model ` +
+          `'${selectedModel}', so NemoClaw cannot verify the required ${requiredContextWindow}-token ` +
+          `window. ${remediation}`,
+      };
+    }
+    if (runtimeStatus.contextLength < requiredContextWindow) {
+      clearPreviousAuto();
+      return {
+        ok: false,
+        message:
+          `Ollama reports context_length=${runtimeStatus.contextLength} for loaded model ` +
+          `'${selectedModel}', below the required ${requiredContextWindow}-token window. ` +
+          remediation,
+      };
+    }
+    if (hasExplicitContextWindow(userContextWindow)) {
+      logger.log(`  ℹ Keeping configured context window: ${userContextWindow} tokens`);
+      return { ok: true };
+    }
+  }
+
   if (runtimeStatus.loaded && runtimeStatus.contextLength) {
     const detected = runtimeStatus.contextLength;
     const adopted = Math.max(detected, contextWindowFloor);
@@ -259,11 +324,12 @@ export function applyOllamaRuntimeContextWindow(
     } else {
       logger.log(`  ✓ Using Ollama runtime context length: ${value} tokens`);
     }
-    return;
+    return { ok: true };
   }
 
   if (currentIsPreviousAuto) {
     delete env.NEMOCLAW_CONTEXT_WINDOW;
     autoDetectedOllamaContextWindow = null;
   }
+  return { ok: true };
 }

@@ -123,7 +123,7 @@ describe("Ollama runtime context helpers", () => {
     expect(messages.some((m) => m.includes("Raising Ollama runtime context window"))).toBe(true);
   });
 
-  it("keeps the OpenClaw Ollama floor at 16384 and raises Hermes to its 64000-token floor", () => {
+  it("keeps the OpenClaw Ollama floor at 16384 and requires 64000 for Hermes", () => {
     expect(getOllamaContextWindowFloorForAgent(null)).toBe(MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW);
     expect(getOllamaContextWindowFloorForAgent("openclaw")).toBe(
       MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW,
@@ -132,7 +132,7 @@ describe("Ollama runtime context helpers", () => {
 
     const env: NodeJS.ProcessEnv = {};
     const messages: string[] = [];
-    applyOllamaRuntimeContextWindow("llama3.2:1b", getOllamaHost, {
+    const result = applyOllamaRuntimeContextWindow("llama3.2:1b", getOllamaHost, {
       env,
       contextWindowFloor: MIN_HERMES_OLLAMA_CONTEXT_WINDOW,
       logger: {
@@ -145,8 +145,116 @@ describe("Ollama runtime context helpers", () => {
         }),
     });
 
-    expect(env.NEMOCLAW_CONTEXT_WINDOW).toBe(String(MIN_HERMES_OLLAMA_CONTEXT_WINDOW));
-    expect(messages.some((m) => m.includes("64000-token agent floor"))).toBe(true);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected strict Hermes context validation to fail");
+    expect(result.message).toContain("context_length=16384");
+    expect(result.message).toContain("'llama3.2:1b'");
+    expect(result.message).toContain("required 64000-token window");
+    expect(result.message).toContain("OLLAMA_CONTEXT_LENGTH=64000");
+    expect(env.NEMOCLAW_CONTEXT_WINDOW).toBeUndefined();
+    expect(messages.some((m) => m.includes("Raising Ollama runtime context window"))).toBe(false);
+  });
+
+  it("does not let an explicit prompt budget hide a below-floor Hermes daemon", () => {
+    const env: NodeJS.ProcessEnv = { NEMOCLAW_CONTEXT_WINDOW: "64000" };
+    const result = applyOllamaRuntimeContextWindow("llama3.2:1b", getOllamaHost, {
+      env,
+      contextWindowFloor: MIN_HERMES_OLLAMA_CONTEXT_WINDOW,
+      logger: { log: () => {}, warn: () => {} },
+      runCaptureImpl: () =>
+        JSON.stringify({
+          models: [{ name: "llama3.2:1b", context_length: 16_384 }],
+        }),
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected strict Hermes context validation to fail");
+    expect(result.message).toContain("context_length=16384");
+    expect(result.message).toContain("OLLAMA_CONTEXT_LENGTH=64000");
+    expect(env.NEMOCLAW_CONTEXT_WINDOW).toBe("64000");
+  });
+
+  it.each([
+    ["no runtime response", ""],
+    ["an unloaded model", JSON.stringify({ models: [] })],
+    [
+      "a missing context length",
+      JSON.stringify({ models: [{ name: "llama3.2:1b", processor: "100% GPU" }] }),
+    ],
+    [
+      "a malformed context length",
+      JSON.stringify({ models: [{ name: "llama3.2:1b", context_length: "bogus" }] }),
+    ],
+  ])("fails closed for Hermes with %s", (_caseName, output) => {
+    const env: NodeJS.ProcessEnv = {};
+    const result = applyOllamaRuntimeContextWindow("llama3.2:1b", getOllamaHost, {
+      env,
+      contextWindowFloor: MIN_HERMES_OLLAMA_CONTEXT_WINDOW,
+      logger: { log: () => {}, warn: () => {} },
+      runCaptureImpl: () => output,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected strict Hermes context validation to fail");
+    expect(result.message).toContain("did not report a valid runtime context_length");
+    expect(result.message).toContain("OLLAMA_CONTEXT_LENGTH=64000");
+    expect(env.NEMOCLAW_CONTEXT_WINDOW).toBeUndefined();
+  });
+
+  it.each([64_000, 131_072])("accepts a Hermes daemon reporting context_length=%i", (context) => {
+    const env: NodeJS.ProcessEnv = {};
+    const result = applyOllamaRuntimeContextWindow("llama3.2:1b", getOllamaHost, {
+      env,
+      contextWindowFloor: MIN_HERMES_OLLAMA_CONTEXT_WINDOW,
+      logger: { log: () => {}, warn: () => {} },
+      runCaptureImpl: () =>
+        JSON.stringify({ models: [{ name: "llama3.2:1b", context_length: context }] }),
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(env.NEMOCLAW_CONTEXT_WINDOW).toBe(String(context));
+  });
+
+  it("requires the daemon to satisfy an explicit Hermes context above the agent floor", () => {
+    const env: NodeJS.ProcessEnv = { NEMOCLAW_CONTEXT_WINDOW: "131072" };
+    const result = applyOllamaRuntimeContextWindow("llama3.2:1b", getOllamaHost, {
+      env,
+      contextWindowFloor: MIN_HERMES_OLLAMA_CONTEXT_WINDOW,
+      logger: { log: () => {}, warn: () => {} },
+      runCaptureImpl: () =>
+        JSON.stringify({ models: [{ name: "llama3.2:1b", context_length: 64_000 }] }),
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected explicit context validation to fail");
+    expect(result.message).toContain("required 131072-token window");
+    expect(result.message).toContain("OLLAMA_CONTEXT_LENGTH=131072");
+    expect(env.NEMOCLAW_CONTEXT_WINDOW).toBe("131072");
+  });
+
+  it("clears only stale auto-detected state when strict Hermes validation fails", () => {
+    const env: NodeJS.ProcessEnv = {};
+    const logger = { log: () => {}, warn: () => {} };
+
+    expect(
+      applyOllamaRuntimeContextWindow("llama3.2:1b", getOllamaHost, {
+        env,
+        logger,
+        runCaptureImpl: () =>
+          JSON.stringify({ models: [{ name: "llama3.2:1b", context_length: 32_768 }] }),
+      }),
+    ).toEqual({ ok: true });
+    expect(env.NEMOCLAW_CONTEXT_WINDOW).toBe("32768");
+
+    const result = applyOllamaRuntimeContextWindow("llama3.2:1b", getOllamaHost, {
+      env,
+      contextWindowFloor: MIN_HERMES_OLLAMA_CONTEXT_WINDOW,
+      logger,
+      runCaptureImpl: () => JSON.stringify({ models: [] }),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(env.NEMOCLAW_CONTEXT_WINDOW).toBeUndefined();
   });
 
   it("preserves a daemon-reported context window above the agent floor", () => {

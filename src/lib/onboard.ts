@@ -3090,7 +3090,17 @@ async function selectAndValidateOllamaModel(
         "  ℹ Using chat completions API (Ollama tool calls require /v1/chat/completions)",
       );
     }
-    localInference.applyOllamaRuntimeContextWindow(selectedModel, defaults);
+    const contextWindowResult = localInference.applyOllamaRuntimeContextWindow(
+      selectedModel,
+      defaults,
+    );
+    if (!contextWindowResult.ok) {
+      if (isNonInteractive()) abortNonInteractive(contextWindowResult.message);
+      console.error(`  ${contextWindowResult.message}`);
+      console.log("  Returning to provider selection.");
+      console.log("");
+      return { outcome: "back-to-selection" };
+    }
     return { outcome: "selected", model: selectedModel, allowToolsIncompatible };
   }
 }

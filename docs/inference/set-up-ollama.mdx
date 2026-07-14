@@ -86,9 +86,12 @@ Each Ollama-backed OpenClaw passthrough checks whether the selected model is sti
 </AgentOnly>
 
 <AgentOnly variant="hermes">
-When Ollama reports a loaded-model context length, NemoClaw uses it for the `model.context_length` written to `/sandbox/.hermes/config.yaml` unless you set `NEMOCLAW_CONTEXT_WINDOW`.
-Hermes requires at least `64000` tokens, so NemoClaw raises lower auto-detected Ollama values to `64000` before the sandbox is built.
-An explicit `NEMOCLAW_CONTEXT_WINDOW` below `64000` stops config generation instead of producing a sandbox that fails on first inference.
+Hermes requires at least `64000` tokens, so NemoClaw requests that host-side context length when it starts Ollama on macOS or Linux.
+Fresh onboarding verifies after model warm-up that `/api/ps` reports at least `64000` for the loaded model.
+Resumed onboarding and sandbox rebuilds warm the exact recorded Ollama model and repeat this verification before reusing its route.
+When `NEMOCLAW_CONTEXT_WINDOW` is unset, NemoClaw writes the verified runtime value as `model.context_length` in `/sandbox/.hermes/config.yaml`.
+An explicit `NEMOCLAW_CONTEXT_WINDOW` must be at least `64000`; NemoClaw writes that value only when the loaded model reports at least the same context length.
+If an existing or unmanaged daemon reports less, omits the value, or returns a malformed value, onboarding stops before building the sandbox and shows the required `OLLAMA_CONTEXT_LENGTH` value for restarting Ollama.
 </AgentOnly>
 
 ## Use Windows-Host Ollama from WSL
@@ -205,7 +208,9 @@ When Ollama reports a context length below `16384` and `NEMOCLAW_CONTEXT_WINDOW`
 </AgentOnly>
 
 <AgentOnly variant="hermes">
-When Ollama reports a context length below `64000` and `NEMOCLAW_CONTEXT_WINDOW` is unset, NemoClaw writes `model.context_length: 64000` so Hermes meets its minimum context requirement.
+When `NEMOCLAW_CONTEXT_WINDOW` is unset, NemoClaw writes a valid loaded-model context length of at least `64000` as `model.context_length`.
+When you set a larger value explicitly, the loaded model must report at least that value before NemoClaw writes the explicit value.
+When the runtime value is lower or cannot be verified, onboarding stops and tells you which `OLLAMA_CONTEXT_LENGTH` value to use when restarting the host daemon before retrying.
 </AgentOnly>
 
 If the initial validation times out during a cold load, NemoClaw retries once with a 300-second probe budget.
