@@ -80,14 +80,37 @@ describe("checks runner", () => {
   it("exits with one when a check has no status", () => {
     const spawn = vi.fn((_command: string, _args: string[], _options: SpawnSyncOptions) => ({
       status: null,
+      error: new Error("spawn failed"),
     }));
     const exit = vi.fn((code?: number): never => {
       throw new Error(`exit ${code}`);
     });
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     expect(() => runChecks({ checks: [sampleCheck], platform: "linux", spawn, exit })).toThrow(
       "exit 1",
     );
     expect(exit).toHaveBeenCalledWith(1);
+    expect(error).toHaveBeenCalledWith("Check failed: sample");
+    expect(error).toHaveBeenCalledWith("spawn failed");
+    error.mockRestore();
+  });
+
+  it("exits with the check status code on failure", () => {
+    const spawn = vi.fn((_command: string, _args: string[], _options: SpawnSyncOptions) => ({
+      status: 2,
+    }));
+    const exit = vi.fn((code?: number): never => {
+      throw new Error(`exit ${code}`);
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    expect(() => runChecks({ checks: [sampleCheck], platform: "linux", spawn, exit })).toThrow(
+      "exit 2",
+    );
+    expect(exit).toHaveBeenCalledWith(2);
+    expect(error).toHaveBeenCalledWith("Check failed: sample");
+    expect(error).not.toHaveBeenCalledWith("spawn failed");
+    error.mockRestore();
   });
 });

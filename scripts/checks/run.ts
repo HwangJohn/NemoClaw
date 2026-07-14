@@ -15,6 +15,7 @@ type CheckCommand = {
 
 type CheckSpawnResult = {
   status: number | null;
+  error?: Error;
 };
 
 type CheckSpawn = (command: string, args: string[], options: SpawnSyncOptions) => CheckSpawnResult;
@@ -135,6 +136,9 @@ export function runChecks(options: RunChecksOptions = {}): void {
     });
     if (result.status !== 0) {
       console.error(`Check failed: ${check.name}`);
+      if (result.status === null && result.error?.message) {
+        console.error(result.error.message);
+      }
       exit(result.status ?? 1);
     }
   }
