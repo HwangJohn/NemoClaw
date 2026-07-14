@@ -37,6 +37,7 @@ describe("runOllamaStartupOrGate steer hint (#4365)", () => {
   });
 
   function restore() {
+    setOllamaAutostartDisabled(false);
     wait.waitForHttp = originalWaitForHttp;
     runner.runShell = originalRunShell;
     if (originalProviderEnv === undefined) delete process.env.NEMOCLAW_PROVIDER;
@@ -199,6 +200,64 @@ describe("runOllamaStartupOrGate steer hint (#4365)", () => {
       );
     } finally {
       logSpy.mockRestore();
+      restore();
+    }
+  });
+
+  it.each([
+    {
+      name: "returns to provider selection for an interactive unpinned run",
+      nonInteractive: false,
+      provider: undefined,
+      shouldExit: false,
+    },
+    {
+      name: "exits an interactive provider-pinned run instead of looping",
+      nonInteractive: false,
+      provider: "ollama",
+      shouldExit: true,
+    },
+    {
+      name: "exits a non-interactive run",
+      nonInteractive: true,
+      provider: undefined,
+      shouldExit: true,
+    },
+  ])("refuses an unavailable Hermes fallback and $name (#6760)", (testCase) => {
+    if (testCase.provider) process.env.NEMOCLAW_PROVIDER = testCase.provider;
+    else delete process.env.NEMOCLAW_PROVIDER;
+    setOllamaAutostartDisabled(true);
+    let shellCalled = false;
+    runner.runShell = () => {
+      shellCalled = true;
+      return { status: 0 };
+    };
+    const getLocalProviderBaseUrl = vi.fn(() => "http://host.openshell.internal:11435/v1");
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`process.exit:${code ?? 0}`);
+    }) as never);
+    const invoke = () =>
+      runOllamaStartupOrGate({
+        ollamaReady: false,
+        ollamaPort: 11434,
+        getLocalProviderBaseUrl,
+        isNonInteractive: () => testCase.nonInteractive,
+        contextWindowFloor: MIN_HERMES_OLLAMA_CONTEXT_WINDOW,
+      });
+
+    try {
+      if (testCase.shouldExit) expect(invoke).toThrow(/process\.exit:1/);
+      else expect(invoke()).toEqual({ kind: "continue" });
+      expect(exitSpy).toHaveBeenCalledTimes(testCase.shouldExit ? 1 : 0);
+      expect(shellCalled).toBe(false);
+      expect(getLocalProviderBaseUrl).not.toHaveBeenCalled();
+      expect(errSpy).toHaveBeenCalledWith(
+        "  Ollama is not running on localhost:11434 and --no-ollama-autostart is set; cannot verify the required 64000-token context window.",
+      );
+    } finally {
+      errSpy.mockRestore();
+      exitSpy.mockRestore();
       restore();
     }
   });

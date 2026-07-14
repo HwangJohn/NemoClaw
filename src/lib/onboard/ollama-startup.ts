@@ -62,7 +62,17 @@ export function runOllamaStartupOrGate(args: {
   const { ollamaReady, ollamaPort, getLocalProviderBaseUrl, isNonInteractive, contextWindowFloor } =
     args;
   if (ollamaReady) return { kind: "ready" };
+  const resolvedContextFloor = runtimeContext.resolveOllamaContextWindowFloor(contextWindowFloor);
   if (isOllamaAutostartDisabled()) {
+    if (resolvedContextFloor > runtimeContext.MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW) {
+      console.error(
+        "  Ollama is not running on localhost:" +
+          `${ollamaPort} and --no-ollama-autostart is set; ` +
+          `cannot verify the required ${resolvedContextFloor}-token context window.`,
+      );
+      if (isNonInteractive() || isOllamaProviderPinned()) process.exit(1);
+      return { kind: "continue" };
+    }
     console.log(
       "  ⚠ Ollama is not running on localhost:" +
         `${ollamaPort} and --no-ollama-autostart is set; ` +
@@ -85,7 +95,6 @@ export function runOllamaStartupOrGate(args: {
     };
   }
   console.log("  Starting Ollama...");
-  const resolvedContextFloor = runtimeContext.resolveOllamaContextWindowFloor(contextWindowFloor);
   const contextLengthPrefix =
     resolvedContextFloor > runtimeContext.MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW
       ? `OLLAMA_CONTEXT_LENGTH=${resolvedContextFloor} `
