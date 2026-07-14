@@ -352,6 +352,25 @@ describe("DGX Spark existing vLLM headroom warning", () => {
     ).toContain("Qwen/Qwen2.5-72B-Instruct");
   });
 
+  it("includes the threshold-sized model identifier in large-model warnings", () => {
+    const model = "Qwen/Qwen3-30B-A3B";
+
+    expect(
+      buildDgxSparkExistingVllmHeadroomWarning(
+        {
+          data: [
+            {
+              id: "served-model",
+              root: model,
+              max_model_len: 32768,
+            },
+          ],
+        },
+        "served-model",
+      ),
+    ).toContain(model);
+  });
+
   it("warns for numeric model sizes at the large-model threshold", () => {
     expect(
       buildDgxSparkExistingVllmHeadroomWarning(
