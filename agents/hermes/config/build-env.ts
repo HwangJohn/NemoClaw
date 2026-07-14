@@ -9,6 +9,7 @@ import { isObjectRecord } from "./object-record.ts";
 
 export type HermesWebSearchProvider = "tavily";
 
+/** Minimum context window Hermes accepts for generated configuration. */
 export const MIN_HERMES_CONTEXT_WINDOW = 64_000;
 
 export type HermesBuildSettings = {
@@ -31,6 +32,7 @@ export type HermesBuildSettings = {
   };
 };
 
+/** Read and validate the environment consumed by the Hermes config generator. */
 export function readHermesBuildSettings(env: NodeJS.ProcessEnv): HermesBuildSettings {
   const model = readRequiredEnv(env, "NEMOCLAW_MODEL");
   const baseUrl = readRequiredEnv(env, "NEMOCLAW_INFERENCE_BASE_URL");
@@ -52,9 +54,13 @@ export function readHermesBuildSettings(env: NodeJS.ProcessEnv): HermesBuildSett
   };
 }
 
-// Parse NEMOCLAW_CONTEXT_WINDOW as a positive integer of tokens. Empty, absent,
-// or malformed values return null so the generated config omits context_length
-// and Hermes keeps auto-detecting from the endpoint's /v1/models. See #6177.
+/**
+ * Parse `NEMOCLAW_CONTEXT_WINDOW` for Hermes config generation.
+ *
+ * Empty, absent, or malformed values return null so Hermes keeps auto-detecting
+ * from the endpoint's `/v1/models`; explicit values below the Hermes floor fail
+ * before writing an unusable config. See #6177.
+ */
 function readContextWindow(env: NodeJS.ProcessEnv): number | null {
   const raw = (env.NEMOCLAW_CONTEXT_WINDOW || "").trim();
   if (!/^[1-9][0-9]*$/.test(raw)) return null;

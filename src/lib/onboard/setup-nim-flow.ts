@@ -218,6 +218,7 @@ function applyGatewayRouteDiscoveryConstraints(
   }
 }
 
+/** Create the provider-selection flow and seed agent-specific Ollama defaults. */
 export function createSetupNim(
   defaults: SetupNimFlowDeps,
   overrides: Partial<SetupNimFlowDeps> = {},

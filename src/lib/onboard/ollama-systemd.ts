@@ -24,6 +24,7 @@ export type OllamaLoopbackSystemdOverrideState = "not-applicable" | "ready" | "f
 type OllamaLoopbackSystemdOverrideOptions = {
   isNonInteractive?: () => boolean;
   enableService?: boolean;
+  /** Minimum daemon context length to preserve or apply in the systemd override. */
   contextWindowFloor?: number;
   detectNvidiaPlatformImpl?: () => string;
   hasOllamaCudaV13LibraryImpl?: () => boolean;
@@ -173,6 +174,7 @@ function resolveOllamaLibraryOverride(
   return hasCudaV13 ? "cuda_v13" : null;
 }
 
+/** Ensure the Ollama systemd service is loopback-bound with the required context floor. */
 export function ensureOllamaLoopbackSystemdOverride(
   options: OllamaLoopbackSystemdOverrideOptions = {},
 ): OllamaLoopbackSystemdOverrideState {
@@ -309,6 +311,7 @@ export function ensureOllamaLoopbackSystemdOverride(
   return "failed";
 }
 
+/** Ensure the managed Ollama systemd service is enabled and repaired for onboarding. */
 export function ensureManagedOllamaLoopbackSystemdOverride(
   options: Omit<OllamaLoopbackSystemdOverrideOptions, "enableService"> = {},
 ): OllamaLoopbackSystemdOverrideState {
@@ -366,6 +369,12 @@ function rewriteEnvironmentLineWithoutManagedAssignments(
   return kept.length > 0 ? [`${match[1]}${kept.join(" ")}`] : [];
 }
 
+/**
+ * Merge NemoClaw's managed Ollama loopback and context settings into a drop-in.
+ *
+ * Existing operator context values are preserved when they already meet or
+ * exceed the selected agent floor; otherwise the managed floor is written.
+ */
 export function mergeOllamaLoopbackSystemdOverride(
   existingDropIn: string,
   options: { contextWindowFloor?: number; libraryOverride?: string | null } = {},

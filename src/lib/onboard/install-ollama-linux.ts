@@ -255,6 +255,7 @@ function installOllamaUserLocal(opts: InstallOllamaLinuxOptions): InstallOllamaL
   return { ok: true, mode: "user-local", binPath };
 }
 
+/** Start the user-local Ollama daemon with the selected agent context floor. */
 function startUserLocalOllamaDaemon(binPath: string, opts: InstallOllamaLinuxOptions): boolean {
   const log = opts.log ?? ((m: string) => console.log(m));
   const runShellImpl = opts.runShellImpl ?? runShell;
@@ -267,6 +268,7 @@ function startUserLocalOllamaDaemon(binPath: string, opts: InstallOllamaLinuxOpt
   return waitForHttpImpl(`http://127.0.0.1:${OLLAMA_PORT}/`, 10);
 }
 
+/** Return the `OLLAMA_CONTEXT_LENGTH` prefix only when the agent needs a higher floor. */
 function ollamaContextLengthEnvPrefix(
   opts: Pick<InstallOllamaLinuxOptions, "contextWindowFloor">,
 ): string {

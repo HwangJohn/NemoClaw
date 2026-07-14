@@ -66,6 +66,7 @@ type SetupNimOllamaDeps = {
   }) => { ok: true } | { ok: false; message: string };
 };
 
+/** Create Ollama onboarding handlers that propagate agent-specific context floors. */
 export function createSetupNimOllamaHandlers(deps: SetupNimOllamaDeps): {
   handleWindowsHostOllamaSelection: (
     gpu: any,

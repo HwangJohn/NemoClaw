@@ -18,6 +18,7 @@ export interface InstallOllamaMacOSOptions {
   /** When true the running daemon is the upgrade target — pick `brew upgrade`
    *  and refuse to mask its failure with `ignoreError`. */
   isUpgrade?: boolean;
+  /** Minimum daemon context length to request for the selected agent. */
   contextWindowFloor?: number;
   runImpl?: typeof run;
   runShellImpl?: typeof runShell;
@@ -80,6 +81,7 @@ export function installOllamaOnMacOS(opts: InstallOllamaMacOSOptions): InstallOl
   return { ok: true };
 }
 
+/** Return the `OLLAMA_CONTEXT_LENGTH` prefix only when the agent needs a higher floor. */
 function ollamaContextLengthEnvPrefix(
   opts: Pick<InstallOllamaMacOSOptions, "contextWindowFloor">,
 ): string {

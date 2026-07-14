@@ -839,6 +839,7 @@ export function resolveOllamaRuntimeContextWindow(
 
 export { resetOllamaRuntimeContextWindowAutoState };
 
+/** Apply Ollama runtime context-window adoption using the resolved local host. */
 export function applyOllamaRuntimeContextWindow(
   selectedModel: string,
   options: Pick<ApplyOllamaRuntimeContextWindowOptions, "contextWindowFloor"> = {},

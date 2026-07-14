@@ -30,6 +30,7 @@ export interface OllamaRuntimeModelStatus {
 
 export interface ApplyOllamaRuntimeContextWindowOptions {
   env?: NodeJS.ProcessEnv;
+  /** Minimum usable context window for the selected agent. */
   contextWindowFloor?: number;
   logger?: Pick<Console, "log" | "warn">;
   runCaptureImpl?: OllamaRuntimeRunCaptureFn;
@@ -47,8 +48,12 @@ export const MAX_AUTODETECTED_OLLAMA_CONTEXT_WINDOW = 4_194_304;
 // downstream prompt budgeting reflects a workable window.
 export const MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW = 16_384;
 
-// Hermes Agent rejects model context windows below 64,000 tokens. Keep this
-// floor consumer-specific so OpenClaw's Local Ollama defaults stay unchanged.
+/**
+ * Hermes-specific Ollama floor.
+ *
+ * Keep this consumer-specific so OpenClaw's Local Ollama defaults stay
+ * unchanged while Hermes rejects model context windows below 64,000 tokens.
+ */
 export const MIN_HERMES_OLLAMA_CONTEXT_WINDOW = 64_000;
 
 function normalizeOllamaModelName(value: unknown): string {
@@ -69,6 +74,7 @@ export function hasExplicitContextWindow(value: unknown): boolean {
   return String(value ?? "").trim() !== "";
 }
 
+/** Resolve the minimum Ollama context window required by an agent name. */
 export function getOllamaContextWindowFloorForAgent(agentName: string | null | undefined): number {
   return String(agentName ?? "")
     .trim()
@@ -77,6 +83,7 @@ export function getOllamaContextWindowFloorForAgent(agentName: string | null | u
     : MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW;
 }
 
+/** Normalize an optional agent floor, never returning less than the OpenClaw floor. */
 export function resolveOllamaContextWindowFloor(value: unknown): number {
   const parsed = parsePositiveInteger(value);
   return parsed && parsed > MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW
@@ -205,6 +212,10 @@ export function resetOllamaRuntimeContextWindowAutoState(): void {
   autoDetectedOllamaContextWindow = null;
 }
 
+/**
+ * Adopt the loaded Ollama model's runtime context length when no explicit
+ * `NEMOCLAW_CONTEXT_WINDOW` is set, raising it to the selected agent floor.
+ */
 export function applyOllamaRuntimeContextWindow(
   selectedModel: string,
   getOllamaHost: () => string,

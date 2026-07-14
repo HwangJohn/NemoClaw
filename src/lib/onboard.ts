@@ -3033,6 +3033,8 @@ const { readRecordedProvider, readRecordedNimContainer, readRecordedModel, readR
 type OllamaModelSelectionOutcome =
   | { outcome: "selected"; model: string; allowToolsIncompatible: boolean }
   | { outcome: "back-to-selection" };
+
+/** Select and validate a Local Ollama model, then apply the agent context floor. */
 async function selectAndValidateOllamaModel(
   gpu: ReturnType<typeof nim.detectGpu>,
   provider: string,
