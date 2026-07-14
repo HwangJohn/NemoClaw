@@ -801,4 +801,59 @@ describe("createSetupNim", () => {
     expect(installVllm).not.toHaveBeenCalled();
     expect(handleVllmSelection).not.toHaveBeenCalled();
   });
+
+  it("returns interactive occupied-port selection to the provider menu", async () => {
+    vi.stubEnv("NEMOCLAW_PROVIDER", "");
+    const profile = { name: "DGX Spark" } as VllmProfile;
+    const prompt = vi.fn(async () => "1");
+    const error = vi.fn();
+    const installVllm = vi.fn<SetupNimFlowDeps["installVllm"]>();
+    const handleVllmSelection = vi.fn<SetupNimFlowDeps["handleVllmSelection"]>();
+    const selectedKeys = ["install-vllm", "build"];
+    const selectFromNumberedMenu = vi.fn<SetupNimFlowDeps["selectFromNumberedMenu"]>(
+      (_rawChoice, _defaultIndex, options) => {
+        const key = selectedKeys.shift();
+        const selected = options.find((option) => option.key === key);
+        expect(selected, `missing provider option ${String(key)}`).toBeDefined();
+        return selected!;
+      },
+    );
+    const handleRemoteProviderSelection = vi.fn<SetupNimFlowDeps["handleRemoteProviderSelection"]>(
+      async ({ selected }, state) => {
+        expect(selected.key).toBe("build");
+        state.model = "nvidia/nemotron-3-super-120b-a12b";
+        state.provider = "nvidia-prod";
+        state.endpointUrl = "https://integrate.api.nvidia.com/v1";
+        state.credentialEnv = "NVIDIA_INFERENCE_API_KEY";
+        state.preferredInferenceApi = "openai-completions";
+        return "selected";
+      },
+    );
+    const setupNim = createSetupNim(
+      makeDeps({
+        prompt,
+        error,
+        selectFromNumberedMenu,
+        detectInferenceProviderHostState: () =>
+          makeHostState({
+            vllmRunning: true,
+            vllmProfile: profile,
+            hasVllmImage: true,
+            vllmEntries: [{ key: "install-vllm", label: "Start vLLM (DGX Spark)" }],
+          }),
+        installVllm,
+        handleVllmSelection,
+        handleRemoteProviderSelection,
+      }),
+    );
+
+    await expect(setupNim(null)).resolves.toMatchObject({ provider: "nvidia-prod" });
+
+    expect(prompt).toHaveBeenCalledTimes(2);
+    expect(selectFromNumberedMenu).toHaveBeenCalledTimes(2);
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("stop the existing server"));
+    expect(installVllm).not.toHaveBeenCalled();
+    expect(handleVllmSelection).not.toHaveBeenCalled();
+    expect(handleRemoteProviderSelection).toHaveBeenCalledOnce();
+  });
 });
