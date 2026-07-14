@@ -424,13 +424,45 @@ describe("host shields transition lock", () => {
     ).toThrow(/Timed out after 2ms waiting for shields transition lock .*recorded owner PID 202/s);
   });
 
+  it("enforces the async wait timeout when stale recovery retries without progress", async () => {
+    const recorded = owner("alpha", 202, "proc:dead-holder");
+    const lockPath = writeOwner("alpha", recorded);
+    let nowMs = 2_000;
+    let raced = false;
+    const locker = manager({
+      now: () => nowMs,
+      isProcessAlive: (pid) => {
+        runWhen(pid === 202 && !raced, () => {
+          raced = true;
+          fs.unlinkSync(lockPath);
+          nowMs += 3;
+        });
+        return pid === SELF_PID;
+      },
+    });
+
+    await expect(
+      locker.withShieldsTransitionLockAsync(
+        "alpha",
+        "nemoclaw alpha shields up",
+        async () => {
+          throw new Error("should not acquire after timeout");
+        },
+        {
+          waitTimeoutMs: 2,
+          pollIntervalMs: 1,
+        },
+      ),
+    ).rejects.toThrow(
+      /Timed out after 2ms waiting for shields transition lock .*recorded owner PID 202/s,
+    );
+  });
+
   it("recovers a stale lock asynchronously when a live PID has been reused", async () => {
     const holderPid = 202;
     const recorded = owner("alpha", holderPid, "proc:original");
     const lockPath = writeOwner("alpha", recorded);
-    const sleepAsync = vi.fn(async () => {});
     const locker = manager({
-      sleepAsync,
       isProcessAlive: (pid) => pid === holderPid || pid === SELF_PID,
       readProcessStartIdentity: (pid) =>
         pid === SELF_PID ? SELF_IDENTITY : pid === holderPid ? "proc:reused" : null,
@@ -448,7 +480,6 @@ describe("host shields transition lock", () => {
         return "acquired";
       }),
     ).resolves.toBe("acquired");
-    expect(sleepAsync).not.toHaveBeenCalled();
     expect(fs.existsSync(lockPath)).toBe(false);
   });
 

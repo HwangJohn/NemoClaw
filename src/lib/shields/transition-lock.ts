@@ -653,11 +653,11 @@ export class ShieldsTransitionLockManager {
   ): HeldLock {
     const state = this.acquisitionState(sandboxName, command, options);
     let lastWaitReason: WaitReason | null = null;
-    let retried = false;
+    let retrying = false;
 
     while (true) {
-      if (retried) this.enforceWaitTimeout(state, lastWaitReason);
-      retried = true;
+      this.enforceWaitTimeoutBeforeRetry(state, lastWaitReason, retrying);
+      retrying = true;
       const inProcess = this.held.get(sandboxName);
       if (inProcess) {
         lastWaitReason = { kind: "same-process", owner: inProcess.owner };
@@ -684,11 +684,11 @@ export class ShieldsTransitionLockManager {
   ): Promise<HeldLock> {
     const state = this.acquisitionState(sandboxName, command, options);
     let lastWaitReason: WaitReason | null = null;
-    let retried = false;
+    let retrying = false;
 
     while (true) {
-      if (retried) this.enforceWaitTimeout(state, lastWaitReason);
-      retried = true;
+      this.enforceWaitTimeoutBeforeRetry(state, lastWaitReason, retrying);
+      retrying = true;
       const inProcess = this.held.get(sandboxName);
       if (inProcess) {
         lastWaitReason = { kind: "same-process", owner: inProcess.owner };
@@ -810,6 +810,14 @@ export class ShieldsTransitionLockManager {
         `Timed out after ${String(state.waitTimeoutMs)}ms waiting for shields transition lock '${state.lockPath}': ${formatWaitReason(reason, state.lockPath)}`,
       );
     }
+  }
+
+  private enforceWaitTimeoutBeforeRetry(
+    state: AcquisitionState,
+    reason: WaitReason | null,
+    retrying: boolean,
+  ): void {
+    if (retrying) this.enforceWaitTimeout(state, reason);
   }
 
   private waitDuration(state: AcquisitionState, reason: WaitReason | null): number {
