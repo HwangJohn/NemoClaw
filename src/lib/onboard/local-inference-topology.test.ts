@@ -111,7 +111,7 @@ describe("ensureLocalProviderReachable", () => {
   });
 });
 
-describe("repairLocalInferenceSystemdOverrideOrExit", () => {
+describe("repairLocalInferenceSystemdOverrideOrExit (#6760)", () => {
   const recordedModel = "qwen3.5:35b";
   const isNonInteractive = vi.fn(() => true);
 
@@ -124,15 +124,15 @@ describe("repairLocalInferenceSystemdOverrideOrExit", () => {
     });
   }
 
-  function expectExit(run: () => void, message: string): void {
+  function expectFailure(run: () => void, message: string): void {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const exit = vi.spyOn(process, "exit").mockImplementation((code) => {
-      throw new Error(`exit ${code}`);
+      throw new Error(`unexpected process.exit(${code})`);
     });
 
-    expect(run).toThrow("exit 1");
+    expect(run).toThrow(message);
     expect(error).toHaveBeenCalledWith(`  ${message}`);
-    expect(exit).toHaveBeenCalledWith(1);
+    expect(exit).not.toHaveBeenCalled();
   }
 
   it("warms the recorded Hermes model before verifying its runtime context", () => {
@@ -185,7 +185,7 @@ describe("repairLocalInferenceSystemdOverrideOrExit", () => {
   });
 
   it("rejects a strict resume when the recorded model is missing", () => {
-    expectExit(
+    expectFailure(
       () =>
         repairLocalInferenceSystemdOverrideOrExit({
           provider: "ollama-local",
@@ -201,7 +201,7 @@ describe("repairLocalInferenceSystemdOverrideOrExit", () => {
   it("rejects a strict resume when Ollama is unreachable", () => {
     mockedFindReachableHost.mockReturnValue(null);
 
-    expectExit(
+    expectFailure(
       repairHermesResume,
       "Ollama is not reachable, so the recorded model's runtime context window cannot be verified.",
     );
@@ -212,7 +212,7 @@ describe("repairLocalInferenceSystemdOverrideOrExit", () => {
   it("rejects a strict resume when the recorded model cannot be warmed", () => {
     mockedValidateModel.mockReturnValue({ ok: false, message: "recorded model did not answer" });
 
-    expectExit(repairHermesResume, "recorded model did not answer");
+    expectFailure(repairHermesResume, "recorded model did not answer");
     expect(mockedApplyRuntimeContext).not.toHaveBeenCalled();
   });
 
@@ -224,6 +224,6 @@ describe("repairLocalInferenceSystemdOverrideOrExit", () => {
   ])("rejects an incomplete strict runtime proof: %s", (message) => {
     mockedApplyRuntimeContext.mockReturnValue({ ok: false, message });
 
-    expectExit(repairHermesResume, message);
+    expectFailure(repairHermesResume, message);
   });
 });

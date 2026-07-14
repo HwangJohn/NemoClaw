@@ -158,9 +158,9 @@ export interface RepairLocalInferenceSystemdOverrideOptions {
   isNonInteractive: () => boolean;
 }
 
-function exitOllamaResumeRepair(message: string): never {
+function failOllamaResumeRepair(message: string): never {
   console.error(`  ${message}`);
-  process.exit(1);
+  throw new Error(message);
 }
 
 // Repair the Ollama systemd loopback override for recorded ollama-local
@@ -175,29 +175,29 @@ export function repairLocalInferenceSystemdOverrideOrExit(
   const contextWindowFloor = resolveOllamaContextWindowFloor(options.contextWindowFloor);
   const state = ensureOllamaLoopbackSystemdOverride({ isNonInteractive, contextWindowFloor });
   if (state === "failed") {
-    exitOllamaResumeRepair(
+    failOllamaResumeRepair(
       "Ollama systemd restart did not recover after applying the loopback override.",
     );
   }
   if (contextWindowFloor <= MIN_AUTODETECTED_OLLAMA_CONTEXT_WINDOW) return;
   if (!model) {
-    exitOllamaResumeRepair(
+    failOllamaResumeRepair(
       "The recorded Ollama model is missing, so its runtime context window cannot be verified.",
     );
   }
   if (!findReachableOllamaHost()) {
-    exitOllamaResumeRepair(
+    failOllamaResumeRepair(
       "Ollama is not reachable, so the recorded model's runtime context window cannot be verified.",
     );
   }
   const validation = validateOllamaModel(model);
   if (!validation.ok) {
-    exitOllamaResumeRepair(
+    failOllamaResumeRepair(
       validation.message || `Selected Ollama model '${model}' failed runtime validation.`,
     );
   }
   const runtimeContext = applyOllamaRuntimeContextWindow(model, { contextWindowFloor });
-  if (!runtimeContext.ok) exitOllamaResumeRepair(runtimeContext.message);
+  if (!runtimeContext.ok) failOllamaResumeRepair(runtimeContext.message);
 }
 
 export interface LocalProviderReachabilityDeps {

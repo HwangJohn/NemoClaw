@@ -16,6 +16,18 @@ import {
 
 const getOllamaHost = () => "127.0.0.1";
 
+type OllamaRuntimeContextFailure = Extract<
+  ReturnType<typeof applyOllamaRuntimeContextWindow>,
+  { ok: false }
+>;
+
+function expectOllamaRuntimeContextFailure(
+  result: ReturnType<typeof applyOllamaRuntimeContextWindow>,
+): OllamaRuntimeContextFailure {
+  expect(result.ok).toBe(false);
+  return result as OllamaRuntimeContextFailure;
+}
+
 describe("Ollama runtime context helpers", () => {
   afterEach(() => {
     resetOllamaRuntimeContextWindowAutoState();
@@ -145,12 +157,11 @@ describe("Ollama runtime context helpers", () => {
         }),
     });
 
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error("expected strict Hermes context validation to fail");
-    expect(result.message).toContain("context_length=16384");
-    expect(result.message).toContain("'llama3.2:1b'");
-    expect(result.message).toContain("required 64000-token window");
-    expect(result.message).toContain("OLLAMA_CONTEXT_LENGTH=64000");
+    const failure = expectOllamaRuntimeContextFailure(result);
+    expect(failure.message).toContain("context_length=16384");
+    expect(failure.message).toContain("'llama3.2:1b'");
+    expect(failure.message).toContain("required 64000-token window");
+    expect(failure.message).toContain("OLLAMA_CONTEXT_LENGTH=64000");
     expect(env.NEMOCLAW_CONTEXT_WINDOW).toBeUndefined();
     expect(messages.some((m) => m.includes("Raising Ollama runtime context window"))).toBe(false);
   });
@@ -167,10 +178,9 @@ describe("Ollama runtime context helpers", () => {
         }),
     });
 
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error("expected strict Hermes context validation to fail");
-    expect(result.message).toContain("context_length=16384");
-    expect(result.message).toContain("OLLAMA_CONTEXT_LENGTH=64000");
+    const failure = expectOllamaRuntimeContextFailure(result);
+    expect(failure.message).toContain("context_length=16384");
+    expect(failure.message).toContain("OLLAMA_CONTEXT_LENGTH=64000");
     expect(env.NEMOCLAW_CONTEXT_WINDOW).toBe("64000");
   });
 
@@ -194,10 +204,9 @@ describe("Ollama runtime context helpers", () => {
       runCaptureImpl: () => output,
     });
 
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error("expected strict Hermes context validation to fail");
-    expect(result.message).toContain("did not report a valid runtime context_length");
-    expect(result.message).toContain("OLLAMA_CONTEXT_LENGTH=64000");
+    const failure = expectOllamaRuntimeContextFailure(result);
+    expect(failure.message).toContain("did not report a valid runtime context_length");
+    expect(failure.message).toContain("OLLAMA_CONTEXT_LENGTH=64000");
     expect(env.NEMOCLAW_CONTEXT_WINDOW).toBeUndefined();
   });
 
@@ -225,10 +234,9 @@ describe("Ollama runtime context helpers", () => {
         JSON.stringify({ models: [{ name: "llama3.2:1b", context_length: 64_000 }] }),
     });
 
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error("expected explicit context validation to fail");
-    expect(result.message).toContain("required 131072-token window");
-    expect(result.message).toContain("OLLAMA_CONTEXT_LENGTH=131072");
+    const failure = expectOllamaRuntimeContextFailure(result);
+    expect(failure.message).toContain("required 131072-token window");
+    expect(failure.message).toContain("OLLAMA_CONTEXT_LENGTH=131072");
     expect(env.NEMOCLAW_CONTEXT_WINDOW).toBe("131072");
   });
 
