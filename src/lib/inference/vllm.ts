@@ -124,6 +124,8 @@ const HF_TOKEN_ENV_KEYS = ["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"] as const;
 const MODEL_DOWNLOAD_HEARTBEAT_MS = 30_000;
 const VLLM_LAUNCH_HEARTBEAT_MS = 30_000;
 const HF_CACHE_CONTAINER_DIR = "/root/.cache/huggingface";
+export const NEMOCLAW_VLLM_CONTAINER_NAME = "nemoclaw-vllm";
+export const NEMOCLAW_VLLM_MANAGED_LABEL = "com.nvidia.nemoclaw.managed-vllm";
 
 function hostHfCacheDir(): string {
   return path.join(os.homedir(), ".cache", "huggingface");
@@ -192,7 +194,7 @@ const SPARK_PROFILE: VllmProfile = {
   image: VLLM_IMAGES.ngc2605Post1.arm64.ref,
   imageDownloadSizeBytes: VLLM_IMAGES.ngc2605Post1.arm64.downloadSizeBytes,
   defaultModel: qwen35bNvfp4Model(),
-  containerName: "nemoclaw-vllm",
+  containerName: NEMOCLAW_VLLM_CONTAINER_NAME,
   dockerRunFlags: vllmDockerRunFlags(),
   pullTimeoutSec: 12 * 60 * 60,
   loadTimeoutSec: 1800,
@@ -205,7 +207,7 @@ const STATION_PROFILE: VllmProfile = {
   image: VLLM_IMAGES.ngc2605Post1.arm64.ref,
   imageDownloadSizeBytes: VLLM_IMAGES.ngc2605Post1.arm64.downloadSizeBytes,
   defaultModel: deepseekV4FlashModel(),
-  containerName: "nemoclaw-vllm",
+  containerName: NEMOCLAW_VLLM_CONTAINER_NAME,
   dockerRunFlags: SPARK_PROFILE.dockerRunFlags,
   buildDockerRunFlags: () => {
     const indices = getGpuIndicesByName(/GB300/i);
@@ -239,7 +241,7 @@ const GENERIC_LINUX_PROFILE: VllmProfile | null = genericLinuxImage
       image: genericLinuxImage.ref,
       imageDownloadSizeBytes: genericLinuxImage.downloadSizeBytes,
       defaultModel: nemotronNanoModel(),
-      containerName: "nemoclaw-vllm",
+      containerName: NEMOCLAW_VLLM_CONTAINER_NAME,
       dockerRunFlags: SPARK_PROFILE.dockerRunFlags,
       pullTimeoutSec: SPARK_PROFILE.pullTimeoutSec,
       loadTimeoutSec: SPARK_PROFILE.loadTimeoutSec,
@@ -444,6 +446,8 @@ export function buildVllmRunArgs(
     "--restart",
     "unless-stopped",
     ...safeRunFlags,
+    "--label",
+    `${NEMOCLAW_VLLM_MANAGED_LABEL}=true`,
     "-p",
     `${String(VLLM_PORT)}:8000`,
     "--name",
@@ -454,6 +458,19 @@ export function buildVllmRunArgs(
     "-lc",
     buildVllmServeCommand(model, env),
   ];
+}
+
+export function isNemoClawManagedVllmRunning(): boolean {
+  const format = `{{.State.Running}}|{{index .Config.Labels "${NEMOCLAW_VLLM_MANAGED_LABEL}"}}`;
+  try {
+    const ownership = dockerCapture(
+      ["inspect", "--type", "container", "--format", format, NEMOCLAW_VLLM_CONTAINER_NAME],
+      { env: buildVllmDockerEnv(), ignoreError: true },
+    ).trim();
+    return ownership === "true|true";
+  } catch {
+    return false;
+  }
 }
 
 function startContainer(

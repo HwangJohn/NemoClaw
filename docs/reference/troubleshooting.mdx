@@ -2207,7 +2207,7 @@ For an existing vLLM server, inspect its launch arguments:
 docker inspect <vllm-container> --format '{{json .Config.Cmd}}'
 ```
 
-Large unquantized checkpoints, very long `--max-model-len` values, high `--gpu-memory-utilization`, and multiple concurrent sequences all consume the Spark's shared CPU/GPU memory pool.
+Large checkpoints without explicit quantization, very long `--max-model-len` values, high `--gpu-memory-utilization`, and multiple concurrent sequences all consume the Spark's shared CPU/GPU memory pool.
 Before reintroducing agent tools, restart vLLM with a smaller envelope, for example:
 
 ```bash

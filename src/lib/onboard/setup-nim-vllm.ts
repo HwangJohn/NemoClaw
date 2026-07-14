@@ -3,7 +3,14 @@
 
 import type { SetupNimSelectionResult, SetupNimSelectionState } from "./setup-nim-flow";
 
-type VllmModelEntry = { id?: unknown; max_model_len?: unknown };
+type VllmModelEntry = {
+  id?: unknown;
+  root?: unknown;
+  max_model_len?: unknown;
+  quantization?: unknown;
+  config?: unknown;
+  model_config?: unknown;
+};
 type VllmModels = { data?: VllmModelEntry[] };
 
 export interface SetupNimVllmSelectionOptions {
@@ -27,6 +34,7 @@ export interface SetupNimVllmDeps {
   ): Promise<{ ok: boolean; retry?: string; api?: string | null }>;
   applyVllmRuntimeContextWindow(models: VllmModels, model: string): void;
   isDgxSparkHost?: () => boolean;
+  isNemoClawManagedVllmRunning?: () => boolean;
   exitProcess(code: number): never;
 }
 
@@ -34,13 +42,10 @@ const SPARK_LONG_CONTEXT_WARNING_THRESHOLD = 131_072;
 const LARGE_MODEL_SIZE_PATTERN = /(?:^|[-_/])(\d+(?:\.\d+)?)b(?:$|[-_/])/gi;
 const LARGE_MODEL_SIZE_THRESHOLD_B = 30;
 const LARGE_MODEL_KEYWORD_PATTERN = /(?:^|[-_/])super(?:$|[-_/])/i;
-// Heuristic: suppress the large-model warning when the served-model alias contains
-// a well-known quantization marker. Aliases are not authoritative — vLLM allows
-// arbitrary names — but explicit quantization suffixes (nvfp4, fp8, awq, gptq,
-// int4, int8) are a strong conventional signal. Long-context (max_model_len) is
-// evaluated independently and can still trigger a warning even for quantized names.
-const QUANTIZED_MODEL_PATTERN =
-  /(?:^|[-_/])(?:nvfp4|fp4|fp8|awq|gptq|int4|int8|modelopt|quant)(?:$|[-_/])/i;
+const SAFE_REPORTED_MODEL_ID_PATTERN = /^[A-Za-z0-9._:/-]+$/;
+const NO_QUANTIZATION_VALUES = new Set(["", "false", "none", "null", "unquantized"]);
+
+type ModelSizeClass = "large" | "small" | "unknown";
 
 function parsePositiveInteger(value: unknown): number | null {
   const normalized = typeof value === "number" ? value : Number(String(value ?? "").trim());
@@ -55,14 +60,38 @@ function findVllmModelEntry(models: VllmModels, detectedModel: string): VllmMode
   );
 }
 
-function isLargeModelId(model: string): boolean {
+function classifyModelSize(model: string): ModelSizeClass {
+  let sawNumericSize = false;
   for (const match of model.matchAll(LARGE_MODEL_SIZE_PATTERN)) {
     const sizeBillions = Number(match[1]);
-    if (Number.isFinite(sizeBillions) && sizeBillions >= LARGE_MODEL_SIZE_THRESHOLD_B) {
-      return true;
+    if (Number.isFinite(sizeBillions)) {
+      sawNumericSize = true;
+      if (sizeBillions >= LARGE_MODEL_SIZE_THRESHOLD_B) return "large";
     }
   }
-  return LARGE_MODEL_KEYWORD_PATTERN.test(model);
+  if (LARGE_MODEL_KEYWORD_PATTERN.test(model)) return "large";
+  return sawNumericSize ? "small" : "unknown";
+}
+
+function reportedModelRoot(entry: VllmModelEntry | null): string | null {
+  const root = typeof entry?.root === "string" ? entry.root.trim() : "";
+  return root && SAFE_REPORTED_MODEL_ID_PATTERN.test(root) ? root : null;
+}
+
+function readObjectString(value: unknown, key: string): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = (value as Record<string, unknown>)[key];
+  return typeof candidate === "string" ? candidate.trim() : null;
+}
+
+function reportedQuantization(entry: VllmModelEntry | null): string | null {
+  const direct = typeof entry?.quantization === "string" ? entry.quantization.trim() : null;
+  const configured =
+    readObjectString(entry?.model_config, "quantization") ??
+    readObjectString(entry?.config, "quantization");
+  const quantization = direct ?? configured;
+  if (!quantization || NO_QUANTIZATION_VALUES.has(quantization.toLowerCase())) return null;
+  return quantization;
 }
 
 export function buildDgxSparkExistingVllmHeadroomWarning(
@@ -72,28 +101,33 @@ export function buildDgxSparkExistingVllmHeadroomWarning(
   const model = detectedModel.trim();
   if (!model) return null;
 
-  const largeModel = isLargeModelId(model);
-  const quantizedModel = QUANTIZED_MODEL_PATTERN.test(model);
-  const maxModelLen = parsePositiveInteger(findVllmModelEntry(models, model)?.max_model_len);
+  const entry = findVllmModelEntry(models, model);
+  const root = reportedModelRoot(entry);
+  const modelSize = root ? classifyModelSize(root) : "unknown";
+  const quantization = reportedQuantization(entry);
+  const maxModelLen = parsePositiveInteger(entry?.max_model_len);
   const longContext = !!maxModelLen && maxModelLen >= SPARK_LONG_CONTEXT_WARNING_THRESHOLD;
 
-  // Warn when the model is heuristically large+unquantized, OR when the reported
-  // context window is very large (independent of model size — KV cache alone can
-  // exhaust unified memory on DGX Spark regardless of parameter count).
-  const riskyLargeModel = largeModel && !quantizedModel;
-  if (!riskyLargeModel && !longContext) return null;
+  // The served ID is an arbitrary alias and can never prove model size or
+  // quantization. Fail conservatively when vLLM omits its underlying model root.
+  const riskyLargeModel = modelSize === "large" && !quantization;
+  const unverifiableModel = modelSize === "unknown";
+  if (!riskyLargeModel && !unverifiableModel && !longContext) return null;
 
   const contextText = maxModelLen ? ` with max_model_len=${String(maxModelLen)}` : "";
+  const rootText = root && root !== model ? ` (underlying model '${root}')` : "";
   const contextHint = longContext
     ? " The reported context window is very large for a unified-memory host."
     : "";
-  const riskDescription = riskyLargeModel
-    ? "Large, heuristically-classified unquantized checkpoints"
-    : "High-context configurations";
+  const riskDescription = unverifiableModel
+    ? "vLLM did not report enough model metadata to verify the underlying model size"
+    : riskyLargeModel
+      ? "Model metadata heuristically indicates a large checkpoint without reported quantization configuration"
+      : "High-context configurations";
 
   return (
-    `  ! Existing vLLM on DGX Spark is serving '${model}'${contextText}. ` +
-    `${riskDescription} can leave too little unified-memory headroom and may surface ` +
+    `  ! Existing vLLM on DGX Spark is serving '${model}'${rootText}${contextText}. ` +
+    `${riskDescription}. This configuration can leave too little unified-memory headroom and may surface ` +
     "as NVRM NV_ERR_NO_MEMORY or a hard host freeze under agent/tool load." +
     contextHint +
     " Prefer the managed Spark vLLM path (NEMOCLAW_PROVIDER=install-vllm) or restart vLLM " +
@@ -161,9 +195,13 @@ export function createSetupNimVllmHandler(
     // GB10 hosts that detectNvidiaPlatform() alone would miss); fall back to the dep.
     const isSparkHost =
       options.sparkHost !== undefined ? options.sparkHost : (deps.isDgxSparkHost?.() ?? false);
-    if (!options.managedInstall && isSparkHost) {
-      const warning = buildDgxSparkExistingVllmHeadroomWarning(models, detectedModel);
-      if (warning) console.warn(warning);
+    if (isSparkHost) {
+      const managedByNemoClaw =
+        options.managedInstall === true || deps.isNemoClawManagedVllmRunning?.() === true;
+      if (!managedByNemoClaw) {
+        const warning = buildDgxSparkExistingVllmHeadroomWarning(models, detectedModel);
+        if (warning) console.warn(warning);
+      }
     }
 
     const validationBaseUrl = deps.getLocalProviderValidationBaseUrl(state.provider);

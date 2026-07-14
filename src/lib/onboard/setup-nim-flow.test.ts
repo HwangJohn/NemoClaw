@@ -759,9 +759,12 @@ describe("createSetupNim", () => {
     expect(result.preferredInferenceApi).toBe("openai-completions");
   });
 
-  it("logs an occupied-port warning when install-vllm is selected and vLLM is already running", async () => {
+  it("refuses managed install when an existing vLLM occupies the port", async () => {
     const profile = { name: "DGX Spark" } as VllmProfile;
-    const log = vi.fn();
+    const error = vi.fn();
+    const abortNonInteractive = vi.fn<SetupNimFlowDeps["abortNonInteractive"]>((message) => {
+      throw new Error(message);
+    });
     const installVllm = vi.fn<SetupNimFlowDeps["installVllm"]>(async (_profile, options) => {
       options.beforeInstall?.("vllm-model");
       return { ok: true };
@@ -777,7 +780,8 @@ describe("createSetupNim", () => {
       makeDeps({
         isNonInteractive: () => true,
         getNonInteractiveProvider: () => "install-vllm",
-        log,
+        error,
+        abortNonInteractive,
         detectInferenceProviderHostState: () =>
           makeHostState({
             vllmRunning: true,
@@ -790,9 +794,11 @@ describe("createSetupNim", () => {
       }),
     );
 
-    await setupNim(null);
+    await expect(setupNim(null)).rejects.toThrow("vLLM is already running on localhost:8000");
 
-    expect(log).toHaveBeenCalledWith(expect.stringContaining("existing vLLM server is running"));
-    expect(installVllm).toHaveBeenCalledOnce();
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("stop the existing server"));
+    expect(abortNonInteractive).toHaveBeenCalledOnce();
+    expect(installVllm).not.toHaveBeenCalled();
+    expect(handleVllmSelection).not.toHaveBeenCalled();
   });
 });

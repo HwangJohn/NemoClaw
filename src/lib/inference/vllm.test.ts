@@ -55,6 +55,9 @@ import {
   buildVllmRunArgs,
   detectVllmProfile,
   installVllm,
+  isNemoClawManagedVllmRunning,
+  NEMOCLAW_VLLM_CONTAINER_NAME,
+  NEMOCLAW_VLLM_MANAGED_LABEL,
   pullImage,
   resolveVllmServedModelId,
 } from "./vllm";
@@ -293,6 +296,9 @@ describe("vLLM run command", () => {
     expect(args.slice(0, 3)).toEqual(["--pull=never", "--restart", "unless-stopped"]);
     expect(args).toContain("--name");
     expect(args[args.indexOf("--name") + 1]).toBe(profile!.containerName);
+    expect(args).toEqual(
+      expect.arrayContaining(["--label", `${NEMOCLAW_VLLM_MANAGED_LABEL}=true`]),
+    );
     expect(args).toContain("8000:8000");
   });
 
@@ -355,6 +361,46 @@ describe("vLLM run command", () => {
     expect(flags).toEqual(expect.arrayContaining(["--gpus", '"device=0,1"']));
     expect(flags).not.toContain("device=0,1");
     expect(flags).not.toContain(`'"device=0,1"'`);
+  });
+});
+
+describe("managed vLLM ownership", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("recognizes only the exact running container with the managed label", () => {
+    mocks.dockerCapture.mockReturnValue("true|true\n");
+
+    expect(isNemoClawManagedVllmRunning()).toBe(true);
+    expect(mocks.dockerCapture).toHaveBeenCalledWith(
+      [
+        "inspect",
+        "--type",
+        "container",
+        "--format",
+        `{{.State.Running}}|{{index .Config.Labels "${NEMOCLAW_VLLM_MANAGED_LABEL}"}}`,
+        NEMOCLAW_VLLM_CONTAINER_NAME,
+      ],
+      expect.objectContaining({ ignoreError: true }),
+    );
+  });
+
+  it.each([
+    "false|true",
+    "true|<no value>",
+    "true|false",
+    "",
+  ])("fails closed for inspect output %j", (output) => {
+    mocks.dockerCapture.mockReturnValue(output);
+    expect(isNemoClawManagedVllmRunning()).toBe(false);
+  });
+
+  it("fails closed when Docker inspection throws", () => {
+    mocks.dockerCapture.mockImplementation(() => {
+      throw new Error("docker unavailable");
+    });
+    expect(isNemoClawManagedVllmRunning()).toBe(false);
   });
 });
 
