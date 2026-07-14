@@ -204,28 +204,47 @@ describe("runOllamaStartupOrGate steer hint (#4365)", () => {
     }
   });
 
+  const providerSetups = {
+    pinned: () => {
+      process.env.NEMOCLAW_PROVIDER = "ollama";
+    },
+    unpinned: () => {
+      delete process.env.NEMOCLAW_PROVIDER;
+    },
+  };
+  const outcomeAssertions = {
+    continue: (invoke: () => ReturnType<typeof runOllamaStartupOrGate>) => {
+      expect(invoke()).toEqual({ kind: "continue" });
+    },
+    exit: (invoke: () => ReturnType<typeof runOllamaStartupOrGate>) => {
+      expect(invoke).toThrow(/process\.exit:1/);
+    },
+  };
+
   it.each([
     {
       name: "returns to provider selection for an interactive unpinned run",
       nonInteractive: false,
-      provider: undefined,
-      shouldExit: false,
+      outcome: "continue",
+      providerSetup: "unpinned",
+      expectedExitCalls: 0,
     },
     {
       name: "exits an interactive provider-pinned run instead of looping",
       nonInteractive: false,
-      provider: "ollama",
-      shouldExit: true,
+      outcome: "exit",
+      providerSetup: "pinned",
+      expectedExitCalls: 1,
     },
     {
       name: "exits a non-interactive run",
       nonInteractive: true,
-      provider: undefined,
-      shouldExit: true,
+      outcome: "exit",
+      providerSetup: "unpinned",
+      expectedExitCalls: 1,
     },
-  ])("refuses an unavailable Hermes fallback and $name (#6760)", (testCase) => {
-    if (testCase.provider) process.env.NEMOCLAW_PROVIDER = testCase.provider;
-    else delete process.env.NEMOCLAW_PROVIDER;
+  ] as const)("refuses an unavailable Hermes fallback and $name (#6760)", (testCase) => {
+    providerSetups[testCase.providerSetup]();
     setOllamaAutostartDisabled(true);
     let shellCalled = false;
     runner.runShell = () => {
@@ -247,9 +266,8 @@ describe("runOllamaStartupOrGate steer hint (#4365)", () => {
       });
 
     try {
-      if (testCase.shouldExit) expect(invoke).toThrow(/process\.exit:1/);
-      else expect(invoke()).toEqual({ kind: "continue" });
-      expect(exitSpy).toHaveBeenCalledTimes(testCase.shouldExit ? 1 : 0);
+      outcomeAssertions[testCase.outcome](invoke);
+      expect(exitSpy).toHaveBeenCalledTimes(testCase.expectedExitCalls);
       expect(shellCalled).toBe(false);
       expect(getLocalProviderBaseUrl).not.toHaveBeenCalled();
       expect(errSpy).toHaveBeenCalledWith(
