@@ -585,7 +585,7 @@ import {
 import { mergePolicyMessagingChannels } from "./onboard/messaging-policy-presets";
 import { filterEnabledChannelsByAgent } from "./onboard/messaging-state";
 import { getValidatedMessagingTokenByEnvKey } from "./onboard/messaging-token";
-import { handleOllamaProbeFailure } from "./onboard/ollama-probe-failure";
+import * as ollamaFlow from "./onboard/ollama-probe-failure";
 import { runOllamaStartupOrGate } from "./onboard/ollama-startup";
 import type {
   DockerDriverBinaryOverrides,
@@ -2993,17 +2993,12 @@ type RebuildRouteHandoff = import("./onboard/rebuild-route-handoff").RebuildRout
 const { readRecordedProvider, readRecordedNimContainer, readRecordedModel, readRecordedEndpointUrl,
   readRecordedInferenceRoute, readRecordedProviderEndpoints } = providerRecovery.createProviderRecoveryHelpers({ parseGatewayInference, runCaptureOpenshell, warn: (message) => console.warn(message) });
 
-type OllamaModelSelectionOutcome =
-  | { outcome: "selected"; model: string; allowToolsIncompatible: boolean }
-  | { outcome: "back-to-selection" };
-
-/** Select and validate a Local Ollama model, then apply the agent context floor. */
 async function selectAndValidateOllamaModel(
   gpu: ReturnType<typeof nim.detectGpu>,
   provider: string,
   defaults: OllamaModelSelectionDefaults,
   onModelSelected?: (model: string) => void,
-): Promise<OllamaModelSelectionOutcome> {
+): Promise<ollamaFlow.OllamaModelSelectionOutcome> {
   const { requestedModel, recoveredModel, lockedModel } = defaults;
   const probeFailures = new OllamaProbeFailureTracker();
   const confirm = (question: string, defaultIsYes: boolean) =>
@@ -3057,7 +3052,7 @@ async function selectAndValidateOllamaModel(
     const probe = await prepareOllamaModel(selectedModel, installedModels, interaction);
     if (!probe.ok) {
       const probeFailureLimitReached = probeFailures.recordFailure(selectedModel);
-      const action = handleOllamaProbeFailure(probe, selectedModel, isNonInteractive);
+      const action = ollamaFlow.handleOllamaProbeFailure(probe, selectedModel, isNonInteractive);
       if (action === "back-to-selection") return { outcome: "back-to-selection" };
       if (probeFailureLimitReached) {
         console.error(probeFailures.formatLimitMessage(selectedModel));
@@ -3090,18 +3085,11 @@ async function selectAndValidateOllamaModel(
         "  ℹ Using chat completions API (Ollama tool calls require /v1/chat/completions)",
       );
     }
-    const contextWindowResult = localInference.applyOllamaRuntimeContextWindow(
-      selectedModel,
-      defaults,
+    return ollamaFlow.completeOllamaRuntimeContextSelection(
+      localInference.applyOllamaRuntimeContextWindow(selectedModel, defaults),
+      { outcome: "selected", model: selectedModel, allowToolsIncompatible },
+      isNonInteractive,
     );
-    if (!contextWindowResult.ok) {
-      if (isNonInteractive()) abortNonInteractive(contextWindowResult.message);
-      console.error(`  ${contextWindowResult.message}`);
-      console.log("  Returning to provider selection.");
-      console.log("");
-      return { outcome: "back-to-selection" };
-    }
-    return { outcome: "selected", model: selectedModel, allowToolsIncompatible };
   }
 }
 
