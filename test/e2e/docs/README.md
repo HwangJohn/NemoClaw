@@ -89,8 +89,9 @@ The retired `--emit-matrix` and `--plan-only` paths must not be reintroduced.
 When adding or changing a live test, update `test/e2e/mock-parity.json` with
 the fast PR-collected test that covers its mockable contract. If the behavior
 cannot be reproduced without real infrastructure, record a concise
-`liveOnlyReason` instead. The PR and `main` `e2e-support` lanes enforce this
-changed-file policy without requiring an immediate backfill of untouched tests.
+`liveOnlyReason` instead. The PR and `main` CLI coverage shards enforce this
+changed-file policy alongside the `e2e-support` project without requiring an
+immediate backfill of untouched tests.
 
 ## Repository Layout
 
@@ -108,16 +109,21 @@ test/e2e/
 ## CI Entry Points
 
 - `tools/advisors/risk-plan.mts` is the small deterministic selection policy
-  shared by PR Review Advisor, E2E Advisor, and the PR E2E controller. It maps
+  shared by PR Review Advisor and the PR E2E controller. It maps
   changed runtime surfaces to invariant families and
   canonical `e2e.yaml` jobs; it is not a second test runner or migration-status
-  ledger. The advisors use it as recommendation context, while the controller
+  ledger. The advisor uses it as recommendation context, while the controller
   applies it independently without model output.
 
-- `.github/workflows/pr-e2e-gate.yaml` owns `E2E / PR Gate` for PRs from this
-  repository after `CI / Pull Request` completes. The controller builds the
-  risk plan from GitHub's complete file list, dispatches every selected job,
-  and verifies each expected `risk-signal.json`. See
+- `.github/workflows/pr-e2e-gate.yaml` reserves `E2E / PR Gate` on every exact
+  PR head, including forks, before `CI / Pull Request` completes. The trusted
+  controller builds the risk plan from GitHub's complete file list. Internal
+  revisions normally dispatch every selected job and verify each expected
+  `risk-signal.json`; this remains automatic when their `e2e-control-plane`
+  matches are drawn only from the trusted controller workflow and script.
+  Other or mixed internal control-plane revisions require a maintainer-authorized
+  exact-SHA run; only its verified evidence can pass the gate. Risky forks
+  retain the audited credentialed-E2E skip approval. See
   [NemoClaw E2E CI](../README.md) for the full lifecycle.
 
 - `.github/workflows/e2e.yaml` runs selected or all supported
@@ -136,12 +142,13 @@ test/e2e/
   invocations, and suppress PR reporting and scorecards. The workflow boundary
   requires every selected job shard to upload its evidence artifact.
 - `.github/workflows/e2e-branch-validation.yaml`, `macos-e2e.yaml`,
-  `wsl-e2e.yaml`, `ollama-proxy-e2e.yaml`, and `regression-e2e.yaml` call
-  focused E2E targets directly for their E2E coverage.
+  `wsl-e2e.yaml`, and `regression-e2e.yaml` call focused E2E targets directly
+  for their E2E coverage. Individual repository-hosted targets, including
+  `ollama-auth-proxy`, are selected through `.github/workflows/e2e.yaml`.
 - `vitest.config.ts` contains `e2e-support` for fast fixture/support tests and
-  `e2e-live` for opt-in live target execution. The PR and `main` aggregate
-  checks require `e2e-support` for code changes; the project never opts into
-  live targets.
+  `e2e-live` for opt-in live target execution. The PR and `main` CLI coverage
+  shards include `e2e-support` for code changes; they never opt into live
+  targets.
 
 ## Migration Tracking
 
