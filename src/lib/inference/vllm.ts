@@ -126,6 +126,7 @@ const VLLM_LAUNCH_HEARTBEAT_MS = 30_000;
 const HF_CACHE_CONTAINER_DIR = "/root/.cache/huggingface";
 export const NEMOCLAW_VLLM_CONTAINER_NAME = "nemoclaw-vllm";
 export const NEMOCLAW_VLLM_MANAGED_LABEL = "com.nvidia.nemoclaw.managed-vllm";
+const DOCKER_CONTAINER_ID_PATTERN = /^[a-f0-9]{12,64}$/;
 
 function hostHfCacheDir(): string {
   return path.join(os.homedir(), ".cache", "huggingface");
@@ -460,17 +461,69 @@ export function buildVllmRunArgs(
   ];
 }
 
-export function isNemoClawManagedVllmRunning(): boolean {
-  const format = `{{.State.Running}}|{{index .Config.Labels "${NEMOCLAW_VLLM_MANAGED_LABEL}"}}`;
+type VllmContainerOwnership =
+  | { kind: "absent" }
+  | { kind: "foreign" }
+  | { kind: "managed"; containerId: string; running: boolean }
+  | { kind: "unknown" };
+
+function inspectVllmContainerOwnership(containerName: string): VllmContainerOwnership {
+  const format = `{{.ID}}|{{.Names}}|{{.State}}|{{.Label "${NEMOCLAW_VLLM_MANAGED_LABEL}"}}`;
   try {
-    const ownership = dockerCapture(
-      ["inspect", "--type", "container", "--format", format, NEMOCLAW_VLLM_CONTAINER_NAME],
-      { env: buildVllmDockerEnv(), ignoreError: true },
+    const output = dockerCapture(
+      [
+        "container",
+        "ls",
+        "--all",
+        "--no-trunc",
+        "--filter",
+        `name=^/${containerName}$`,
+        "--format",
+        format,
+      ],
+      { env: buildVllmDockerEnv(), timeout: 10_000 },
     ).trim();
-    return ownership === "true|true";
+    if (!output) return { kind: "absent" };
+
+    const rows = output.split(/\r?\n/);
+    if (rows.length !== 1) return { kind: "unknown" };
+    const fields = rows[0].split("|");
+    if (fields.length !== 4) return { kind: "unknown" };
+    const [containerId, observedName, state, managedLabel] = fields;
+    if (observedName !== containerName || !DOCKER_CONTAINER_ID_PATTERN.test(containerId)) {
+      return { kind: "unknown" };
+    }
+    if (managedLabel !== "true") return { kind: "foreign" };
+    return { kind: "managed", containerId, running: state === "running" };
   } catch {
-    return false;
+    return { kind: "unknown" };
   }
+}
+
+function vllmContainerReplacementTarget(
+  containerName: string,
+): { ok: true; containerId?: string } | { ok: false; reason: string } {
+  const ownership = inspectVllmContainerOwnership(containerName);
+  if (ownership.kind === "foreign") {
+    return {
+      ok: false,
+      reason: `Container "${containerName}" already exists without the NemoClaw ownership label. NemoClaw will not remove it. Remove or rename that container, then retry managed vLLM installation.`,
+    };
+  }
+  if (ownership.kind === "unknown") {
+    return {
+      ok: false,
+      reason: `Could not verify ownership of Docker container "${containerName}". NemoClaw will not remove it. Check Docker access and retry.`,
+    };
+  }
+  return ownership.kind === "managed"
+    ? { ok: true, containerId: ownership.containerId }
+    : { ok: true };
+}
+
+export function isNemoClawManagedVllmRunning(): boolean {
+  const ownership = inspectVllmContainerOwnership(NEMOCLAW_VLLM_CONTAINER_NAME);
+  return ownership.kind === "managed" && ownership.running;
 }
 
 function startContainer(
@@ -493,13 +546,17 @@ function startContainer(
   } catch (err) {
     return { ok: false, reason: (err as Error).message };
   }
-  // Validate every launch input before replacing a potentially healthy
-  // existing container. Once validated, teardown keeps startup idempotent.
-  dockerForceRm(profile.containerName, {
-    env: buildVllmDockerEnv(),
-    ignoreError: true,
-    suppressOutput: true,
-  });
+  // Re-check immediately before teardown. Removing the inspected container ID
+  // avoids deleting an unrelated same-name container if the name changes hands.
+  const replacement = vllmContainerReplacementTarget(profile.containerName);
+  if (!replacement.ok) return replacement;
+  if (replacement.containerId) {
+    dockerForceRm(replacement.containerId, {
+      env: buildVllmDockerEnv(),
+      ignoreError: true,
+      suppressOutput: true,
+    });
+  }
   const result = dockerRunDetached(runArgs, {
     env: buildVllmDockerEnv(buildHfTokenForwardEnv()),
     ignoreError: true,
@@ -814,6 +871,14 @@ export async function installVllm(
   const prereqs = dockerPrereqsOk();
   if (!prereqs.ok) {
     console.error(`  vLLM install failed: ${String(prereqs.reason)}`);
+    return { ok: false };
+  }
+
+  // Fail before large downloads when the fixed name belongs to another
+  // operator. startContainer repeats this check to close the teardown race.
+  const replacement = vllmContainerReplacementTarget(profile.containerName);
+  if (!replacement.ok) {
+    console.error(`  vLLM install failed: ${replacement.reason}`);
     return { ok: false };
   }
 

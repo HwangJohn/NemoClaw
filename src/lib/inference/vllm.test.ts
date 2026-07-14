@@ -90,7 +90,19 @@ function mockDockerSpawnSuccess(): EventEmitter & {
   return proc;
 }
 
-function mockSuccessfulVllmInstall(containerName: string): void {
+const MANAGED_CONTAINER_ID = "a".repeat(64);
+
+function vllmContainerRow(
+  containerName: string,
+  { id = MANAGED_CONTAINER_ID, label = "true", state = "exited" } = {},
+): string {
+  return `${id}|${containerName}|${state}|${label}`;
+}
+
+function mockSuccessfulVllmInstall(
+  containerName: string,
+  ownershipResponses: readonly (Error | string)[] = ["", ""],
+): void {
   const captureByCommand: Record<string, string> = {
     curl: '{"data":[]}',
     sh: "/usr/bin/tool\n",
@@ -107,7 +119,15 @@ function mockSuccessfulVllmInstall(containerName: string): void {
   });
   mocks.dockerSpawn.mockReturnValue(mockDockerSpawnSuccess());
   mocks.dockerRunDetached.mockReturnValue({ status: 0, stdout: "", stderr: "", error: null });
-  mocks.dockerCapture.mockReturnValue(`${containerName}\n`);
+  let ownershipIndex = 0;
+  mocks.dockerCapture.mockImplementation((args: readonly string[]) => {
+    if (args[0] === "container" && args[1] === "ls") {
+      const response = ownershipResponses[ownershipIndex++] ?? "";
+      if (response instanceof Error) throw response;
+      return response;
+    }
+    return args[0] === "ps" ? `${containerName}\n` : "";
+  });
 }
 
 function mockInconclusiveDockerStorage(): void {
@@ -370,27 +390,33 @@ describe("managed vLLM ownership", () => {
   });
 
   it("recognizes only the exact running container with the managed label", () => {
-    mocks.dockerCapture.mockReturnValue("true|true\n");
+    mocks.dockerCapture.mockReturnValue(
+      vllmContainerRow(NEMOCLAW_VLLM_CONTAINER_NAME, { state: "running" }),
+    );
 
     expect(isNemoClawManagedVllmRunning()).toBe(true);
     expect(mocks.dockerCapture).toHaveBeenCalledWith(
       [
-        "inspect",
-        "--type",
         "container",
+        "ls",
+        "--all",
+        "--no-trunc",
+        "--filter",
+        `name=^/${NEMOCLAW_VLLM_CONTAINER_NAME}$`,
         "--format",
-        `{{.State.Running}}|{{index .Config.Labels "${NEMOCLAW_VLLM_MANAGED_LABEL}"}}`,
-        NEMOCLAW_VLLM_CONTAINER_NAME,
+        `{{.ID}}|{{.Names}}|{{.State}}|{{.Label "${NEMOCLAW_VLLM_MANAGED_LABEL}"}}`,
       ],
-      expect.objectContaining({ ignoreError: true }),
+      expect.objectContaining({ timeout: 10_000 }),
     );
   });
 
   it.each([
-    "false|true",
-    "true|<no value>",
-    "true|false",
+    vllmContainerRow(NEMOCLAW_VLLM_CONTAINER_NAME),
+    vllmContainerRow(NEMOCLAW_VLLM_CONTAINER_NAME, { label: "" }),
+    vllmContainerRow(NEMOCLAW_VLLM_CONTAINER_NAME, { label: "false", state: "running" }),
     "",
+    "malformed",
+    `${vllmContainerRow(NEMOCLAW_VLLM_CONTAINER_NAME)}\n${vllmContainerRow(NEMOCLAW_VLLM_CONTAINER_NAME)}`,
   ])("fails closed for inspect output %j", (output) => {
     mocks.dockerCapture.mockReturnValue(output);
     expect(isNemoClawManagedVllmRunning()).toBe(false);
@@ -1000,7 +1026,7 @@ describe("installVllm model resolution", () => {
       ...mocks.dockerRunDetached.mock.calls.map((call) => call[1]),
       ...mocks.dockerCapture.mock.calls.map((call) => call[1]),
     ];
-    expect(dockerAdapterOptions).toHaveLength(6);
+    expect(dockerAdapterOptions).toHaveLength(7);
     for (const options of dockerAdapterOptions) {
       expect(options).toEqual(
         expect.objectContaining({
@@ -1023,10 +1049,7 @@ describe("installVllm model resolution", () => {
     });
 
     expect(result).toEqual({ ok: true });
-    expect(mocks.dockerForceRm).toHaveBeenCalledWith(
-      profile.containerName,
-      expect.objectContaining({ ignoreError: true, suppressOutput: true }),
-    );
+    expect(mocks.dockerForceRm).not.toHaveBeenCalled();
     expect(mocks.dockerRunDetached).toHaveBeenCalledTimes(1);
     const [args, opts] = mocks.dockerRunDetached.mock.calls[0] as [
       string[],
@@ -1048,6 +1071,94 @@ describe("installVllm model resolution", () => {
     expect(opts).toEqual(
       expect.objectContaining({ env: expect.objectContaining({ HF_TOKEN: "hf_test" }) }),
     );
+  });
+
+  it("replaces only an existing managed container by its inspected ID", async () => {
+    const profile = detectVllmProfile({ platform: "spark", type: "nvidia" })!;
+    const managed = vllmContainerRow(profile.containerName);
+    mockSuccessfulVllmInstall(profile.containerName, [managed, managed]);
+    mocks.dockerImageInspectFormat.mockReturnValue("sha256:cached-image");
+
+    const result = await installVllm(profile, {
+      hasImage: true,
+      nonInteractive: true,
+      promptFn: vi.fn(),
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(mocks.dockerForceRm).toHaveBeenCalledWith(
+      MANAGED_CONTAINER_ID,
+      expect.objectContaining({ ignoreError: true, suppressOutput: true }),
+    );
+    expect(mocks.dockerForceRm).not.toHaveBeenCalledWith(profile.containerName, expect.anything());
+    expect(mocks.dockerRunDetached).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    "",
+    "false",
+  ])("preserves a same-name container with managed label %j before downloads", async (label) => {
+    const profile = detectVllmProfile({ platform: "spark", type: "nvidia" })!;
+    mockSuccessfulVllmInstall(profile.containerName, [
+      vllmContainerRow(profile.containerName, { label }),
+    ]);
+
+    const result = await installVllm(profile, {
+      hasImage: true,
+      nonInteractive: true,
+      promptFn: vi.fn(),
+    });
+
+    expect(result).toEqual({ ok: false });
+    expect(mocks.dockerForceRm).not.toHaveBeenCalled();
+    expect(mocks.dockerRunDetached).not.toHaveBeenCalled();
+    expect(mocks.dockerPullWithProgressWatchdog).not.toHaveBeenCalled();
+    expect(mocks.dockerSpawn).not.toHaveBeenCalled();
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("NemoClaw will not remove it"));
+  });
+
+  it.each([
+    ["Docker inspection failure", new Error("docker unavailable")],
+    ["malformed ownership output", "malformed"],
+  ] as const)("fails closed on %s", async (_name, ownershipResponse) => {
+    const profile = detectVllmProfile({ platform: "spark", type: "nvidia" })!;
+    mockSuccessfulVllmInstall(profile.containerName, [ownershipResponse]);
+
+    const result = await installVllm(profile, {
+      hasImage: true,
+      nonInteractive: true,
+      promptFn: vi.fn(),
+    });
+
+    expect(result).toEqual({ ok: false });
+    expect(mocks.dockerForceRm).not.toHaveBeenCalled();
+    expect(mocks.dockerRunDetached).not.toHaveBeenCalled();
+    expect(mocks.dockerPullWithProgressWatchdog).not.toHaveBeenCalled();
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Could not verify ownership of Docker container"),
+    );
+  });
+
+  it("rechecks ownership after downloads and preserves a replacement container", async () => {
+    const profile = detectVllmProfile({ platform: "spark", type: "nvidia" })!;
+    mockSuccessfulVllmInstall(profile.containerName, [
+      vllmContainerRow(profile.containerName),
+      vllmContainerRow(profile.containerName, { label: "" }),
+    ]);
+    mocks.dockerImageInspectFormat.mockReturnValue("sha256:cached-image");
+
+    const result = await installVllm(profile, {
+      hasImage: true,
+      nonInteractive: true,
+      promptFn: vi.fn(),
+    });
+
+    expect(result).toEqual({ ok: false });
+    expect(mocks.dockerPullWithProgressWatchdog).toHaveBeenCalledTimes(1);
+    expect(mocks.dockerSpawn).toHaveBeenCalledTimes(1);
+    expect(mocks.dockerForceRm).not.toHaveBeenCalled();
+    expect(mocks.dockerRunDetached).not.toHaveBeenCalled();
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("NemoClaw will not remove it"));
   });
 
   it("rejects invalid profile run flags before launching the long-lived container", async () => {
