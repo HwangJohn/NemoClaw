@@ -160,6 +160,42 @@ describe("inference selection validation", () => {
     }
   });
 
+  it("offers transport recovery when custom endpoint DNS preflight fails (#6854)", async () => {
+    const probeOpenAiLikeEndpoint = vi.fn(() => ({ ok: true, api: "openai-completions" }));
+    const promptValidationRecovery = vi.fn(async () => "retry" as const);
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const helpers = createInferenceSelectionValidationHelpers({
+      isNonInteractive: () => false,
+      agentProductName: () => "OpenClaw",
+      getCredential: () => "test-key",
+      probeOpenAiLikeEndpoint,
+      promptValidationRecovery,
+      resolveEndpointHost: async () => {
+        throw new Error("getaddrinfo ENOTFOUND example.invalid");
+      },
+    });
+
+    try {
+      await expect(
+        helpers.validateCustomOpenAiLikeSelection(
+          "Custom endpoint",
+          "https://example.invalid/v1",
+          "model-a",
+          "COMPATIBLE_API_KEY",
+        ),
+      ).resolves.toEqual({ ok: false, retry: "retry" });
+      expect(probeOpenAiLikeEndpoint).not.toHaveBeenCalled();
+      expect(promptValidationRecovery).toHaveBeenCalledWith(
+        "Custom endpoint",
+        expect.objectContaining({ kind: "transport", retry: "retry" }),
+        "COMPATIBLE_API_KEY",
+        null,
+      );
+    } finally {
+      error.mockRestore();
+    }
+  });
+
   it.each([
     "http://127.0.0.1:8000/v1",
     "https://inference.local/v1",
