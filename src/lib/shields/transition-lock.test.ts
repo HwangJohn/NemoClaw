@@ -399,6 +399,31 @@ describe("host shields transition lock", () => {
     expect(fs.readdirSync(stateDir)).toEqual([]);
   });
 
+  it("recovers a stale lock when a live PID has been reused", () => {
+    const holderPid = 202;
+    const recorded = owner("alpha", holderPid, "proc:original");
+    const lockPath = writeOwner("alpha", recorded);
+    const locker = manager({
+      isProcessAlive: (pid) => pid === holderPid || pid === SELF_PID,
+      readProcessStartIdentity: (pid) =>
+        pid === SELF_PID ? SELF_IDENTITY : pid === holderPid ? "proc:reused" : null,
+    });
+
+    expect(
+      locker.withShieldsTransitionLock("alpha", "timer restore", () => {
+        const replacement = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+        expect(replacement).toMatchObject({
+          sandboxName: "alpha",
+          pid: SELF_PID,
+          processStartIdentity: SELF_IDENTITY,
+          command: "timer restore",
+        });
+        return "acquired";
+      }),
+    ).toBe("acquired");
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
   it("enforces the wait timeout when stale recovery retries without progress", () => {
     const recorded = owner("alpha", 202, "proc:dead-holder");
     const lockPath = writeOwner("alpha", recorded);
@@ -456,6 +481,28 @@ describe("host shields transition lock", () => {
     ).rejects.toThrow(
       /Timed out after 2ms waiting for shields transition lock .*recorded owner PID 202/s,
     );
+  });
+
+  it("recovers a stale lock asynchronously when the parsed holder is dead", async () => {
+    const recorded = owner("alpha", 202, "proc:dead-holder");
+    const lockPath = writeOwner("alpha", recorded);
+    const locker = manager();
+
+    await expect(
+      locker.withShieldsTransitionLockAsync("alpha", "nemoclaw alpha shields up", async () => {
+        const replacement = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+        expect(replacement).toMatchObject({
+          sandboxName: "alpha",
+          pid: SELF_PID,
+          processStartIdentity: SELF_IDENTITY,
+          command: "nemoclaw alpha shields up",
+        });
+        return "acquired";
+      }),
+    ).resolves.toBe("acquired");
+
+    expect(fs.existsSync(lockPath)).toBe(false);
+    expect(fs.readdirSync(stateDir)).toEqual([]);
   });
 
   it("recovers a stale lock asynchronously when a live PID has been reused", async () => {
