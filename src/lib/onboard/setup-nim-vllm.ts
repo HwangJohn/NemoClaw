@@ -47,11 +47,13 @@ const NO_QUANTIZATION_VALUES = new Set(["", "false", "none", "null", "unquantize
 
 type ModelSizeClass = "large" | "small" | "unknown";
 
+/** Parse positive integer metadata reported by vLLM model endpoints. */
 function parsePositiveInteger(value: unknown): number | null {
   const normalized = typeof value === "number" ? value : Number(String(value ?? "").trim());
   return Number.isSafeInteger(normalized) && normalized > 0 ? normalized : null;
 }
 
+/** Find the `/v1/models` entry that corresponds to the selected served model ID. */
 function findVllmModelEntry(models: VllmModels, detectedModel: string): VllmModelEntry | null {
   const entries = Array.isArray(models.data) ? models.data : [];
   return (
@@ -60,6 +62,7 @@ function findVllmModelEntry(models: VllmModels, detectedModel: string): VllmMode
   );
 }
 
+/** Classify an underlying model root by size, keeping arbitrary aliases unknown. */
 function classifyModelSize(model: string): ModelSizeClass {
   let sawNumericSize = false;
   for (const match of model.matchAll(LARGE_MODEL_SIZE_PATTERN)) {
@@ -73,17 +76,20 @@ function classifyModelSize(model: string): ModelSizeClass {
   return sawNumericSize ? "small" : "unknown";
 }
 
+/** Return the reported underlying model root only when it is a safe model identifier. */
 function reportedModelRoot(entry: VllmModelEntry | null): string | null {
   const root = typeof entry?.root === "string" ? entry.root.trim() : "";
   return root && SAFE_REPORTED_MODEL_ID_PATTERN.test(root) ? root : null;
 }
 
+/** Read a string property from optional nested vLLM model metadata. */
 function readObjectString(value: unknown, key: string): string | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const candidate = (value as Record<string, unknown>)[key];
   return typeof candidate === "string" ? candidate.trim() : null;
 }
 
+/** Resolve quantization metadata from direct and nested vLLM model fields. */
 function reportedQuantization(entry: VllmModelEntry | null): string | null {
   const direct = typeof entry?.quantization === "string" ? entry.quantization.trim() : null;
   const configured =
@@ -94,6 +100,7 @@ function reportedQuantization(entry: VllmModelEntry | null): string | null {
   return quantization;
 }
 
+/** Build the DGX Spark headroom warning for an existing, unmanaged vLLM server. */
 export function buildDgxSparkExistingVllmHeadroomWarning(
   models: VllmModels,
   detectedModel: string,
@@ -136,6 +143,7 @@ export function buildDgxSparkExistingVllmHeadroomWarning(
   );
 }
 
+/** Create the Local vLLM onboarding handler, including Spark-specific safety warnings. */
 export function createSetupNimVllmHandler(
   deps: SetupNimVllmDeps,
 ): (
