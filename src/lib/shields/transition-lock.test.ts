@@ -96,6 +96,17 @@ describe("host shields transition lock", () => {
     return lockPath;
   }
 
+  function createRecoveryGuard(sandboxName: string): { lockPath: string; guardPath: string } {
+    const lockPath = shieldsTransitionLockPath(sandboxName, stateDir);
+    const guardPath = `${lockPath}.recovering`;
+    fs.mkdirSync(guardPath, { mode: 0o700 });
+    return { lockPath, guardPath };
+  }
+
+  function writeRecoveryGuardOwner(guardPath: string, value: ShieldsTransitionLockOwner): void {
+    fs.writeFileSync(path.join(guardPath, "owner.json"), JSON.stringify(value), { mode: 0o600 });
+  }
+
   it("atomically creates a regular owner file and removes it after the callback", () => {
     const locker = manager();
     const lockPath = shieldsTransitionLockPath("alpha", stateDir);
@@ -772,6 +783,66 @@ describe("host shields transition lock", () => {
     await expect(thirdPromise).rejects.toThrow(/recorded owner PID 202/);
     expect(thirdAcquired).toBe(false);
     expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it("recovers an orphaned stale recovery guard before acquiring", () => {
+    const { lockPath, guardPath } = createRecoveryGuard("alpha");
+    const locker = manager();
+
+    expect(
+      locker.withShieldsTransitionLock("alpha", "nemoclaw alpha shields up", () => {
+        expect(fs.existsSync(lockPath)).toBe(true);
+        expect(fs.existsSync(guardPath)).toBe(false);
+        return "acquired";
+      }),
+    ).toBe("acquired");
+
+    expect(fs.existsSync(lockPath)).toBe(false);
+    expect(fs.existsSync(guardPath)).toBe(false);
+  });
+
+  it("recovers an orphaned stale recovery guard before acquiring asynchronously", async () => {
+    const { lockPath, guardPath } = createRecoveryGuard("alpha");
+    const locker = manager();
+
+    await expect(
+      locker.withShieldsTransitionLockAsync("alpha", "nemoclaw alpha shields up", async () => {
+        expect(fs.existsSync(lockPath)).toBe(true);
+        expect(fs.existsSync(guardPath)).toBe(false);
+        return "acquired";
+      }),
+    ).resolves.toBe("acquired");
+
+    expect(fs.existsSync(lockPath)).toBe(false);
+    expect(fs.existsSync(guardPath)).toBe(false);
+  });
+
+  it("keeps a live stale recovery guard owner protected", () => {
+    const { lockPath, guardPath } = createRecoveryGuard("alpha");
+    writeRecoveryGuardOwner(guardPath, owner("alpha", 202, "proc:guard", "stale recovery"));
+    let nowMs = 2_000;
+    const locker = manager({
+      now: () => {
+        nowMs += 1;
+        return nowMs;
+      },
+      sleep: (milliseconds) => {
+        nowMs += milliseconds;
+      },
+      isProcessAlive: (pid) => pid === SELF_PID || pid === 202,
+      readProcessStartIdentity: (pid) =>
+        pid === SELF_PID ? SELF_IDENTITY : pid === 202 ? "proc:guard" : null,
+    });
+
+    expect(() =>
+      locker.withShieldsTransitionLock("alpha", "nemoclaw alpha shields up", () => "unexpected", {
+        waitTimeoutMs: 2,
+        pollIntervalMs: 1,
+      }),
+    ).toThrow(/the lock changed during inspection/);
+
+    expect(fs.existsSync(lockPath)).toBe(false);
+    expect(fs.existsSync(guardPath)).toBe(true);
   });
 
   it("waits on a recent malformed owner record", () => {

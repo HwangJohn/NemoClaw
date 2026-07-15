@@ -552,7 +552,7 @@ export class ShieldsTransitionLockManager {
         removalReason = "removed-reused-pid";
       }
 
-      const guardPath = this.enterStaleRecoveryGuard(lockPath);
+      const guardPath = this.enterStaleRecoveryGuard(lockPath, sandboxName);
       if (!guardPath) return { removed: false, reason: "path-changed" };
       try {
         const current = this.currentRegularLockIdentity(lockPath);
@@ -624,37 +624,78 @@ export class ShieldsTransitionLockManager {
     return `${lockPath}.recovering`;
   }
 
-  private staleRecoveryInProgress(lockPath: string): boolean {
+  private staleRecoveryGuardOwnerPath(guardPath: string): string {
+    return path.join(guardPath, "owner.json");
+  }
+
+  private staleRecoveryGuardOwner(sandboxName: string): ShieldsTransitionLockOwner {
+    return {
+      version: LOCK_VERSION,
+      sandboxName,
+      pid: this.pid,
+      processStartIdentity: this.processStartIdentity(this.pid) ?? this.ownerStartIdentityFallback,
+      command: "shields stale recovery",
+      acquiredAtMs: this.now(),
+    };
+  }
+
+  private staleRecoveryInProgress(lockPath: string, sandboxName: string): boolean {
     const guardPath = this.staleRecoveryGuardPath(lockPath);
     try {
       const stat = fs.lstatSync(guardPath, { bigint: true });
       if (!stat.isDirectory()) {
         throw unsafeLockPathError(guardPath, "recovery guard is not a directory");
       }
-      return true;
     } catch (error) {
       if (isErrnoException(error) && error.code === "ENOENT") return false;
       throw error;
     }
+
+    const snapshot = readExistingLock(this.staleRecoveryGuardOwnerPath(guardPath), sandboxName);
+    if (!snapshot) {
+      this.removeStaleRecoveryGuard(guardPath);
+      return false;
+    }
+    let removeGuard = false;
+    try {
+      const owner = snapshot.owner;
+      if (!owner || !this.processIsAlive(owner.pid)) {
+        removeGuard = true;
+        return false;
+      }
+      const currentIdentity = this.processStartIdentity(owner.pid);
+      if (!currentIdentity || isUnverifiedSelfIdentity(owner.processStartIdentity)) return true;
+      if (currentIdentity === owner.processStartIdentity) return true;
+      removeGuard = true;
+      return false;
+    } finally {
+      closeSnapshot(snapshot);
+      if (removeGuard) this.removeStaleRecoveryGuard(guardPath);
+    }
   }
 
-  private enterStaleRecoveryGuard(lockPath: string): string | null {
+  private enterStaleRecoveryGuard(lockPath: string, sandboxName: string): string | null {
     const guardPath = this.staleRecoveryGuardPath(lockPath);
     try {
       fs.mkdirSync(guardPath, { mode: 0o700 });
-      return guardPath;
     } catch (error) {
       if (isErrnoException(error) && error.code === "EEXIST") return null;
       throw error;
     }
+    const held = this.tryCreate(
+      this.staleRecoveryGuardOwnerPath(guardPath),
+      this.staleRecoveryGuardOwner(sandboxName),
+    );
+    if (!held) {
+      this.removeStaleRecoveryGuard(guardPath);
+      return null;
+    }
+    fs.closeSync(held.fd);
+    return guardPath;
   }
 
   private removeStaleRecoveryGuard(guardPath: string): void {
-    try {
-      fs.rmdirSync(guardPath);
-    } catch (error) {
-      if (!isErrnoException(error) || error.code !== "ENOENT") throw error;
-    }
+    fs.rmSync(guardPath, { recursive: true, force: true });
   }
 
   private removeLinkedQuarantine(quarantinePath: string): void {
@@ -912,7 +953,7 @@ export class ShieldsTransitionLockManager {
     } catch (error) {
       if (!isErrnoException(error) || error.code !== "ENOENT") throw error;
     }
-    if (this.staleRecoveryInProgress(lockPath)) return null;
+    if (this.staleRecoveryInProgress(lockPath, owner.sandboxName)) return null;
     const tempPath = `${lockPath}.acquire-${String(this.pid)}-${randomBytes(16).toString("hex")}.tmp`;
     let fd: number;
     try {
