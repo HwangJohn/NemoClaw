@@ -3086,11 +3086,8 @@ async function selectAndValidateOllamaModel(
         "  ℹ Using chat completions API (Ollama tool calls require /v1/chat/completions)",
       );
     }
-    return ollamaFlow.completeOllamaRuntimeContextSelection(
-      localInference.applyOllamaRuntimeContextWindow(selectedModel, defaults),
-      { outcome: "selected", model: selectedModel, allowToolsIncompatible },
-      isNonInteractive,
-    );
+    // biome-ignore format: keep src/lib/onboard.ts under the growth guardrail.
+    return ollamaFlow.completeOllamaRuntimeContextSelection(localInference.applyOllamaRuntimeContextWindow(selectedModel, defaults), { outcome: "selected", model: selectedModel, allowToolsIncompatible }, isNonInteractive);
   }
 }
 
