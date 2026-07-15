@@ -160,7 +160,7 @@ describe("inference selection validation", () => {
     }
   });
 
-  it("offers transport recovery when custom endpoint DNS preflight fails (#6854)", async () => {
+  it("routes an unreachable custom endpoint through transport recovery, not a silent loop (#6854)", async () => {
     const probeOpenAiLikeEndpoint = vi.fn(() => ({ ok: true, api: "openai-completions" }));
     const promptValidationRecovery = vi.fn(async () => "retry" as const);
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
