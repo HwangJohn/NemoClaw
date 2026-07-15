@@ -99,12 +99,11 @@ describe("host shields transition lock", () => {
   function createRecoveryGuard(sandboxName: string): { lockPath: string; guardPath: string } {
     const lockPath = shieldsTransitionLockPath(sandboxName, stateDir);
     const guardPath = `${lockPath}.recovering`;
-    fs.mkdirSync(guardPath, { mode: 0o700 });
     return { lockPath, guardPath };
   }
 
   function writeRecoveryGuardOwner(guardPath: string, value: ShieldsTransitionLockOwner): void {
-    fs.writeFileSync(path.join(guardPath, "owner.json"), JSON.stringify(value), { mode: 0o600 });
+    fs.writeFileSync(guardPath, JSON.stringify(value), { mode: 0o600 });
   }
 
   it("atomically creates a regular owner file and removes it after the callback", () => {
@@ -785,8 +784,12 @@ describe("host shields transition lock", () => {
     expect(fs.existsSync(lockPath)).toBe(false);
   });
 
-  it("recovers an orphaned stale recovery guard before acquiring", () => {
+  it("recovers a crashed stale guard while the stale canonical owner remains", () => {
     const { lockPath, guardPath } = createRecoveryGuard("alpha");
+    fs.writeFileSync(lockPath, JSON.stringify(owner("alpha", 202, "proc:stale")), {
+      mode: 0o600,
+    });
+    writeRecoveryGuardOwner(guardPath, owner("alpha", 203, "proc:recoverer", "stale recovery"));
     const locker = manager();
 
     expect(
@@ -803,6 +806,10 @@ describe("host shields transition lock", () => {
 
   it("recovers an orphaned stale recovery guard before acquiring asynchronously", async () => {
     const { lockPath, guardPath } = createRecoveryGuard("alpha");
+    fs.writeFileSync(lockPath, JSON.stringify(owner("alpha", 202, "proc:stale")), {
+      mode: 0o600,
+    });
+    writeRecoveryGuardOwner(guardPath, owner("alpha", 202, "proc:recoverer", "stale recovery"));
     const locker = manager();
 
     await expect(
@@ -815,6 +822,25 @@ describe("host shields transition lock", () => {
 
     expect(fs.existsSync(lockPath)).toBe(false);
     expect(fs.existsSync(guardPath)).toBe(false);
+  });
+
+  it("does not let an orphaned recovery-owner temp file block acquisition", () => {
+    const { lockPath, guardPath } = createRecoveryGuard("alpha");
+    const orphanedTemp = `${guardPath}.acquire-202-${"a".repeat(32)}.tmp`;
+    fs.writeFileSync(orphanedTemp, "{incomplete", { mode: 0o600 });
+    const locker = manager();
+
+    expect(
+      locker.withShieldsTransitionLock("alpha", "nemoclaw alpha shields up", () => {
+        expect(fs.existsSync(lockPath)).toBe(true);
+        expect(fs.existsSync(guardPath)).toBe(false);
+        return "acquired";
+      }),
+    ).toBe("acquired");
+
+    expect(fs.existsSync(lockPath)).toBe(false);
+    expect(fs.existsSync(guardPath)).toBe(false);
+    expect(fs.existsSync(orphanedTemp)).toBe(true);
   });
 
   it("keeps a live stale recovery guard owner protected", () => {
@@ -847,17 +873,20 @@ describe("host shields transition lock", () => {
 
   it("does not remove a replacement recovery guard during orphan cleanup", () => {
     const { lockPath, guardPath } = createRecoveryGuard("alpha");
-    const originalRmdirSync = fs.rmdirSync;
+    writeRecoveryGuardOwner(guardPath, owner("alpha", 203, "proc:stale", "stale recovery"));
+    const originalRenameSync = fs.renameSync;
     let raced = false;
+    let callbackRan = false;
+    let replacementSnapshot: ReturnType<typeof readLockFileSnapshot> | null = null;
     let nowMs = 2_000;
-    vi.spyOn(fs, "rmdirSync").mockImplementation((target) => {
-      runWhen(String(target) === guardPath && !raced, () => {
+    vi.spyOn(fs, "renameSync").mockImplementation((source, destination) => {
+      runWhen(String(source) === guardPath && !raced, () => {
         raced = true;
-        originalRmdirSync(guardPath);
-        fs.mkdirSync(guardPath, { mode: 0o700 });
+        fs.unlinkSync(guardPath);
         writeRecoveryGuardOwner(guardPath, owner("alpha", 202, "proc:guard", "stale recovery"));
+        replacementSnapshot = readLockFileSnapshot(guardPath);
       });
-      originalRmdirSync(target);
+      originalRenameSync(source, destination);
     });
     const locker = manager({
       now: () => {
@@ -870,15 +899,89 @@ describe("host shields transition lock", () => {
     });
 
     expect(() =>
-      locker.withShieldsTransitionLock("alpha", "nemoclaw alpha shields up", () => "unexpected", {
-        waitTimeoutMs: 2,
-        pollIntervalMs: 1,
-      }),
+      locker.withShieldsTransitionLock(
+        "alpha",
+        "nemoclaw alpha shields up",
+        () => {
+          callbackRan = true;
+        },
+        {
+          waitTimeoutMs: 2,
+          pollIntervalMs: 1,
+        },
+      ),
     ).toThrow(/the lock changed during inspection/);
 
+    expect(raced).toBe(true);
+    expect(callbackRan).toBe(false);
     expect(fs.existsSync(lockPath)).toBe(false);
     expect(fs.existsSync(guardPath)).toBe(true);
-    expect(JSON.parse(fs.readFileSync(path.join(guardPath, "owner.json"), "utf8"))).toMatchObject({
+    expect(readLockFileSnapshot(guardPath)).toEqual(replacementSnapshot);
+    expect(JSON.parse(fs.readFileSync(guardPath, "utf8"))).toMatchObject({
+      pid: 202,
+      processStartIdentity: "proc:guard",
+    });
+    const preserved = fs
+      .readdirSync(stateDir)
+      .filter((entry) => entry.startsWith(`${path.basename(guardPath)}.stale-`));
+    expect(preserved).toHaveLength(1);
+    expect(readLockFileSnapshot(path.join(stateDir, preserved[0]!, "owner.json"))).toEqual(
+      replacementSnapshot,
+    );
+  });
+
+  it("preserves a replacement installed while releasing a held recovery guard", () => {
+    const recorded = owner("alpha", 203, "proc:stale");
+    const lockPath = writeOwner("alpha", recorded);
+    const guardPath = `${lockPath}.recovering`;
+    const originalRenameSync = fs.renameSync;
+    let raced = false;
+    let callbackRan = false;
+    let replacementSnapshot: ReturnType<typeof readLockFileSnapshot> | null = null;
+    let nowMs = 2_000;
+    vi.spyOn(fs, "renameSync").mockImplementation((source, destination) => {
+      runWhen(
+        String(source) === guardPath &&
+          String(destination).includes(".recovery-release-") &&
+          !raced,
+        () => {
+          raced = true;
+          fs.unlinkSync(guardPath);
+          writeRecoveryGuardOwner(guardPath, owner("alpha", 202, "proc:guard", "stale recovery"));
+          replacementSnapshot = readLockFileSnapshot(guardPath);
+        },
+      );
+      originalRenameSync(source, destination);
+    });
+    const locker = manager({
+      now: () => {
+        nowMs += 1;
+        return nowMs;
+      },
+      isProcessAlive: (pid) => pid === SELF_PID || pid === 202,
+      readProcessStartIdentity: (pid) =>
+        pid === SELF_PID ? SELF_IDENTITY : pid === 202 ? "proc:guard" : null,
+    });
+
+    expect(() =>
+      locker.withShieldsTransitionLock(
+        "alpha",
+        "nemoclaw alpha shields up",
+        () => {
+          callbackRan = true;
+        },
+        {
+          waitTimeoutMs: 2,
+          pollIntervalMs: 1,
+        },
+      ),
+    ).toThrow(/Timed out after 2ms/);
+
+    expect(raced).toBe(true);
+    expect(callbackRan).toBe(false);
+    expect(fs.existsSync(lockPath)).toBe(false);
+    expect(readLockFileSnapshot(guardPath)).toEqual(replacementSnapshot);
+    expect(JSON.parse(fs.readFileSync(guardPath, "utf8"))).toMatchObject({
       pid: 202,
       processStartIdentity: "proc:guard",
     });

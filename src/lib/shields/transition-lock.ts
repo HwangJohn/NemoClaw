@@ -80,12 +80,6 @@ interface HeldLock {
   owner: ShieldsTransitionLockOwner;
 }
 
-interface RecoveryGuard {
-  guardPath: string;
-  guardIdentity: InodeIdentity;
-  owner: HeldLock;
-}
-
 interface AcquisitionState {
   lockPath: string;
   owner: ShieldsTransitionLockOwner;
@@ -561,6 +555,7 @@ export class ShieldsTransitionLockManager {
       const guard = this.enterStaleRecoveryGuard(lockPath, sandboxName);
       if (!guard) return { removed: false, reason: "path-changed" };
       try {
+        this.assertHeldPath(guard);
         const current = this.currentRegularLockIdentity(lockPath);
         if (!current || !sameInode(current, snapshot.identity)) {
           return { removed: false, reason: "path-changed" };
@@ -602,6 +597,7 @@ export class ShieldsTransitionLockManager {
             this.removeEmptyQuarantine(quarantineDir);
             return { removed: false, reason: "path-changed" };
           }
+          this.assertHeldPath(guard);
           try {
             fs.unlinkSync(lockPath);
           } catch (error) {
@@ -619,7 +615,7 @@ export class ShieldsTransitionLockManager {
         this.removeEmptyQuarantine(quarantineDir);
         return { removed: true, reason: removalReason };
       } finally {
-        this.removeHeldStaleRecoveryGuard(guard);
+        this.removeHeldLockPath(guard, sandboxName, "recovery-release");
       }
     } finally {
       closeSnapshot(snapshot);
@@ -628,10 +624,6 @@ export class ShieldsTransitionLockManager {
 
   private staleRecoveryGuardPath(lockPath: string): string {
     return `${lockPath}.recovering`;
-  }
-
-  private staleRecoveryGuardOwnerPath(guardPath: string): string {
-    return path.join(guardPath, "owner.json");
   }
 
   private staleRecoveryGuardOwner(sandboxName: string): ShieldsTransitionLockOwner {
@@ -647,127 +639,92 @@ export class ShieldsTransitionLockManager {
 
   private staleRecoveryInProgress(lockPath: string, sandboxName: string): boolean {
     const guardPath = this.staleRecoveryGuardPath(lockPath);
-    let guardIdentity: InodeIdentity;
-    try {
-      const stat = fs.lstatSync(guardPath, { bigint: true });
-      if (!stat.isDirectory()) {
-        throw unsafeLockPathError(guardPath, "recovery guard is not a directory");
-      }
-      guardIdentity = inodeIdentity(stat);
-    } catch (error) {
-      if (isErrnoException(error) && error.code === "ENOENT") return false;
-      throw error;
-    }
-
-    const snapshot = readExistingLock(this.staleRecoveryGuardOwnerPath(guardPath), sandboxName);
-    if (!snapshot) {
-      return !this.removeEmptyRecoveryGuardIfSame(guardPath, guardIdentity);
-    }
-    let ownerIdentity: InodeIdentity | null = null;
-    let guardIsActive = true;
+    const snapshot = readExistingLock(guardPath, sandboxName);
+    if (!snapshot) return false;
+    let guardIsStale = false;
     try {
       const owner = snapshot.owner;
-      if (!owner || !this.processIsAlive(owner.pid)) {
-        ownerIdentity = snapshot.identity;
-        guardIsActive = false;
-      } else {
+      if (!owner) return true;
+      if (!this.processIsAlive(owner.pid)) {
+        guardIsStale = true;
+      } else if (!isUnverifiedSelfIdentity(owner.processStartIdentity)) {
         const currentIdentity = this.processStartIdentity(owner.pid);
-        if (
-          currentIdentity &&
-          !isUnverifiedSelfIdentity(owner.processStartIdentity) &&
-          currentIdentity !== owner.processStartIdentity
-        ) {
-          ownerIdentity = snapshot.identity;
-          guardIsActive = false;
-        }
+        guardIsStale = currentIdentity !== null && currentIdentity !== owner.processStartIdentity;
       }
+      if (!guardIsStale) return true;
+      if (!this.removeObservedStaleRecoveryGuard(guardPath, snapshot, sandboxName)) return true;
     } finally {
       closeSnapshot(snapshot);
     }
-    if (!guardIsActive && ownerIdentity) {
-      return !this.removeObservedStaleRecoveryGuard(guardPath, guardIdentity, ownerIdentity);
-    }
-    return guardIsActive;
+    return this.currentRegularLockIdentity(guardPath) !== null;
   }
 
-  private enterStaleRecoveryGuard(lockPath: string, sandboxName: string): RecoveryGuard | null {
+  private enterStaleRecoveryGuard(lockPath: string, sandboxName: string): HeldLock | null {
     const guardPath = this.staleRecoveryGuardPath(lockPath);
-    let guardIdentity: InodeIdentity;
-    try {
-      fs.mkdirSync(guardPath, { mode: 0o700 });
-      guardIdentity = this.currentDirectoryIdentity(guardPath)!;
-    } catch (error) {
-      if (isErrnoException(error) && error.code === "EEXIST") return null;
-      throw error;
-    }
-    try {
-      const held = this.tryCreate(
-        this.staleRecoveryGuardOwnerPath(guardPath),
-        this.staleRecoveryGuardOwner(sandboxName),
-      );
-      if (!held) {
-        this.removeEmptyRecoveryGuardIfSame(guardPath, guardIdentity);
-        return null;
-      }
-      return { guardPath, guardIdentity, owner: held };
-    } catch (error) {
-      this.removeEmptyRecoveryGuardIfSame(guardPath, guardIdentity);
-      throw error;
-    }
-  }
-
-  private removeHeldStaleRecoveryGuard(guard: RecoveryGuard): void {
-    const ownerIdentity = inodeIdentity(fs.fstatSync(guard.owner.fd, { bigint: true }));
-    closeSnapshot(guard.owner);
-    const currentOwner = readExistingLock(guard.owner.lockPath, guard.owner.owner.sandboxName);
-    const removeOwner =
-      currentOwner !== null &&
-      sameInode(currentOwner.identity, ownerIdentity) &&
-      currentOwner.owner !== null &&
-      sameOwnerRecord(currentOwner.owner, guard.owner.owner);
-    if (currentOwner) closeSnapshot(currentOwner);
-    if (removeOwner) {
-      this.removeLinkedQuarantine(guard.owner.lockPath);
-    }
-    this.removeEmptyRecoveryGuardIfSame(guard.guardPath, guard.guardIdentity);
+    const owner = this.staleRecoveryGuardOwner(sandboxName);
+    const created = this.tryCreate(guardPath, owner);
+    if (created) return created;
+    if (this.staleRecoveryInProgress(lockPath, sandboxName)) return null;
+    return this.tryCreate(guardPath, owner);
   }
 
   private removeObservedStaleRecoveryGuard(
     guardPath: string,
-    guardIdentity: InodeIdentity,
-    ownerIdentity: InodeIdentity,
+    snapshot: ExistingLockSnapshot,
+    sandboxName: string,
   ): boolean {
-    const ownerPath = this.staleRecoveryGuardOwnerPath(guardPath);
-    const currentOwner = this.currentRegularLockIdentity(ownerPath);
-    if (!currentOwner || !sameInode(currentOwner, ownerIdentity)) return false;
-    this.removeLinkedQuarantine(ownerPath);
-    return this.removeEmptyRecoveryGuardIfSame(guardPath, guardIdentity);
-  }
-
-  private currentDirectoryIdentity(directoryPath: string): InodeIdentity | null {
+    const cleanupGuard = this.enterStaleRecoveryGuard(guardPath, sandboxName);
+    if (!cleanupGuard) return false;
     try {
-      const stat = fs.lstatSync(directoryPath, { bigint: true });
-      if (!stat.isDirectory()) {
-        throw unsafeLockPathError(directoryPath, "path is not a directory");
+      this.assertHeldPath(cleanupGuard);
+      const current = readExistingLock(guardPath, sandboxName);
+      if (!current) return true;
+      try {
+        if (
+          !sameInode(current.identity, snapshot.identity) ||
+          current.owner === null ||
+          snapshot.owner === null ||
+          !sameOwnerRecord(current.owner, snapshot.owner)
+        ) {
+          return false;
+        }
+      } finally {
+        closeSnapshot(current);
       }
-      return inodeIdentity(stat);
-    } catch (error) {
-      if (isErrnoException(error) && error.code === "ENOENT") return null;
-      throw error;
-    }
-  }
 
-  private removeEmptyRecoveryGuardIfSame(guardPath: string, guardIdentity: InodeIdentity): boolean {
-    const current = this.currentDirectoryIdentity(guardPath);
-    if (!current) return true;
-    if (!sameInode(current, guardIdentity)) return false;
-    try {
-      fs.rmdirSync(guardPath);
-      return true;
-    } catch (error) {
-      if (isErrnoException(error) && error.code === "ENOENT") return true;
-      if (isErrnoException(error) && error.code === "ENOTEMPTY") return false;
-      throw error;
+      this.assertHeldPath(cleanupGuard);
+      const quarantineDir = fs.mkdtempSync(`${guardPath}.stale-`);
+      fs.chmodSync(quarantineDir, 0o700);
+      const quarantinePath = path.join(quarantineDir, "owner.json");
+      try {
+        fs.renameSync(guardPath, quarantinePath);
+      } catch (error) {
+        this.removeEmptyQuarantine(quarantineDir);
+        if (isErrnoException(error) && error.code === "ENOENT") return true;
+        throw error;
+      }
+
+      let moved: ExistingLockSnapshot | null = null;
+      try {
+        moved = readExistingLock(quarantinePath, sandboxName);
+        if (
+          !moved ||
+          !sameInode(moved.identity, snapshot.identity) ||
+          moved.owner === null ||
+          snapshot.owner === null ||
+          !sameOwnerRecord(moved.owner, snapshot.owner)
+        ) {
+          this.restoreQuarantinedReplacement(guardPath, quarantinePath);
+          return false;
+        }
+        fs.unlinkSync(quarantinePath);
+        this.removeEmptyQuarantine(quarantineDir);
+        return true;
+      } finally {
+        if (moved) closeSnapshot(moved);
+      }
+    } finally {
+      this.removeHeldLockPath(cleanupGuard, sandboxName, "recovery-release");
     }
   }
 
@@ -1116,15 +1073,10 @@ export class ShieldsTransitionLockManager {
     }
   }
 
-  private release(sandboxName: string, held: HeldLock): void {
-    if (this.held.get(sandboxName) !== held) return;
-    held.depth -= 1;
-    if (held.depth > 0) return;
-    this.held.delete(sandboxName);
-
+  private removeHeldLockPath(held: HeldLock, sandboxName: string, quarantineLabel: string): void {
     try {
       const heldIdentity = inodeIdentity(fs.fstatSync(held.fd, { bigint: true }));
-      const quarantineDir = fs.mkdtempSync(`${held.lockPath}.release-`);
+      const quarantineDir = fs.mkdtempSync(`${held.lockPath}.${quarantineLabel}-`);
       fs.chmodSync(quarantineDir, 0o700);
       const quarantinePath = path.join(quarantineDir, "owner.json");
       try {
@@ -1150,6 +1102,14 @@ export class ShieldsTransitionLockManager {
     } finally {
       fs.closeSync(held.fd);
     }
+  }
+
+  private release(sandboxName: string, held: HeldLock): void {
+    if (this.held.get(sandboxName) !== held) return;
+    held.depth -= 1;
+    if (held.depth > 0) return;
+    this.held.delete(sandboxName);
+    this.removeHeldLockPath(held, sandboxName, "release");
   }
 }
 
