@@ -151,19 +151,24 @@ setupNim(null, null, loadAgent("hermes"))
 
   try {
     fs.writeFileSync(scriptPath, script);
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      HOME: tmpDir,
+      PATH: `${fakeBin}:${process.env.PATH || ""}`,
+      NEMOCLAW_NON_INTERACTIVE: "1",
+      NEMOCLAW_PROVIDER: "ollama",
+      NEMOCLAW_MODEL: OLLAMA_MODEL,
+      NEMOCLAW_YES: "1",
+      NEMOCLAW_CONTEXT_WINDOW: configuredContextWindow,
+      NEMOCLAW_OLLAMA_PORT: "11434",
+      NEMOCLAW_OLLAMA_PROXY_PORT: "11435",
+    };
+    delete env.OLLAMA_HOST;
+
     return spawnSync(process.execPath, [scriptPath], {
       cwd: repoRoot,
       encoding: "utf-8",
-      env: {
-        ...process.env,
-        HOME: tmpDir,
-        PATH: `${fakeBin}:${process.env.PATH || ""}`,
-        NEMOCLAW_NON_INTERACTIVE: "1",
-        NEMOCLAW_PROVIDER: "ollama",
-        NEMOCLAW_MODEL: OLLAMA_MODEL,
-        NEMOCLAW_YES: "1",
-        NEMOCLAW_CONTEXT_WINDOW: configuredContextWindow,
-      },
+      env,
     });
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });

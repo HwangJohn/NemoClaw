@@ -3,6 +3,7 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { OLLAMA_PORT } from "../core/ports";
 import {
   applyOllamaRuntimeContextWindow,
   getOllamaContextWindowFloorForAgent,
@@ -204,6 +205,26 @@ describe("Ollama runtime context helpers", () => {
       runCaptureImpl: () => output,
     });
 
+    const failure = expectOllamaRuntimeContextFailure(result);
+    expect(failure.message).toContain("did not report a valid runtime context_length");
+    expect(failure.message).toContain("OLLAMA_CONTEXT_LENGTH=64000");
+    expect(env.NEMOCLAW_CONTEXT_WINDOW).toBeUndefined();
+  });
+
+  it("fails closed against Windows-host Ollama when runtime context is missing (#6760)", () => {
+    const env: NodeJS.ProcessEnv = {};
+    let probeCommand: readonly string[] = [];
+    const result = applyOllamaRuntimeContextWindow("llama3.2:1b", () => "host.docker.internal", {
+      env,
+      contextWindowFloor: MIN_HERMES_OLLAMA_CONTEXT_WINDOW,
+      logger: { log: () => {}, warn: () => {} },
+      runCaptureImpl: (command) => {
+        probeCommand = command;
+        return JSON.stringify({ models: [{ name: "llama3.2:1b" }] });
+      },
+    });
+
+    expect(probeCommand).toContain(`http://host.docker.internal:${OLLAMA_PORT}/api/ps`);
     const failure = expectOllamaRuntimeContextFailure(result);
     expect(failure.message).toContain("did not report a valid runtime context_length");
     expect(failure.message).toContain("OLLAMA_CONTEXT_LENGTH=64000");
