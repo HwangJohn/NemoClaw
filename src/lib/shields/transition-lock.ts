@@ -353,6 +353,7 @@ export class ShieldsTransitionLockManager {
   private readonly sleepAsync: (milliseconds: number) => Promise<void>;
   private readonly processIsAlive: (pid: number) => boolean;
   private readonly processStartIdentity: (pid: number) => string | null;
+  private readonly ownerStartIdentityFallback: string;
   private readonly held = new Map<string, HeldLock>();
   private readonly ownership = new AsyncLocalStorage<ReadonlyMap<string, symbol>>();
 
@@ -364,6 +365,7 @@ export class ShieldsTransitionLockManager {
     this.sleepAsync = deps.sleepAsync ?? defaultSleepAsync;
     this.processIsAlive = deps.isProcessAlive ?? isProcessAlive;
     this.processStartIdentity = deps.readProcessStartIdentity ?? readProcessStartIdentity;
+    this.ownerStartIdentityFallback = `unverified-self:${String(this.pid)}:${randomBytes(16).toString("hex")}`;
   }
 
   withShieldsTransitionLock<T>(
@@ -725,12 +727,12 @@ export class ShieldsTransitionLockManager {
       options.malformedStaleMs ?? DEFAULT_MALFORMED_STALE_MS,
       "malformedStaleMs",
     );
-    const ownerStartIdentity = this.processStartIdentity(this.pid);
-    if (!ownerStartIdentity) {
-      throw new Error(
-        `Cannot acquire shields transition lock: process-start identity for PID ${String(this.pid)} is unavailable`,
-      );
-    }
+    // Some hosts cannot expose a stable OS process-start identity for the
+    // current process. Still allow this process to publish a unique owner
+    // token; observers that cannot verify a live owner keep failing closed
+    // instead of reclaiming it.
+    const ownerStartIdentity =
+      this.processStartIdentity(this.pid) ?? this.ownerStartIdentityFallback;
 
     fs.mkdirSync(this.stateDir, { recursive: true, mode: 0o700 });
     const lockPath = shieldsTransitionLockPath(sandboxName, this.stateDir);

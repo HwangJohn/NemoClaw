@@ -133,6 +133,23 @@ describe("host shields transition lock", () => {
     expect(fs.existsSync(lockPath)).toBe(false);
   });
 
+  it("uses a unique self identity when the current process start identity is unavailable", () => {
+    const locker = manager({ readProcessStartIdentity: () => null });
+    const lockPath = shieldsTransitionLockPath("alpha", stateDir);
+
+    locker.withShieldsTransitionLock("alpha", "nemoclaw alpha shields up", () => {
+      const written = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+      expect(written).toMatchObject({
+        sandboxName: "alpha",
+        pid: SELF_PID,
+        command: "nemoclaw alpha shields up",
+      });
+      expect(written.processStartIdentity).toMatch(/^unverified-self:101:[0-9a-f]{32}$/u);
+    });
+
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
   it("never publishes a canonical owner when atomic link publication fails", () => {
     const locker = manager();
     const lockPath = shieldsTransitionLockPath("alpha", stateDir);
