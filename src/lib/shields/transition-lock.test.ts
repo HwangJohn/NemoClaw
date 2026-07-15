@@ -845,6 +845,45 @@ describe("host shields transition lock", () => {
     expect(fs.existsSync(guardPath)).toBe(true);
   });
 
+  it("does not remove a replacement recovery guard during orphan cleanup", () => {
+    const { lockPath, guardPath } = createRecoveryGuard("alpha");
+    const originalRmdirSync = fs.rmdirSync;
+    let raced = false;
+    let nowMs = 2_000;
+    vi.spyOn(fs, "rmdirSync").mockImplementation((target) => {
+      runWhen(String(target) === guardPath && !raced, () => {
+        raced = true;
+        originalRmdirSync(guardPath);
+        fs.mkdirSync(guardPath, { mode: 0o700 });
+        writeRecoveryGuardOwner(guardPath, owner("alpha", 202, "proc:guard", "stale recovery"));
+      });
+      originalRmdirSync(target);
+    });
+    const locker = manager({
+      now: () => {
+        nowMs += 1;
+        return nowMs;
+      },
+      isProcessAlive: (pid) => pid === SELF_PID || pid === 202,
+      readProcessStartIdentity: (pid) =>
+        pid === SELF_PID ? SELF_IDENTITY : pid === 202 ? "proc:guard" : null,
+    });
+
+    expect(() =>
+      locker.withShieldsTransitionLock("alpha", "nemoclaw alpha shields up", () => "unexpected", {
+        waitTimeoutMs: 2,
+        pollIntervalMs: 1,
+      }),
+    ).toThrow(/the lock changed during inspection/);
+
+    expect(fs.existsSync(lockPath)).toBe(false);
+    expect(fs.existsSync(guardPath)).toBe(true);
+    expect(JSON.parse(fs.readFileSync(path.join(guardPath, "owner.json"), "utf8"))).toMatchObject({
+      pid: 202,
+      processStartIdentity: "proc:guard",
+    });
+  });
+
   it("waits on a recent malformed owner record", () => {
     const lockPath = writeOwner("alpha", "{incomplete");
     const initialSnapshot = readLockFileSnapshot(lockPath);

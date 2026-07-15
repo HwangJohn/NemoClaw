@@ -641,11 +641,13 @@ export class ShieldsTransitionLockManager {
 
   private staleRecoveryInProgress(lockPath: string, sandboxName: string): boolean {
     const guardPath = this.staleRecoveryGuardPath(lockPath);
+    let guardIdentity: InodeIdentity;
     try {
       const stat = fs.lstatSync(guardPath, { bigint: true });
       if (!stat.isDirectory()) {
         throw unsafeLockPathError(guardPath, "recovery guard is not a directory");
       }
+      guardIdentity = inodeIdentity(stat);
     } catch (error) {
       if (isErrnoException(error) && error.code === "ENOENT") return false;
       throw error;
@@ -653,25 +655,33 @@ export class ShieldsTransitionLockManager {
 
     const snapshot = readExistingLock(this.staleRecoveryGuardOwnerPath(guardPath), sandboxName);
     if (!snapshot) {
-      this.removeStaleRecoveryGuard(guardPath);
-      return false;
+      return !this.removeEmptyRecoveryGuardIfSame(guardPath, guardIdentity);
     }
-    let removeGuard = false;
+    let ownerIdentity: InodeIdentity | null = null;
+    let guardIsActive = true;
     try {
       const owner = snapshot.owner;
       if (!owner || !this.processIsAlive(owner.pid)) {
-        removeGuard = true;
-        return false;
+        ownerIdentity = snapshot.identity;
+        guardIsActive = false;
+      } else {
+        const currentIdentity = this.processStartIdentity(owner.pid);
+        if (
+          currentIdentity &&
+          !isUnverifiedSelfIdentity(owner.processStartIdentity) &&
+          currentIdentity !== owner.processStartIdentity
+        ) {
+          ownerIdentity = snapshot.identity;
+          guardIsActive = false;
+        }
       }
-      const currentIdentity = this.processStartIdentity(owner.pid);
-      if (!currentIdentity || isUnverifiedSelfIdentity(owner.processStartIdentity)) return true;
-      if (currentIdentity === owner.processStartIdentity) return true;
-      removeGuard = true;
-      return false;
     } finally {
       closeSnapshot(snapshot);
-      if (removeGuard) this.removeStaleRecoveryGuard(guardPath);
     }
+    if (!guardIsActive && ownerIdentity) {
+      return !this.removeObservedStaleRecoveryGuard(guardPath, guardIdentity, ownerIdentity);
+    }
+    return guardIsActive;
   }
 
   private enterStaleRecoveryGuard(lockPath: string, sandboxName: string): string | null {
@@ -695,7 +705,47 @@ export class ShieldsTransitionLockManager {
   }
 
   private removeStaleRecoveryGuard(guardPath: string): void {
-    fs.rmSync(guardPath, { recursive: true, force: true });
+    this.removeLinkedQuarantine(this.staleRecoveryGuardOwnerPath(guardPath));
+    this.removeEmptyQuarantine(guardPath);
+  }
+
+  private removeObservedStaleRecoveryGuard(
+    guardPath: string,
+    guardIdentity: InodeIdentity,
+    ownerIdentity: InodeIdentity,
+  ): boolean {
+    const ownerPath = this.staleRecoveryGuardOwnerPath(guardPath);
+    const currentOwner = this.currentRegularLockIdentity(ownerPath);
+    if (!currentOwner || !sameInode(currentOwner, ownerIdentity)) return false;
+    this.removeLinkedQuarantine(ownerPath);
+    return this.removeEmptyRecoveryGuardIfSame(guardPath, guardIdentity);
+  }
+
+  private currentDirectoryIdentity(directoryPath: string): InodeIdentity | null {
+    try {
+      const stat = fs.lstatSync(directoryPath, { bigint: true });
+      if (!stat.isDirectory()) {
+        throw unsafeLockPathError(directoryPath, "path is not a directory");
+      }
+      return inodeIdentity(stat);
+    } catch (error) {
+      if (isErrnoException(error) && error.code === "ENOENT") return null;
+      throw error;
+    }
+  }
+
+  private removeEmptyRecoveryGuardIfSame(guardPath: string, guardIdentity: InodeIdentity): boolean {
+    const current = this.currentDirectoryIdentity(guardPath);
+    if (!current) return true;
+    if (!sameInode(current, guardIdentity)) return false;
+    try {
+      fs.rmdirSync(guardPath);
+      return true;
+    } catch (error) {
+      if (isErrnoException(error) && error.code === "ENOENT") return true;
+      if (isErrnoException(error) && error.code === "ENOTEMPTY") return false;
+      throw error;
+    }
   }
 
   private removeLinkedQuarantine(quarantinePath: string): void {
