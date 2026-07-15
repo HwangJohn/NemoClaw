@@ -552,65 +552,108 @@ export class ShieldsTransitionLockManager {
         removalReason = "removed-reused-pid";
       }
 
-      const current = this.currentRegularLockIdentity(lockPath);
-      if (!current || !sameInode(current, snapshot.identity)) {
-        return { removed: false, reason: "path-changed" };
-      }
-
-      const quarantineDir = fs.mkdtempSync(`${lockPath}.${expectation.quarantineLabel}-`);
-      fs.chmodSync(quarantineDir, 0o700);
-      const quarantinePath = path.join(quarantineDir, "owner.json");
+      const guardPath = this.enterStaleRecoveryGuard(lockPath);
+      if (!guardPath) return { removed: false, reason: "path-changed" };
       try {
-        fs.linkSync(lockPath, quarantinePath);
-      } catch (error) {
-        this.removeEmptyQuarantine(quarantineDir);
-        if (isErrnoException(error) && error.code === "ENOENT") {
-          return { removed: false, reason: "path-changed" };
-        }
-        throw error;
-      }
-
-      const moved = readExistingLock(quarantinePath, sandboxName);
-      if (!moved) {
-        this.removeEmptyQuarantine(quarantineDir);
-        return { removed: false, reason: "path-changed" };
-      }
-      try {
-        const movedOwner = moved.owner;
-        const movedMatches =
-          sameInode(moved.identity, snapshot.identity) &&
-          movedOwner !== null &&
-          expectation.matches(movedOwner);
-        if (!movedMatches) {
-          this.removeLinkedQuarantine(quarantinePath);
-          this.removeEmptyQuarantine(quarantineDir);
-          return { removed: false, reason: "path-changed" };
-        }
-
         const current = this.currentRegularLockIdentity(lockPath);
         if (!current || !sameInode(current, snapshot.identity)) {
-          this.removeLinkedQuarantine(quarantinePath);
-          this.removeEmptyQuarantine(quarantineDir);
           return { removed: false, reason: "path-changed" };
         }
+
+        const quarantineDir = fs.mkdtempSync(`${lockPath}.${expectation.quarantineLabel}-`);
+        fs.chmodSync(quarantineDir, 0o700);
+        const quarantinePath = path.join(quarantineDir, "owner.json");
         try {
-          fs.unlinkSync(lockPath);
+          fs.linkSync(lockPath, quarantinePath);
         } catch (error) {
-          this.removeLinkedQuarantine(quarantinePath);
           this.removeEmptyQuarantine(quarantineDir);
           if (isErrnoException(error) && error.code === "ENOENT") {
             return { removed: false, reason: "path-changed" };
           }
           throw error;
         }
-        fs.unlinkSync(quarantinePath);
+
+        const moved = readExistingLock(quarantinePath, sandboxName);
+        if (!moved) {
+          this.removeEmptyQuarantine(quarantineDir);
+          return { removed: false, reason: "path-changed" };
+        }
+        try {
+          const movedOwner = moved.owner;
+          const movedMatches =
+            sameInode(moved.identity, snapshot.identity) &&
+            movedOwner !== null &&
+            expectation.matches(movedOwner);
+          if (!movedMatches) {
+            this.removeLinkedQuarantine(quarantinePath);
+            this.removeEmptyQuarantine(quarantineDir);
+            return { removed: false, reason: "path-changed" };
+          }
+
+          const current = this.currentRegularLockIdentity(lockPath);
+          if (!current || !sameInode(current, snapshot.identity)) {
+            this.removeLinkedQuarantine(quarantinePath);
+            this.removeEmptyQuarantine(quarantineDir);
+            return { removed: false, reason: "path-changed" };
+          }
+          try {
+            fs.unlinkSync(lockPath);
+          } catch (error) {
+            this.removeLinkedQuarantine(quarantinePath);
+            this.removeEmptyQuarantine(quarantineDir);
+            if (isErrnoException(error) && error.code === "ENOENT") {
+              return { removed: false, reason: "path-changed" };
+            }
+            throw error;
+          }
+          fs.unlinkSync(quarantinePath);
+        } finally {
+          closeSnapshot(moved);
+        }
+        this.removeEmptyQuarantine(quarantineDir);
+        return { removed: true, reason: removalReason };
       } finally {
-        closeSnapshot(moved);
+        this.removeStaleRecoveryGuard(guardPath);
       }
-      this.removeEmptyQuarantine(quarantineDir);
-      return { removed: true, reason: removalReason };
     } finally {
       closeSnapshot(snapshot);
+    }
+  }
+
+  private staleRecoveryGuardPath(lockPath: string): string {
+    return `${lockPath}.recovering`;
+  }
+
+  private staleRecoveryInProgress(lockPath: string): boolean {
+    const guardPath = this.staleRecoveryGuardPath(lockPath);
+    try {
+      const stat = fs.lstatSync(guardPath, { bigint: true });
+      if (!stat.isDirectory()) {
+        throw unsafeLockPathError(guardPath, "recovery guard is not a directory");
+      }
+      return true;
+    } catch (error) {
+      if (isErrnoException(error) && error.code === "ENOENT") return false;
+      throw error;
+    }
+  }
+
+  private enterStaleRecoveryGuard(lockPath: string): string | null {
+    const guardPath = this.staleRecoveryGuardPath(lockPath);
+    try {
+      fs.mkdirSync(guardPath, { mode: 0o700 });
+      return guardPath;
+    } catch (error) {
+      if (isErrnoException(error) && error.code === "EEXIST") return null;
+      throw error;
+    }
+  }
+
+  private removeStaleRecoveryGuard(guardPath: string): void {
+    try {
+      fs.rmdirSync(guardPath);
+    } catch (error) {
+      if (!isErrnoException(error) || error.code !== "ENOENT") throw error;
     }
   }
 
@@ -756,10 +799,10 @@ export class ShieldsTransitionLockManager {
       options.malformedStaleMs ?? DEFAULT_MALFORMED_STALE_MS,
       "malformedStaleMs",
     );
-    // Some hosts cannot expose a stable OS process-start identity for the
-    // current process. Still allow this process to publish a unique owner
-    // token; observers that cannot verify a live owner keep failing closed
-    // instead of reclaiming it.
+    // Windows developer and CI hosts can lack both /proc and a ps lstart
+    // identity. Keep this fallback only until timer-control has a stable
+    // Windows start-time reader; live observers fail closed instead of
+    // reclaiming this owner.
     const ownerStartIdentity =
       this.processStartIdentity(this.pid) ?? this.ownerStartIdentityFallback;
 
@@ -869,6 +912,7 @@ export class ShieldsTransitionLockManager {
     } catch (error) {
       if (!isErrnoException(error) || error.code !== "ENOENT") throw error;
     }
+    if (this.staleRecoveryInProgress(lockPath)) return null;
     const tempPath = `${lockPath}.acquire-${String(this.pid)}-${randomBytes(16).toString("hex")}.tmp`;
     let fd: number;
     try {

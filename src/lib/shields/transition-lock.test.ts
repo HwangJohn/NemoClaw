@@ -679,6 +679,101 @@ describe("host shields transition lock", () => {
     expect(JSON.parse(fs.readFileSync(displacedPath, "utf8"))).toEqual(original);
   });
 
+  it("blocks contenders at the final stale recovery unlink boundary", () => {
+    const recorded = owner("alpha", 202, "proc:dead-holder");
+    const lockPath = writeOwner("alpha", recorded);
+    const originalUnlinkSync = fs.unlinkSync;
+    let raced = false;
+    let thirdAcquired = false;
+    let thirdError: unknown = null;
+    vi.spyOn(fs, "unlinkSync").mockImplementation((target) => {
+      runWhen(String(target) === lockPath && !raced, () => {
+        raced = true;
+        let thirdNow = 2_000;
+        const third = manager({
+          now: () => {
+            thirdNow += 1;
+            return thirdNow;
+          },
+          isProcessAlive: (pid) => pid === SELF_PID,
+        });
+        try {
+          third.withShieldsTransitionLock(
+            "alpha",
+            "third contender",
+            () => {
+              thirdAcquired = true;
+            },
+            {
+              waitTimeoutMs: 2,
+              pollIntervalMs: 1,
+            },
+          );
+        } catch (error) {
+          thirdError = error;
+        }
+      });
+      originalUnlinkSync(target);
+    });
+    const locker = manager();
+
+    expect(
+      locker.withShieldsTransitionLock("alpha", "nemoclaw alpha shields up", () => "acquired"),
+    ).toBe("acquired");
+
+    expect(thirdAcquired).toBe(false);
+    expect(thirdError).toBeInstanceOf(Error);
+    expect(String((thirdError as Error).message)).toMatch(/recorded owner PID 202/);
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it("blocks async contenders at the final stale recovery unlink boundary", async () => {
+    const recorded = owner("alpha", 202, "proc:dead-holder");
+    const lockPath = writeOwner("alpha", recorded);
+    const originalUnlinkSync = fs.unlinkSync;
+    let raced = false;
+    let thirdAcquired = false;
+    let thirdPromise: Promise<unknown> = Promise.resolve();
+    vi.spyOn(fs, "unlinkSync").mockImplementation((target) => {
+      runWhen(String(target) === lockPath && !raced, () => {
+        raced = true;
+        let thirdNow = 2_000;
+        const third = manager({
+          now: () => {
+            thirdNow += 1;
+            return thirdNow;
+          },
+          isProcessAlive: (pid) => pid === SELF_PID,
+        });
+        thirdPromise = third.withShieldsTransitionLockAsync(
+          "alpha",
+          "async third contender",
+          async () => {
+            thirdAcquired = true;
+          },
+          {
+            waitTimeoutMs: 2,
+            pollIntervalMs: 1,
+          },
+        );
+      });
+      originalUnlinkSync(target);
+    });
+    const locker = manager();
+
+    await expect(
+      locker.withShieldsTransitionLockAsync(
+        "alpha",
+        "nemoclaw alpha shields up",
+        async () => "acquired",
+      ),
+    ).resolves.toBe("acquired");
+
+    await expect(thirdPromise).rejects.toThrow(/recorded owner PID 202/);
+    expect(thirdAcquired).toBe(false);
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
   it("waits on a recent malformed owner record", () => {
     const lockPath = writeOwner("alpha", "{incomplete");
     const initialSnapshot = readLockFileSnapshot(lockPath);
