@@ -16,6 +16,7 @@ const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
 const DEFAULT_POLL_INTERVAL_MS = 50;
 const DEFAULT_MALFORMED_STALE_MS = 30_000;
 const TAKEOVER_TOKEN_PATTERN = /^[0-9a-f]{32}$/;
+const UNVERIFIED_SELF_IDENTITY_PREFIX = "unverified-self:";
 
 const waitBuffer = new Int32Array(new SharedArrayBuffer(4));
 
@@ -220,6 +221,10 @@ function sameOwnerRecord(
   );
 }
 
+function isUnverifiedSelfIdentity(identity: string): boolean {
+  return identity.startsWith(UNVERIFIED_SELF_IDENTITY_PREFIX);
+}
+
 function unsafeLockPathError(lockPath: string, reason: string): Error {
   return new Error(`Unsafe shields transition lock '${lockPath}': ${reason}`);
 }
@@ -365,7 +370,7 @@ export class ShieldsTransitionLockManager {
     this.sleepAsync = deps.sleepAsync ?? defaultSleepAsync;
     this.processIsAlive = deps.isProcessAlive ?? isProcessAlive;
     this.processStartIdentity = deps.readProcessStartIdentity ?? readProcessStartIdentity;
-    this.ownerStartIdentityFallback = `unverified-self:${String(this.pid)}:${randomBytes(16).toString("hex")}`;
+    this.ownerStartIdentityFallback = `${UNVERIFIED_SELF_IDENTITY_PREFIX}${String(this.pid)}:${randomBytes(16).toString("hex")}`;
   }
 
   withShieldsTransitionLock<T>(
@@ -538,6 +543,9 @@ export class ShieldsTransitionLockManager {
         if (!currentIdentity) {
           return { removed: false, reason: "owner-identity-unavailable" };
         }
+        if (isUnverifiedSelfIdentity(owner.processStartIdentity)) {
+          return { removed: false, reason: "owner-identity-unavailable" };
+        }
         if (currentIdentity === owner.processStartIdentity) {
           return { removed: false, reason: "owner-live" };
         }
@@ -553,7 +561,7 @@ export class ShieldsTransitionLockManager {
       fs.chmodSync(quarantineDir, 0o700);
       const quarantinePath = path.join(quarantineDir, "owner.json");
       try {
-        fs.renameSync(lockPath, quarantinePath);
+        fs.linkSync(lockPath, quarantinePath);
       } catch (error) {
         this.removeEmptyQuarantine(quarantineDir);
         if (isErrnoException(error) && error.code === "ENOENT") {
@@ -564,7 +572,8 @@ export class ShieldsTransitionLockManager {
 
       const moved = readExistingLock(quarantinePath, sandboxName);
       if (!moved) {
-        return { removed: false, reason: "replacement-preserved", quarantinePath };
+        this.removeEmptyQuarantine(quarantineDir);
+        return { removed: false, reason: "path-changed" };
       }
       try {
         const movedOwner = moved.owner;
@@ -573,14 +582,26 @@ export class ShieldsTransitionLockManager {
           movedOwner !== null &&
           expectation.matches(movedOwner);
         if (!movedMatches) {
-          this.restoreQuarantinedReplacement(lockPath, quarantinePath);
-          return { removed: false, reason: "replacement-preserved", quarantinePath };
+          this.removeLinkedQuarantine(quarantinePath);
+          this.removeEmptyQuarantine(quarantineDir);
+          return { removed: false, reason: "path-changed" };
         }
 
-        const currentQuarantine = this.currentRegularLockIdentity(quarantinePath);
-        if (!currentQuarantine || !sameInode(currentQuarantine, moved.identity)) {
-          this.restoreQuarantinedReplacement(lockPath, quarantinePath);
-          return { removed: false, reason: "replacement-preserved", quarantinePath };
+        const current = this.currentRegularLockIdentity(lockPath);
+        if (!current || !sameInode(current, snapshot.identity)) {
+          this.removeLinkedQuarantine(quarantinePath);
+          this.removeEmptyQuarantine(quarantineDir);
+          return { removed: false, reason: "path-changed" };
+        }
+        try {
+          fs.unlinkSync(lockPath);
+        } catch (error) {
+          this.removeLinkedQuarantine(quarantinePath);
+          this.removeEmptyQuarantine(quarantineDir);
+          if (isErrnoException(error) && error.code === "ENOENT") {
+            return { removed: false, reason: "path-changed" };
+          }
+          throw error;
         }
         fs.unlinkSync(quarantinePath);
       } finally {
@@ -590,6 +611,14 @@ export class ShieldsTransitionLockManager {
       return { removed: true, reason: removalReason };
     } finally {
       closeSnapshot(snapshot);
+    }
+  }
+
+  private removeLinkedQuarantine(quarantinePath: string): void {
+    try {
+      fs.unlinkSync(quarantinePath);
+    } catch (error) {
+      if (!isErrnoException(error) || error.code !== "ENOENT") throw error;
     }
   }
 
@@ -796,6 +825,9 @@ export class ShieldsTransitionLockManager {
       if (!this.processIsAlive(owner.pid)) return { kind: "dead", owner };
       const currentIdentity = this.processStartIdentity(owner.pid);
       if (!currentIdentity) return { kind: "identity-unavailable", owner };
+      if (isUnverifiedSelfIdentity(owner.processStartIdentity)) {
+        return { kind: "identity-unavailable", owner };
+      }
       if (currentIdentity !== owner.processStartIdentity) {
         return { kind: "pid-reused", owner, currentProcessStartIdentity: currentIdentity };
       }

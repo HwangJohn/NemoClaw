@@ -150,6 +150,73 @@ describe("host shields transition lock", () => {
     expect(fs.existsSync(lockPath)).toBe(false);
   });
 
+  it("does not reclaim a live owner with an unverified self identity", () => {
+    const ownerLocker = manager({ readProcessStartIdentity: () => null });
+    const lockPath = shieldsTransitionLockPath("alpha", stateDir);
+    let contenderNow = 2_000;
+    const contender = manager({
+      now: () => contenderNow,
+      sleep: (milliseconds) => {
+        contenderNow += milliseconds;
+      },
+      isProcessAlive: (pid) => pid === SELF_PID,
+      readProcessStartIdentity: (pid) => (pid === SELF_PID ? SELF_IDENTITY : null),
+    });
+
+    ownerLocker.withShieldsTransitionLock("alpha", "owner with unverified identity", () => {
+      expect(() =>
+        contender.withShieldsTransitionLock("alpha", "contender", () => "unexpected", {
+          waitTimeoutMs: 2,
+          pollIntervalMs: 1,
+        }),
+      ).toThrow(/PID 101 is alive but its process-start identity cannot be verified/);
+      expect(JSON.parse(fs.readFileSync(lockPath, "utf8")).command).toBe(
+        "owner with unverified identity",
+      );
+    });
+
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it("does not asynchronously reclaim a live owner with an unverified self identity", async () => {
+    const ownerLocker = manager({ readProcessStartIdentity: () => null });
+    const lockPath = shieldsTransitionLockPath("alpha", stateDir);
+    let contenderNow = 2_000;
+    const contender = manager({
+      now: () => contenderNow,
+      sleepAsync: async (milliseconds) => {
+        contenderNow += milliseconds;
+      },
+      isProcessAlive: (pid) => pid === SELF_PID,
+      readProcessStartIdentity: (pid) => (pid === SELF_PID ? SELF_IDENTITY : null),
+    });
+
+    await ownerLocker.withShieldsTransitionLockAsync(
+      "alpha",
+      "async owner with unverified identity",
+      async () => {
+        await expect(
+          contender.withShieldsTransitionLockAsync(
+            "alpha",
+            "async contender",
+            async () => {
+              throw new Error("should not reclaim live unverified owner");
+            },
+            {
+              waitTimeoutMs: 2,
+              pollIntervalMs: 1,
+            },
+          ),
+        ).rejects.toThrow(/PID 101 is alive but its process-start identity cannot be verified/);
+        expect(JSON.parse(fs.readFileSync(lockPath, "utf8")).command).toBe(
+          "async owner with unverified identity",
+        );
+      },
+    );
+
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
   it("never publishes a canonical owner when atomic link publication fails", () => {
     const locker = manager();
     const lockPath = shieldsTransitionLockPath("alpha", stateDir);
@@ -310,7 +377,7 @@ describe("host shields transition lock", () => {
     expect(fs.existsSync(lockPath)).toBe(false);
   });
 
-  it("preserves a replacement raced into the token-specific quarantine", () => {
+  it("preserves a replacement raced into token-specific stale recovery", () => {
     const original = owner("alpha", 202, "proc:owner", "shields down", TAKEOVER_TOKEN);
     const replacement = owner(
       "alpha",
@@ -321,15 +388,15 @@ describe("host shields transition lock", () => {
     );
     const lockPath = writeOwner("alpha", original);
     const displacedPath = `${lockPath}.displaced`;
-    const originalRenameSync = fs.renameSync;
+    const originalLinkSync = fs.linkSync;
     let raced = false;
-    vi.spyOn(fs, "renameSync").mockImplementation((source, destination) => {
+    vi.spyOn(fs, "linkSync").mockImplementation((source, destination) => {
       runWhen(String(source) === lockPath && !raced, () => {
         raced = true;
-        originalRenameSync(lockPath, displacedPath);
+        fs.renameSync(lockPath, displacedPath);
         fs.writeFileSync(lockPath, JSON.stringify(replacement), { mode: 0o600 });
       });
-      originalRenameSync(source, destination);
+      originalLinkSync(source, destination);
     });
     const locker = manager({
       isProcessAlive: (pid) => pid === SELF_PID || pid === 303,
@@ -339,10 +406,8 @@ describe("host shields transition lock", () => {
 
     const result = locker.takeoverShieldsTransitionLock("alpha", 202, "proc:owner", TAKEOVER_TOKEN);
 
-    expect(result).toMatchObject({ removed: false, reason: "replacement-preserved" });
-    expect(result.quarantinePath).toContain(`.takeover-${TAKEOVER_TOKEN}-`);
+    expect(result).toEqual({ removed: false, reason: "path-changed" });
     expect(JSON.parse(fs.readFileSync(lockPath, "utf8"))).toEqual(replacement);
-    expect(JSON.parse(fs.readFileSync(result.quarantinePath!, "utf8"))).toEqual(replacement);
     expect(JSON.parse(fs.readFileSync(displacedPath, "utf8"))).toEqual(original);
   });
 
@@ -547,22 +612,54 @@ describe("host shields transition lock", () => {
     expect(fs.existsSync(lockPath)).toBe(false);
   });
 
-  it("fails closed when stale lock recovery observes a replacement race", () => {
+  it("keeps a replacement owner canonical during stale lock recovery races", () => {
     const original = owner("alpha", 202, "proc:dead-holder");
     const replacement = owner("alpha", 303, "proc:replacement", "replacement holder");
     const lockPath = writeOwner("alpha", original);
     const displacedPath = `${lockPath}.displaced`;
-    const originalRenameSync = fs.renameSync;
+    const originalLinkSync = fs.linkSync;
     let raced = false;
-    vi.spyOn(fs, "renameSync").mockImplementation((source, destination) => {
+    let thirdAcquired = false;
+    let thirdError: unknown = null;
+    let recoveryNow = 2_000;
+    vi.spyOn(fs, "linkSync").mockImplementation((source, destination) => {
       runWhen(String(source) === lockPath && !raced, () => {
         raced = true;
-        originalRenameSync(lockPath, displacedPath);
+        fs.renameSync(lockPath, displacedPath);
         fs.writeFileSync(lockPath, JSON.stringify(replacement), { mode: 0o600 });
+        let thirdNow = 2_000;
+        const third = manager({
+          now: () => thirdNow,
+          sleep: (milliseconds) => {
+            thirdNow += milliseconds;
+          },
+          isProcessAlive: (pid) => pid === SELF_PID || pid === 303,
+          readProcessStartIdentity: (pid) =>
+            pid === SELF_PID ? SELF_IDENTITY : pid === 303 ? "proc:replacement" : null,
+        });
+        try {
+          third.withShieldsTransitionLock(
+            "alpha",
+            "third contender",
+            () => {
+              thirdAcquired = true;
+            },
+            {
+              waitTimeoutMs: 2,
+              pollIntervalMs: 1,
+            },
+          );
+        } catch (error) {
+          thirdError = error;
+        }
       });
-      originalRenameSync(source, destination);
+      originalLinkSync(source, destination);
     });
     const locker = manager({
+      now: () => recoveryNow,
+      sleep: (milliseconds) => {
+        recoveryNow += milliseconds;
+      },
       isProcessAlive: (pid) => pid === SELF_PID || pid === 303,
       readProcessStartIdentity: (pid) =>
         pid === SELF_PID ? SELF_IDENTITY : pid === 303 ? "proc:replacement" : null,
@@ -573,8 +670,11 @@ describe("host shields transition lock", () => {
         waitTimeoutMs: 2,
         pollIntervalMs: 1,
       }),
-    ).toThrow(/a replacement was preserved during recovery.*remove '.*' manually/s);
+    ).toThrow(/PID 303 is still running/);
 
+    expect(thirdAcquired).toBe(false);
+    expect(thirdError).toBeInstanceOf(Error);
+    expect(String((thirdError as Error).message)).toMatch(/PID 303 is still running/);
     expect(JSON.parse(fs.readFileSync(lockPath, "utf8"))).toEqual(replacement);
     expect(JSON.parse(fs.readFileSync(displacedPath, "utf8"))).toEqual(original);
   });
