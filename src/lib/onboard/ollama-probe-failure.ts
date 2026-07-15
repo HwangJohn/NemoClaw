@@ -30,6 +30,7 @@ export function completeOllamaRuntimeContextSelection(
   if (result.ok) return selected;
   if (isNonInteractive()) abortNonInteractive(result.message);
   console.error(`  ${result.message}`);
+  if (isOllamaProviderPinned()) process.exit(1);
   console.log("  Returning to provider selection.");
   console.log("");
   return { outcome: "back-to-selection" };

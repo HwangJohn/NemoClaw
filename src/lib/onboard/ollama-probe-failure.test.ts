@@ -220,4 +220,30 @@ describe("completeOllamaRuntimeContextSelection (#6760)", () => {
       exitSpy.mockRestore();
     }
   });
+
+  it("exits pinned interactive runs after a runtime context failure", () => {
+    vi.stubEnv("NEMOCLAW_PROVIDER", "ollama");
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`process.exit:${code ?? 0}`);
+    }) as never);
+
+    try {
+      expect(() =>
+        completeOllamaRuntimeContextSelection(
+          { ok: false, message: "restart Ollama with OLLAMA_CONTEXT_LENGTH=64000" },
+          selected,
+          () => false,
+        ),
+      ).toThrow(/process\.exit:1/);
+      expect(errSpy).toHaveBeenCalledWith("  restart Ollama with OLLAMA_CONTEXT_LENGTH=64000");
+      expect(logSpy).not.toHaveBeenCalledWith("  Returning to provider selection.");
+    } finally {
+      errSpy.mockRestore();
+      logSpy.mockRestore();
+      exitSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
 });
