@@ -54,6 +54,15 @@ function runHermesOllamaOnboard(
   const onboardPath = JSON.stringify(path.join(repoRoot, "src", "lib", "onboard.ts"));
   const runnerPath = JSON.stringify(path.join(repoRoot, "src", "lib", "runner.ts"));
   const agentDefsPath = JSON.stringify(path.join(repoRoot, "src", "lib", "agent", "defs.ts"));
+  const httpProbePath = JSON.stringify(
+    path.join(repoRoot, "src", "lib", "adapters", "http", "probe.ts"),
+  );
+  const ollamaProxyPath = JSON.stringify(
+    path.join(repoRoot, "src", "lib", "inference", "ollama", "proxy.ts"),
+  );
+  const localInferenceTopologyPath = JSON.stringify(
+    path.join(repoRoot, "src", "lib", "onboard", "local-inference-topology.ts"),
+  );
 
   fs.mkdirSync(fakeBin, { recursive: true });
   writeFakeCurl(fakeBin);
@@ -61,15 +70,20 @@ function runHermesOllamaOnboard(
   const script = String.raw`
 const runner = require(${runnerPath});
 const childProcess = require("child_process");
+const nodeChildProcess = require("node:child_process");
 
-childProcess.spawn = () => ({ pid: 99999, unref() {}, on() {} });
-const originalSpawnSync = childProcess.spawnSync;
-childProcess.spawnSync = (command, args, options) => {
+const fakeSpawn = () => ({ pid: 99999, unref() {}, on() {} });
+childProcess.spawn = fakeSpawn;
+nodeChildProcess.spawn = fakeSpawn;
+const originalSpawnSync = nodeChildProcess.spawnSync;
+const fakeSpawnSync = (command, args, options) => {
   if (command === "nc" && args?.includes("11435")) {
     return { status: 0, stdout: "", stderr: "", signal: null };
   }
   return originalSpawnSync(command, args, options);
 };
+childProcess.spawnSync = fakeSpawnSync;
+nodeChildProcess.spawnSync = fakeSpawnSync;
 
 runner.run = () => ({ status: 0 });
 runner.runCapture = (command) => {
@@ -91,6 +105,33 @@ runner.runCapture = (command) => {
   }
   return "";
 };
+runner.runCaptureEx = (command) => {
+  const normalized = Array.isArray(command) ? command.join(" ") : command;
+  if (normalized.includes("api/generate")) {
+    return { stdout: '{"response":"hello"}', stderr: "", exitCode: 0, timedOut: false };
+  }
+  return { stdout: runner.runCapture(command), stderr: "", exitCode: 0, timedOut: false };
+};
+
+const ollamaProxy = require(${ollamaProxyPath});
+ollamaProxy.startOllamaAuthProxy = () => true;
+ollamaProxy.ensureOllamaAuthProxy = () => {};
+ollamaProxy.isProxyHealthy = () => true;
+const localInferenceTopology = require(${localInferenceTopologyPath});
+localInferenceTopology.shouldFrontOllamaWithProxy = () => false;
+
+const httpProbe = require(${httpProbePath});
+const successfulOpenAiProbe = () => ({
+  ok: true,
+  httpStatus: 200,
+  curlStatus: 0,
+  body: ${JSON.stringify(OLLAMA_CHAT_COMPLETIONS_TOOL_CALL_RESPONSE)},
+  stderr: "",
+  message: "HTTP 200",
+});
+httpProbe.runCurlProbe = successfulOpenAiProbe;
+httpProbe.runChatCompletionsStreamingProbe = successfulOpenAiProbe;
+httpProbe.runStreamingEventProbe = () => ({ ok: true, missingEvents: [], message: "" });
 
 const { loadAgent } = require(${agentDefsPath});
 const { setupNim } = require(${onboardPath});

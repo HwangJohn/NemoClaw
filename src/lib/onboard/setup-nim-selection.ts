@@ -18,6 +18,8 @@ export type OllamaModelSelectionDefaults = {
   lockedModel?: string | null;
   /** Minimum runtime context window required by the selected agent. */
   contextWindowFloor?: number;
+  /** Interactive prompt default from provider/model environment variables. */
+  promptDefaultModel?: string | null;
 };
 
 export type SetupNimSelectionState<THermesAuthMethod = unknown> = {
