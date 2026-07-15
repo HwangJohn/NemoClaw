@@ -28,8 +28,7 @@ describe("Ubuntu 26.04 preflight tracking", () => {
       }),
       commandExistsImpl: (name: string) =>
         name === "docker" || name === "apt-get" || name === "systemctl",
-      runCaptureImpl: (command: readonly string[]) =>
-        commandResponses.get(command.join(" ")) ?? "",
+      runCaptureImpl: (command: readonly string[]) => commandResponses.get(command.join(" ")) ?? "",
     });
 
     expect(result.runtime).toBe("docker");
