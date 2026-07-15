@@ -7,6 +7,13 @@ import { assessHost } from "./preflight";
 
 describe("Ubuntu 26.04 preflight tracking", () => {
   it("tracks Ubuntu 26.04 Docker 29 as a generic Linux fixture without support promotion (#3245)", () => {
+    const commandResponses = new Map<string, string>([
+      ['sh -c command -v "$1" -- apt-get', "/usr/bin/apt-get"],
+      ['sh -c command -v "$1" -- systemctl', "/usr/bin/systemctl"],
+      ["systemctl is-active docker", "active"],
+      ["systemctl is-enabled docker", "enabled"],
+    ]);
+
     const result = assessHost({
       platform: "linux",
       env: {},
@@ -21,13 +28,8 @@ describe("Ubuntu 26.04 preflight tracking", () => {
       }),
       commandExistsImpl: (name: string) =>
         name === "docker" || name === "apt-get" || name === "systemctl",
-      runCaptureImpl: (command: readonly string[]) => {
-        if (command.join(" ") === 'sh -c command -v "$1" -- apt-get') return "/usr/bin/apt-get";
-        if (command.join(" ") === 'sh -c command -v "$1" -- systemctl') return "/usr/bin/systemctl";
-        if (command.join(" ") === "systemctl is-active docker") return "active";
-        if (command.join(" ") === "systemctl is-enabled docker") return "enabled";
-        return "";
-      },
+      runCaptureImpl: (command: readonly string[]) =>
+        commandResponses.get(command.join(" ")) ?? "",
     });
 
     expect(result.runtime).toBe("docker");
