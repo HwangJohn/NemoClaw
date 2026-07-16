@@ -3,6 +3,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { spawn, type SpawnOptions } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -33,6 +34,7 @@ const PR_GATE_WORKFLOW_PATH = ".github/workflows/pr-e2e-gate.yaml";
 const PR_GATE_APPROVAL_ENVIRONMENT = "approve-credentialed-e2e-skip-for-fork-pr";
 const CHECK_NAME = "E2E / PR Gate Coordination";
 const WORKFLOW_NAME = "E2E / PR Gate Controller";
+const CONTROL_PLANE_AUTHORIZATION_TITLE = "Maintainer authorization required to run E2E";
 const CHECK_EXTERNAL_ID_PREFIX = "nemoclaw-pr-e2e:v2";
 const LEGACY_CHECK_EXTERNAL_ID_PREFIX = "nemoclaw-pr-e2e:v1";
 const GITHUB_ACTIONS_APP_ID = 15368;
@@ -67,6 +69,22 @@ const ACTIVE_WORKFLOW_RUN_STATUSES = [
   "in_progress",
 ] as const;
 const ACTIVE_WORKFLOW_RUN_STATUS_SET = new Set<string>(ACTIVE_WORKFLOW_RUN_STATUSES);
+const TERMINAL_WORKFLOW_RUN_CONCLUSIONS = [
+  "success",
+  "failure",
+  "cancelled",
+  "timed_out",
+  "action_required",
+  "neutral",
+  "skipped",
+  "stale",
+  "startup_failure",
+] as const;
+const TERMINAL_WORKFLOW_RUN_CONCLUSION_SET = new Set<string>(TERMINAL_WORKFLOW_RUN_CONCLUSIONS);
+const WAIT_POLL_INTERVAL_MS = 10_000;
+const WAIT_TIMEOUT_MS = 105 * 60_000;
+const EVIDENCE_DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
+const EVIDENCE_DOWNLOAD_KILL_GRACE_MS = 30_000;
 const EVIDENCE_LIMITS = {
   maxDepth: 8,
   maxEntries: 4096,
@@ -145,6 +163,8 @@ export type ControllerCommand =
     } & ControllerPaths)
   | { mode: "abandon"; checkRunId: number; childRunId?: number }
   | { mode: "cancel"; prNumber: number }
+  | { mode: "wait"; childRunId: number }
+  | ({ mode: "download"; childRunId: number } & ControllerPaths)
   | ControlPlaneDispatchCommand
   | ManualForkSkipCommand
   | ApprovedForkSkipCommand;
@@ -240,6 +260,16 @@ class ObsoleteExactDiffError extends Error {
     super(`${verdict.title}: ${verdict.summary}`);
     this.name = "ObsoleteExactDiffError";
     this.verdict = verdict;
+  }
+}
+
+class DispatchedChildRunError extends Error {
+  readonly childRunId: number;
+
+  constructor(message: string, childRunId: number) {
+    super(message);
+    this.name = "DispatchedChildRunError";
+    this.childRunId = childRunId;
   }
 }
 
@@ -412,6 +442,19 @@ export function parseControllerCommand(argv: string[]): ControllerCommand {
       prNumber: parsePositiveId(requiredArgument(args.pr, "pr"), "--pr"),
     };
   }
+  if (args.mode === "wait") {
+    return {
+      mode: "wait",
+      childRunId: parsePositiveId(requiredArgument(args.runId, "run-id"), "--run-id"),
+    };
+  }
+  if (args.mode === "download") {
+    return {
+      mode: "download",
+      childRunId: parsePositiveId(requiredArgument(args.runId, "run-id"), "--run-id"),
+      ...privateControllerPaths(requiredArgument(args.workDir, "work-dir")),
+    };
+  }
   if (args.mode === "start-control-plane") {
     const maintainer = requiredArgument(args.maintainer, "maintainer");
     if (!MAINTAINER_PATTERN.test(maintainer)) throw new Error("--maintainer is invalid");
@@ -477,7 +520,7 @@ export function parseControllerCommand(argv: string[]): ControllerCommand {
     };
   }
   throw new Error(
-    "--mode must be seed, start, start-control-plane, finish, abandon, cancel, record-fork-e2e-skip, or record-approved-fork-e2e-skip",
+    "--mode must be seed, start, start-control-plane, finish, abandon, cancel, wait, download, record-fork-e2e-skip, or record-approved-fork-e2e-skip",
   );
 }
 
@@ -1433,11 +1476,28 @@ export function expectedSignalShards(
             throw new Error(`${jobId} matrix agent values must be strings`);
           }
         } else if (keys.length === 1 && Array.isArray(matrix.include)) {
-          shards = matrix.include.map((entry) => {
-            if (!isObjectRecord(entry) || typeof entry.agent !== "string") {
-              throw new Error(`${jobId} matrix include entries must name an agent`);
+          const env = isObjectRecord(job.env) ? job.env : {};
+          const configuredShard = env.NEMOCLAW_E2E_SHARD;
+          let shardKey = "agent";
+          if (configuredShard !== undefined) {
+            const match =
+              typeof configuredShard === "string"
+                ? /^\$\{\{\s*matrix\.([A-Za-z][A-Za-z0-9_]*)\s*\}\}$/u.exec(configuredShard)
+                : null;
+            if (!match) {
+              throw new Error(`${jobId} NEMOCLAW_E2E_SHARD must name one matrix include field`);
             }
-            return entry.agent;
+            shardKey = match[1]!;
+          }
+          shards = matrix.include.map((entry) => {
+            if (!isObjectRecord(entry) || !Object.hasOwn(entry, shardKey)) {
+              throw new Error(`${jobId} matrix include entries must name a ${shardKey} shard`);
+            }
+            const shard = entry[shardKey];
+            if (typeof shard !== "string") {
+              throw new Error(`${jobId} matrix include entries must name a ${shardKey} shard`);
+            }
+            return shard;
           });
         } else {
           throw new Error(`${jobId} uses an unsupported evidence matrix`);
@@ -1668,6 +1728,146 @@ async function cancelChildRun(repository: string, token: string, runId: number):
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+export async function waitForChildRun(
+  childRunId: number,
+  deps: {
+    sleep?: (ms: number) => Promise<void>;
+    now?: () => number;
+    pollIntervalMs?: number;
+    timeoutMs?: number;
+  } = {},
+): Promise<void> {
+  const { token, repository } = tokenAndRepository();
+  const wait = deps.sleep ?? sleep;
+  const now = deps.now ?? Date.now;
+  const pollIntervalMs = deps.pollIntervalMs ?? WAIT_POLL_INTERVAL_MS;
+  const timeoutMs = deps.timeoutMs ?? WAIT_TIMEOUT_MS;
+  const runUrl = `https://github.com/${repository}/actions/runs/${childRunId}`;
+  const deadline = now() + timeoutMs;
+  let lastState = "";
+  while (true) {
+    let run: WorkflowRun;
+    try {
+      run = await githubApi<WorkflowRun>(`repos/${repository}/actions/runs/${childRunId}`, token, {
+        userAgent: USER_AGENT,
+        signal: AbortSignal.timeout(Math.max(1, deadline - now())),
+      });
+    } catch (error) {
+      throw new Error(
+        `Run status query failed: unable to query run ${childRunId}. ${runUrl} (${controllerErrorMessage(error)})`,
+      );
+    }
+    const conclusion = run.conclusion && run.conclusion.length > 0 ? run.conclusion : "none";
+    const state = `${run.status}:${conclusion}`;
+    const active = ACTIVE_WORKFLOW_RUN_STATUS_SET.has(run.status) && conclusion === "none";
+    const completed =
+      run.status === "completed" && TERMINAL_WORKFLOW_RUN_CONCLUSION_SET.has(conclusion);
+    if (state !== lastState) {
+      if (active) {
+        console.log(`Run ${childRunId} status=${run.status} url=${runUrl}`);
+      } else if (completed) {
+        console.log(`Run ${childRunId} status=completed conclusion=${conclusion} url=${runUrl}`);
+      }
+      lastState = state;
+    }
+    if (completed) return;
+    if (!active) {
+      throw new Error(
+        `Unexpected run state: run ${childRunId} returned an unsupported status/conclusion pair (${state}). ${runUrl}`,
+      );
+    }
+    if (now() >= deadline) {
+      console.log(
+        `Run ${childRunId} did not complete within ${Math.round(timeoutMs / 60_000)} minutes; finalization will cancel it and report the PR gate outcome. ${runUrl}`,
+      );
+      return;
+    }
+    await wait(pollIntervalMs);
+  }
+}
+
+type EvidenceDownloadResult = { code: number | null; timedOut: boolean };
+
+interface SpawnedEvidenceProcess {
+  kill(signal?: NodeJS.Signals | number): boolean;
+  on(event: "error", listener: (error: Error) => void): this;
+  on(event: "close", listener: (code: number | null) => void): this;
+}
+
+type SpawnEvidenceImpl = (
+  command: string,
+  args: readonly string[],
+  options: SpawnOptions,
+) => SpawnedEvidenceProcess;
+
+function spawnEvidenceDownload(
+  args: string[],
+  timeoutMs: number,
+  killGraceMs: number,
+  spawnImpl: SpawnEvidenceImpl = spawn,
+): Promise<EvidenceDownloadResult> {
+  return new Promise((resolve, reject) => {
+    const child = spawnImpl("gh", args, {
+      stdio: "inherit",
+      env: { ...process.env, GH_TOKEN: process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN ?? "" },
+    });
+    let timedOut = false;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const timeoutTimer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGTERM");
+      killTimer = setTimeout(() => child.kill("SIGKILL"), killGraceMs);
+    }, timeoutMs);
+    child.on("error", (error) => {
+      clearTimeout(timeoutTimer);
+      if (killTimer) clearTimeout(killTimer);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timeoutTimer);
+      if (killTimer) clearTimeout(killTimer);
+      resolve({ code, timedOut });
+    });
+  });
+}
+
+export async function downloadChildRunEvidence(
+  childRunId: number,
+  evidencePath: string,
+  deps: {
+    timeoutMs?: number;
+    killGraceMs?: number;
+    spawn?: SpawnEvidenceImpl;
+  } = {},
+): Promise<void> {
+  const { repository } = tokenAndRepository();
+  const timeoutMs = deps.timeoutMs ?? EVIDENCE_DOWNLOAD_TIMEOUT_MS;
+  const killGraceMs = deps.killGraceMs ?? EVIDENCE_DOWNLOAD_KILL_GRACE_MS;
+  const runUrl = `https://github.com/${repository}/actions/runs/${childRunId}`;
+  const result = await spawnEvidenceDownload(
+    ["run", "download", String(childRunId), "--repo", repository, "--dir", evidencePath],
+    timeoutMs,
+    killGraceMs,
+    deps.spawn,
+  );
+  if (result.timedOut) {
+    throw new Error(
+      `Evidence download timed out: artifact download for run ${childRunId} exceeded ${Math.round(timeoutMs / 60_000)} minutes. ${runUrl}`,
+    );
+  }
+  if (result.code !== 0) {
+    throw new Error(
+      `Evidence download failed: artifact download for run ${childRunId} exited with status ${result.code}. ${runUrl}`,
+    );
+  }
+}
+
 async function dispatchSelectedPrGate(options: {
   repository: string;
   token: string;
@@ -1729,11 +1929,15 @@ async function dispatchSelectedPrGate(options: {
     try {
       await cancelChildRun(options.repository, options.token, childRunId);
     } catch (cancelError) {
-      throw new Error(
+      throw new DispatchedChildRunError(
         `${controllerErrorMessage(error)}; child cancellation failed: ${controllerErrorMessage(cancelError)}`,
+        childRunId,
       );
     }
-    throw error;
+    throw new DispatchedChildRunError(
+      `${controllerErrorMessage(error)}; child cancellation requested`,
+      childRunId,
+    );
   }
 }
 
@@ -1906,22 +2110,17 @@ export async function startPrGate(
     }
     const controlPlaneFamily = plan.families.find((family) => family.id === "e2e-control-plane");
     if (controlPlaneFamily && requiresCredentialedE2eAuthorization(plan)) {
-      const gateRunUrl = `https://github.com/${repository}/actions/runs/${command.gateRunId}`;
       const workflowUrl = `https://github.com/${repository}/actions/workflows/${PR_GATE_WORKFLOW_PATH}`;
-      await completeCheck(
+      await markCheckInProgress(
         { repository, checkRunId },
         token,
-        {
-          conclusion: "failure",
-          title: "Maintainer authorization required to run E2E",
-          summary: [
-            `This exact internal diff (head \`${command.headSha}\`, base \`${ciIdentity.baseSha}\`) changes code that the selected credential-bearing E2E jobs execute or trust: ${jobs.join(", ")}.`,
-            "No selected E2E job ran and no repository secret was exposed.",
-            `A repository maintainer or administrator must review this exact revision, then open the [${WORKFLOW_NAME}](${workflowUrl}) workflow and run \`run-control-plane\` with the PR number, exact head and base SHAs, and a review reason. That authorized run dispatches the selected jobs and this gate passes only if their exact-SHA evidence verifies successfully.`,
-            `Deterministic plan: \`${plan.planHash}\`.`,
-          ].join("\n\n"),
-        },
-        gateRunUrl,
+        CONTROL_PLANE_AUTHORIZATION_TITLE,
+        [
+          `This exact internal diff (head \`${command.headSha}\`, base \`${ciIdentity.baseSha}\`) changes code that the selected credential-bearing E2E jobs execute or trust: ${jobs.join(", ")}.`,
+          "No selected E2E job ran and no repository secret was exposed.",
+          `A repository maintainer or administrator must review this exact revision, then open the [${WORKFLOW_NAME}](${workflowUrl}) workflow and run \`run-control-plane\` with the PR number, exact head and base SHAs, and a review reason. That authorized run dispatches the selected jobs and this gate passes only if their exact-SHA evidence verifies successfully.`,
+          `Deterministic plan: \`${plan.planHash}\`.`,
+        ].join("\n\n"),
       );
       appendOutput("dispatched", "false");
       appendOutput("finalized", "true");
@@ -2038,14 +2237,9 @@ export async function startControlPlanePrGate(command: ControlPlaneDispatchComma
       throw new Error(`Expected one exact-diff PR gate check; found ${matchingChecks.length}`);
     }
     const check = matchingChecks[0]!;
-    if (
-      check.status !== "completed" ||
-      check.conclusion !== "failure" ||
-      check.output?.title !== "Maintainer authorization required to run E2E"
-    ) {
-      throw new Error(
-        "PR gate must first complete with the matching control-plane authorization failure",
-      );
+    const pendingAuthorization = check.status === "in_progress" && check.conclusion === null;
+    if (!pendingAuthorization || check.output?.title !== CONTROL_PLANE_AUTHORIZATION_TITLE) {
+      throw new Error("PR gate must have the matching pending control-plane authorization state");
     }
     checkRunId = check.id;
     appendOutput("check_id", String(checkRunId));
@@ -2077,18 +2271,38 @@ export async function startControlPlanePrGate(command: ControlPlaneDispatchComma
     });
   } catch (error) {
     if (checkRunId) {
-      const closed = await completeFailureAfterControllerError(
-        { repository, checkRunId },
-        token,
-        "Maintainer authorization required to run E2E",
-        {
-          error,
-          detailsUrl: `https://github.com/${repository}/actions/runs/${command.gateRunId}`,
-          recovery:
-            "The authorized E2E attempt did not produce an accepted result. Review the controller error and any linked child run, then launch a fresh first-attempt `run-control-plane` workflow for this exact revision.",
-        },
-      );
-      if (closed) appendOutput("finalized", "true");
+      if (error instanceof DispatchedChildRunError) {
+        const closed = await completeFailureAfterControllerError(
+          { repository, checkRunId },
+          token,
+          "Authorized E2E run requires reconciliation",
+          {
+            error,
+            detailsUrl: `https://github.com/${repository}/actions/runs/${error.childRunId}`,
+            recovery:
+              "A credential-bearing child run was dispatched, so this exact-diff authorization cannot be retried. Inspect the linked run, then update the PR and run fresh CI before authorizing again.",
+          },
+        );
+        if (closed) appendOutput("finalized", "true");
+      } else {
+        const reason = controllerErrorMessage(error).replace(/`/gu, "'");
+        try {
+          await markCheckInProgress(
+            { repository, checkRunId },
+            token,
+            CONTROL_PLANE_AUTHORIZATION_TITLE,
+            [
+              `The authorized E2E attempt did not produce an accepted result: \`${reason}\`.`,
+              "Review the controller error and any linked child run, then launch a fresh first-attempt `run-control-plane` workflow for this exact revision.",
+            ].join("\n\n"),
+          );
+          appendOutput("finalized", "true");
+        } catch (restoreError) {
+          console.error(
+            `Failed to restore control-plane authorization after controller error: ${controllerErrorMessage(restoreError)}`,
+          );
+        }
+      }
     }
     throw error;
   }
@@ -2681,6 +2895,14 @@ async function main(): Promise<void> {
   }
   if (command.mode === "abandon") {
     await abandonPrGate(command.checkRunId, command.childRunId);
+    return;
+  }
+  if (command.mode === "wait") {
+    await waitForChildRun(command.childRunId);
+    return;
+  }
+  if (command.mode === "download") {
+    await downloadChildRunEvidence(command.childRunId, command.evidencePath);
     return;
   }
   if (command.mode === "record-fork-e2e-skip") {

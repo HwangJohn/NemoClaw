@@ -155,15 +155,15 @@ const EXPLICIT_UPLOAD_CONTRACTS = new Map<string, ExplicitUploadContract>([
   [
     "mcp-bridge",
     {
-      name: "e2e-mcp-bridge",
-      path: "e2e-artifacts/live/mcp-bridge/",
+      name: "e2e-mcp-bridge-${{ matrix.agent }}",
+      path: "e2e-artifacts/live/mcp-bridge/${{ matrix.agent }}/",
     },
   ],
   [
     "mcp-bridge-dev",
     {
-      name: "e2e-mcp-bridge-dev",
-      path: "e2e-artifacts/live/mcp-bridge-dev/",
+      name: "e2e-mcp-bridge-dev-${{ matrix.agent }}",
+      path: "e2e-artifacts/live/mcp-bridge-dev/${{ matrix.agent }}/",
     },
   ],
 ]);
@@ -280,7 +280,10 @@ export function validateUploadE2eArtifactsInvocations(workflow: WorkflowRecord):
           env.NEMOCLAW_RUN_LIVE_E2E === "1" ||
           SHARED_E2E_JOBS.has(jobName) ||
           jobSteps.some(
-            (step) => typeof step.run === "string" && step.run.includes("--project e2e-live"),
+            (step) =>
+              typeof step.run === "string" &&
+              (step.run.includes("--project e2e-live") ||
+                step.run.includes("tools/e2e/live-vitest-invocation.mts run --test-path")),
           )
         );
       })

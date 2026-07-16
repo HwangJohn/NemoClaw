@@ -11,6 +11,7 @@ import {
   evaluateE2eWorkflowDispatchSelectors,
   focusedE2eJobsForChangedFiles,
   readFreeStandingJobsInventory,
+  validateE2eWorkflow,
   validateE2eWorkflowBoundary,
   validateFreeStandingWorkflowInventory,
 } from "../../../tools/e2e/workflow-boundary.mts";
@@ -34,6 +35,46 @@ describe("e2e workflow boundary", () => {
 
   it("keeps the live E2E target workflow scheduled, dispatchable, pinned, and artifact-safe", () => {
     expect(validateE2eWorkflowBoundary()).toEqual([]);
+  });
+
+  it("rejects Bedrock matrix shard identity drift (#6938)", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-bedrock-shard-workflow-"));
+    const workflowPath = path.join(tmp, "workflow.yaml");
+    const workflow = readWorkflow() as {
+      jobs: Record<string, { env: Record<string, unknown> }>;
+    };
+    delete workflow.jobs["bedrock-runtime-compatible-anthropic"].env.NEMOCLAW_E2E_SHARD;
+    fs.writeFileSync(workflowPath, YAML.stringify(workflow));
+
+    try {
+      expect(validateE2eWorkflowBoundary(workflowPath)).toContain(
+        "bedrock-runtime-compatible-anthropic job must pass matrix.agent through NEMOCLAW_E2E_SHARD",
+      );
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("requires unknown inference modes to be rejected before planning", () => {
+    const workflow = readWorkflow() as {
+      jobs: Record<string, { steps?: Array<{ name?: string; run?: string }> }>;
+    };
+    const generate = workflow.jobs["generate-matrix"]?.steps?.find(
+      (step) => step.name === "Generate E2E target matrix",
+    );
+    const generateRun =
+      generate?.run ??
+      (() => {
+        throw new Error("workflow missing Generate E2E target matrix script");
+      })();
+    generate!.run = generateRun.replace(
+      "Invalid inference_mode: ${INFERENCE_MODE}",
+      "Unsupported inference mode",
+    );
+
+    expect(validateE2eWorkflow(workflow)).toContain(
+      "step 'Generate E2E target matrix' run script must include Invalid inference_mode: ${INFERENCE_MODE}",
+    );
   });
 
   type RebuildWorkflowStep = {
@@ -249,9 +290,10 @@ describe("e2e workflow boundary", () => {
     timeout: 60_000,
   }, () => {
     const inventory = readFreeStandingJobsInventory();
-    const workflowJobs = new Set(
-      Object.keys((readWorkflow().jobs as Record<string, unknown>) ?? {}),
-    );
+    const workflow = readWorkflow() as {
+      jobs: Record<string, { env?: Record<string, string> }>;
+    };
+    const workflowJobs = new Set(Object.keys(workflow.jobs));
 
     expect(validateFreeStandingWorkflowInventory()).toEqual([]);
     expect(inventory.allowedJobs).not.toHaveLength(0);
@@ -264,6 +306,8 @@ describe("e2e workflow boundary", () => {
     expect(inventory.liveTestToJobs.get("test/e2e/live/full-e2e.test.ts")).toEqual(
       expect.arrayContaining(["full-e2e", "security-posture"]),
     );
+    expect(workflow.jobs["gpu-e2e"]?.env?.NEMOCLAW_MODEL).toBe("qwen3.5:9b");
+    expect(workflow.jobs["gpu-double-onboard"]?.env?.NEMOCLAW_MODEL).toBe("qwen3.5:9b");
     expect(
       focusedE2eJobsForChangedFiles(
         [
@@ -643,11 +687,11 @@ jobs:
           "workflow missing snapshot-commands job",
           "report-to-pr job must wait for live",
           "report-to-pr step must pass jobs through JOBS env",
-          "step 'Post E2E target results to PR' run script must check selector validation before echoing selectors",
-          "step 'Post E2E target results to PR' run script must omit rejected test ID selectors",
-          "step 'Post E2E target results to PR' run script must filter reported entries for selective dispatches",
-          "step 'Post E2E target results to PR' run script must report missing requested jobs",
-          "step 'Post E2E target results to PR' run script must count cancelled jobs",
+          "step 'Post E2E target results to PR' run script must load the trusted report helper from the checked-out workspace",
+          "step 'Post E2E target results to PR' run script must assign resolveReportPr's result before use",
+          "step 'Post E2E target results to PR' run script must destructure loadReportJobs's result before use",
+          "step 'Post E2E target results to PR' run script must assign renderE2eReport's result before use",
+          "report-to-pr must check out the trusted workflow revision before reporting",
         ]),
       );
     } finally {
