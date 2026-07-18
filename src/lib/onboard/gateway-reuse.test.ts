@@ -67,13 +67,13 @@ describe("gateway reuse snapshot", () => {
       "Gateway: nemoclaw",
       "Gateway endpoint: https://127.0.0.1:8080/",
     ].join("\n");
-    const runCaptureOpenshell = vi.fn((args: string[], opts?: Record<string, unknown>) => {
-      if (args[0] === "status" && opts?.includeStderr === true) {
-        return [statusStdout, statusStderr].join("\n");
-      }
-      if (args[0] === "gateway" && args[1] === "info") return gatewayInfo;
-      return "";
-    });
+    const outputByCommand = new Map([
+      ["status", [statusStdout, statusStderr].join("\n")],
+      ["gateway info", gatewayInfo],
+    ]);
+    const runCaptureOpenshell = vi.fn(
+      (args: string[]) => outputByCommand.get(args.slice(0, 2).join(" ")) ?? "",
+    );
     const helpers = createGatewayReuseHelpers({
       gatewayName: "nemoclaw",
       runCaptureOpenshell,
