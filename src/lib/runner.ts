@@ -25,6 +25,10 @@ type RunnerOptions = SpawnSyncOptions & {
 
 type CaptureOptions = Omit<SpawnSyncOptionsWithStringEncoding, "encoding"> & {
   ignoreError?: boolean;
+  /**
+   * Append captured stderr to the returned stdout. This opt-in output is raw
+   * and unredacted; callers must not log it without applying redaction first.
+   */
   includeStderr?: boolean;
 };
 
@@ -243,6 +247,8 @@ function runFile(
 /**
  * Run a program directly with argv-style arguments and capture trimmed stdout.
  * Throws a redacted error on failure, or returns '' when opts.ignoreError is true.
+ * When opts.includeStderr is true, the returned stderr is raw and unredacted;
+ * callers must not log the combined output without applying redaction first.
  *
  * Shell-string capture is intentionally unsupported. If you truly need shell
  * parsing, spell it out explicitly at the call site (for example

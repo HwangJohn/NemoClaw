@@ -52,4 +52,35 @@ describe("gateway reuse snapshot", () => {
 
     expect(helpers.getGatewayReuseSnapshot().gatewayReuseState).toBe("stale");
   });
+
+  it("preserves named active gateway metadata when mixed stdout and stderr report an auth error", () => {
+    const statusStdout = [
+      "Server Status",
+      "",
+      "  Gateway: nemoclaw",
+      "  Server: https://127.0.0.1:8080/",
+    ].join("\n");
+    const statusStderr = "Error: authentication failed";
+    const gatewayInfo = [
+      "Gateway Info",
+      "",
+      "Gateway: nemoclaw",
+      "Gateway endpoint: https://127.0.0.1:8080/",
+    ].join("\n");
+    const runCaptureOpenshell = vi.fn((args: string[], opts?: Record<string, unknown>) => {
+      if (args[0] === "status" && opts?.includeStderr === true) {
+        return [statusStdout, statusStderr].join("\n");
+      }
+      if (args[0] === "gateway" && args[1] === "info") return gatewayInfo;
+      return "";
+    });
+    const helpers = createGatewayReuseHelpers({
+      gatewayName: "nemoclaw",
+      runCaptureOpenshell,
+      runOpenshell: vi.fn(() => ({ status: 0 })),
+      cliDisplayName: () => "NemoClaw",
+    });
+
+    expect(helpers.getGatewayReuseSnapshot().gatewayReuseState).toBe("missing");
+  });
 });

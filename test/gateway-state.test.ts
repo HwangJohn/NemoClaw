@@ -313,6 +313,35 @@ describe("getGatewayReuseState", () => {
     expect(getGatewayReuseState(STATUS_SERVER_STATUS_AUTH_ERROR, "", "")).toBe("missing");
   });
 
+  it.each([
+    ["authentication", "Error: authentication failed"],
+    ["configuration", "Error: invalid gateway configuration"],
+    ["TLS", "Error: transport error: invalid peer certificate: UnknownIssuer"],
+    ["CLI", "Error: unexpected argument '--gateway'"],
+  ])("keeps named active metadata non-stale for mixed stdout and %s stderr", (_kind, stderr) => {
+    const mixedStatusOutput = [STATUS_SERVER_STATUS_ONLY.trim(), stderr].join("\n");
+
+    expect(getGatewayReuseState(mixedStatusOutput, GW_INFO_NAMED, GW_INFO_ACTIVE)).toBe("missing");
+  });
+
+  it.each([
+    "transport error",
+    "Connection reset",
+    "Connection aborted",
+    "Connection closed",
+  ])("uses explicit status error evidence before treating %s as stale", (detail) => {
+    const errorOutput = [STATUS_SERVER_STATUS_ONLY.trim(), `Error: ${detail}`].join("\n");
+    const informationalOutput = [
+      STATUS_SERVER_STATUS_ONLY.trim(),
+      `Previous diagnostic: ${detail}`,
+    ].join("\n");
+
+    expect(getGatewayReuseState(errorOutput, GW_INFO_NAMED, GW_INFO_ACTIVE)).toBe("stale");
+    expect(getGatewayReuseState(informationalOutput, GW_INFO_NAMED, GW_INFO_ACTIVE)).toBe(
+      "healthy",
+    );
+  });
+
   it("returns 'foreign-active' when connected to a different gateway", () => {
     expect(getGatewayReuseState(STATUS_FOREIGN, "", "")).toBe("foreign-active");
   });
