@@ -106,15 +106,23 @@ function hasGatewayConnectionError(output = ""): boolean {
   if (typeof output !== "string") return false;
   const clean = stripAnsi(output);
   return (
-    /\b(Error|transport error|client error)\b/i.test(clean) ||
-    /Connection refused|Connection reset|No active gateway/i.test(clean)
+    /\btransport error\b/i.test(clean) ||
+    /\bConnection (?:refused|reset|aborted|closed)\b/i.test(clean) ||
+    /\bNo active gateway\b/i.test(clean) ||
+    /\btcp connect error\b/i.test(clean) ||
+    /\berror trying to connect\b/i.test(clean)
   );
+}
+
+function hasGatewayStatusError(output = ""): boolean {
+  if (typeof output !== "string") return false;
+  return /\b(?:Error|client error)\b/i.test(stripAnsi(output));
 }
 
 export function isGatewayConnected(statusOutput = ""): boolean {
   if (typeof statusOutput !== "string") return false;
   const clean = stripAnsi(statusOutput);
-  if (hasGatewayConnectionError(clean)) {
+  if (hasGatewayStatusError(clean)) {
     return false;
   }
   return clean.includes("Connected") || clean.includes("Server Status");

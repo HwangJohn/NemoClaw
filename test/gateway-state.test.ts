@@ -50,6 +50,14 @@ const STATUS_SERVER_STATUS_REFUSED_ANSI = `\x1b[1mServer Status\x1b[0m
 \x1b[31mError: Connection refused (os error 61)\x1b[0m
 `;
 
+const STATUS_SERVER_STATUS_AUTH_ERROR = `
+Server Status
+
+Gateway: nemoclaw
+Server: https://127.0.0.1:8080/
+Error: authentication failed
+`;
+
 const GW_INFO_BASE = `
 Gateway Info
 
@@ -161,6 +169,10 @@ describe("isGatewayConnected", () => {
 
   it("does not treat ANSI-wrapped Server Status refusals as connected", () => {
     expect(isGatewayConnected(STATUS_SERVER_STATUS_REFUSED_ANSI)).toBe(false);
+  });
+
+  it("does not treat non-connection status errors as connected", () => {
+    expect(isGatewayConnected(STATUS_SERVER_STATUS_AUTH_ERROR)).toBe(false);
   });
 
   it("returns false for empty string", () => {
@@ -295,6 +307,10 @@ describe("getGatewayReuseState", () => {
 
   it("returns 'stale' when selected gateway status is refused but gateway info is unavailable (#7087)", () => {
     expect(getGatewayReuseState(STATUS_SERVER_STATUS_REFUSED_ANSI, "", "")).toBe("stale");
+  });
+
+  it("does not classify selected-gateway non-connection errors as stale", () => {
+    expect(getGatewayReuseState(STATUS_SERVER_STATUS_AUTH_ERROR, "", "")).toBe("missing");
   });
 
   it("returns 'foreign-active' when connected to a different gateway", () => {

@@ -34,14 +34,15 @@ describe("gateway reuse snapshot", () => {
   });
 
   it("classifies status stderr connection refusals as stale when gateway info is unavailable (#7087)", () => {
-    const runCaptureOpenshell = vi.fn((args: string[], opts?: Record<string, unknown>) => {
-      if (args[0] === "status") {
-        return opts?.includeStderr === true
-          ? ["Server Status", "", "  Gateway: nemoclaw", "Error: Connection refused"].join("\n")
-          : "";
-      }
-      return "";
-    });
+    const statusOutput = [
+      "Server Status",
+      "",
+      "  Gateway: nemoclaw",
+      "Error: Connection refused",
+    ].join("\n");
+    const runCaptureOpenshell = vi.fn((args: string[], opts?: Record<string, unknown>) =>
+      args[0] === "status" && opts?.includeStderr === true ? statusOutput : "",
+    );
     const helpers = createGatewayReuseHelpers({
       gatewayName: "nemoclaw",
       runCaptureOpenshell,
