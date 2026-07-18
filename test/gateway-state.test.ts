@@ -293,6 +293,10 @@ describe("getGatewayReuseState", () => {
     );
   });
 
+  it("returns 'stale' when selected gateway status is refused but gateway info is unavailable (#7087)", () => {
+    expect(getGatewayReuseState(STATUS_SERVER_STATUS_REFUSED_ANSI, "", "")).toBe("stale");
+  });
+
   it("returns 'foreign-active' when connected to a different gateway", () => {
     expect(getGatewayReuseState(STATUS_FOREIGN, "", "")).toBe("foreign-active");
   });

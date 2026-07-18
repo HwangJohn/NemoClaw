@@ -102,13 +102,19 @@ export function getReportedGatewayName(output = ""): string | null {
   return match ? match[1] : null;
 }
 
+function hasGatewayConnectionError(output = ""): boolean {
+  if (typeof output !== "string") return false;
+  const clean = stripAnsi(output);
+  return (
+    /\b(Error|transport error|client error)\b/i.test(clean) ||
+    /Connection refused|Connection reset|No active gateway/i.test(clean)
+  );
+}
+
 export function isGatewayConnected(statusOutput = ""): boolean {
   if (typeof statusOutput !== "string") return false;
   const clean = stripAnsi(statusOutput);
-  if (
-    /\b(Error|transport error|client error)\b/i.test(clean) ||
-    /Connection refused|Connection reset|No active gateway/i.test(clean)
-  ) {
+  if (hasGatewayConnectionError(clean)) {
     return false;
   }
   return clean.includes("Connected") || clean.includes("Server Status");
@@ -169,6 +175,9 @@ export function getGatewayReuseState(
   }
   if ((connected || activeInfo) && activeGatewayName && activeGatewayName !== gatewayName) {
     return "foreign-active";
+  }
+  if (activeGatewayName === gatewayName && hasGatewayConnectionError(statusOutput)) {
+    return "stale";
   }
   if (hasStaleGateway(gwInfoOutput, gatewayName)) {
     return "stale";

@@ -20,6 +20,7 @@ describe("gateway reuse snapshot", () => {
 
     expect(runCaptureOpenshell).toHaveBeenCalledWith(["status"], {
       ignoreError: true,
+      includeStderr: true,
       timeout: OPENSHELL_PROBE_TIMEOUT_MS,
     });
     expect(runCaptureOpenshell).toHaveBeenCalledWith(["gateway", "info", "-g", "nemoclaw"], {
@@ -30,5 +31,24 @@ describe("gateway reuse snapshot", () => {
       ignoreError: true,
       timeout: OPENSHELL_PROBE_TIMEOUT_MS,
     });
+  });
+
+  it("classifies status stderr connection refusals as stale when gateway info is unavailable (#7087)", () => {
+    const runCaptureOpenshell = vi.fn((args: string[], opts?: Record<string, unknown>) => {
+      if (args[0] === "status") {
+        return opts?.includeStderr === true
+          ? ["Server Status", "", "  Gateway: nemoclaw", "Error: Connection refused"].join("\n")
+          : "";
+      }
+      return "";
+    });
+    const helpers = createGatewayReuseHelpers({
+      gatewayName: "nemoclaw",
+      runCaptureOpenshell,
+      runOpenshell: vi.fn(() => ({ status: 0 })),
+      cliDisplayName: () => "NemoClaw",
+    });
+
+    expect(helpers.getGatewayReuseSnapshot().gatewayReuseState).toBe("stale");
   });
 });

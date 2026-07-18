@@ -25,6 +25,7 @@ type RunnerOptions = SpawnSyncOptions & {
 
 type CaptureOptions = Omit<SpawnSyncOptionsWithStringEncoding, "encoding"> & {
   ignoreError?: boolean;
+  includeStderr?: boolean;
 };
 
 type SpawnResult = SpawnSyncReturns<string | Buffer>;
@@ -247,12 +248,22 @@ function runFile(
  * parsing, spell it out explicitly at the call site (for example
  * ["sh", "-c", script]) so reviews and static checks can see the boundary.
  */
+function capturedRunCaptureOutput(
+  result: SpawnSyncReturns<string>,
+  includeStderr: boolean,
+): string {
+  const stdout = (result.stdout || "").trim();
+  if (!includeStderr) return stdout;
+  const stderr = (result.stderr || "").trim();
+  return [stdout, stderr].filter(Boolean).join("\n").trim();
+}
+
 function runCapture(cmd: readonly string[], opts: CaptureOptions = {}): string {
   if (!Array.isArray(cmd)) {
     throw new Error("runCapture no longer accepts shell strings; pass an argv array instead");
   }
   const [exe, args] = normalizeArgv(cmd, "runCapture");
-  const { ignoreError, env: extraEnv, stdio: _stdio, ...spawnOpts } = opts;
+  const { ignoreError, includeStderr, env: extraEnv, stdio: _stdio, ...spawnOpts } = opts;
 
   // Guard: re-enabling shell interpretation defeats the purpose of argv arrays.
   if (spawnOpts.shell) {
@@ -276,16 +287,17 @@ function runCapture(cmd: readonly string[], opts: CaptureOptions = {}): string {
 
     // Check result.error first — spawnSync sets this (with status === null) when
     // the executable is missing (ENOENT), the call times out, or the spawn fails.
+    const output = capturedRunCaptureOutput(result, includeStderr === true);
     if (result.error) {
-      if (ignoreError) return "";
+      if (ignoreError) return output;
       throw result.error;
     }
     if (result.status !== 0) {
-      if (ignoreError) return "";
+      if (ignoreError) return output;
       throw new Error(`Command failed with status ${result.status}`);
     }
 
-    return (result.stdout || "").trim();
+    return output;
   } catch (err) {
     if (ignoreError) return "";
     throw redactError(err);
