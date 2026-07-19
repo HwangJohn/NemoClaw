@@ -61,12 +61,12 @@ describe("runInferenceGet", () => {
 
   it("sanitizes route values only for human-readable output", async () => {
     const deps = createDeps(
-      "Gateway inference:\n  Provider: openai\u001b[2J\n  Model: gpt-5.4\r\n",
+      "Gateway inference:\n  Provider: openai\u001b[2J\n  Model: gpt\u0007-5.4\r\n",
     );
 
     await expect(runInferenceGet({}, deps)).resolves.toEqual({
       provider: "openai\u001b[2J",
-      model: "gpt-5.4",
+      model: "gpt\u0007-5.4",
     });
 
     expect(deps.log.mock.calls.map(([line]) => line)).toEqual([
