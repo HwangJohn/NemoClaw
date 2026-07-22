@@ -17,6 +17,7 @@ import {
   findBrokenPublishedRoutes,
   findMissingDirectLegacyManageSandboxRedirects,
   findMissingDirectLegacyReleaseNotesRedirects,
+  GUARDED_SOURCE_PAGES,
   resolvePublishedRoute,
 } from "../scripts/check-docs-published-routes.mts";
 
@@ -164,6 +165,59 @@ See [Hermes Commands](/user-guide/hermes/reference/commands).
         }),
       ]);
     });
+  });
+
+  it("validates internal MDX href props outside fenced code blocks", () => {
+    const index = buildPublishedRouteIndex(navYaml);
+    const source = commandsSource(`
+<Cards>
+
+<Card title="Missing Inference" href="../inference/missing">
+
+This card points to a missing published route.
+
+</Card>
+
+<Card title="External" href="https://www.nvidia.com/nemoclaw">
+
+External links are outside published-route validation.
+
+</Card>
+
+<Card title="Same Page" href="#same-page">
+
+Same-page anchors are outside cross-page route validation.
+
+</Card>
+
+\`\`\`mdx
+<Card title="Fenced Missing" href="../inference/fenced-missing" />
+\`\`\`
+
+</Cards>
+`);
+
+    withDocsSource(source, (docsDir) => {
+      expect(findBrokenPublishedRoutes("reference/commands.mdx", index, docsDir)).toEqual([
+        expect.objectContaining({
+          fromRoute: "/user-guide/openclaw/reference/commands",
+          resolved: "/user-guide/openclaw/inference/missing",
+          target: "../inference/missing",
+        }),
+        expect.objectContaining({
+          fromRoute: "/user-guide/hermes/reference/commands",
+          resolved: "/user-guide/hermes/inference/missing",
+          target: "../inference/missing",
+        }),
+      ]);
+    });
+  });
+
+  it("guards the docs home page route links", () => {
+    const index = buildPublishedRouteIndex();
+
+    expect(GUARDED_SOURCE_PAGES).toContain("index.mdx");
+    expect(findBrokenPublishedRoutes("index.mdx", index)).toEqual([]);
   });
 
   it("validates every changelog link against published routes", () => {

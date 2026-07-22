@@ -354,7 +354,34 @@ export function resolvePublishedRoute(fromRoute: string, target: string): string
 
 export type MarkdownLink = { text: string; target: string; line: number };
 
-/** Extract markdown links, skipping fenced code blocks and inline code spans. */
+function extractMdxHrefProps(line: string, lineNumber: number): MarkdownLink[] {
+  const links: MarkdownLink[] = [];
+  const hrefRe =
+    /(^|[\s<])href\s*=\s*(?:"([^"]+)"|'([^']+)'|\{\s*"([^"]+)"\s*\}|\{\s*'([^']+)'\s*\})/g;
+  let match: RegExpExecArray | null;
+  while ((match = hrefRe.exec(line)) !== null) {
+    const target = match[2] ?? match[3] ?? match[4] ?? match[5];
+    if (!target) continue;
+    links.push({
+      text: "MDX href",
+      target,
+      line: lineNumber,
+    });
+  }
+  return links;
+}
+
+function lineStartsMdxOpeningTag(line: string): boolean {
+  return /<[A-Za-z][\w.:$-]*(?=\s|>|\/>)/.test(line);
+}
+
+function isMdxOpeningTagStillOpen(line: string, startedBeforeLine: boolean): boolean {
+  if (startedBeforeLine) return !line.includes(">");
+  const tagStart = line.search(/<[A-Za-z][\w.:$-]*(?=\s|>|\/>)/);
+  return tagStart >= 0 && !line.slice(tagStart).includes(">");
+}
+
+/** Extract Markdown links and static MDX href props, skipping fenced code blocks and inline code spans. */
 export function extractMarkdownLinks(body: string): MarkdownLink[] {
   const links: MarkdownLink[] = [];
   const lines = body.split(/\r?\n/);
@@ -364,6 +391,7 @@ export function extractMarkdownLinks(body: string): MarkdownLink[] {
   let fenceChar = "";
   let fenceLen = 0;
   let inFence = false;
+  let inMdxOpeningTag = false;
   lines.forEach((rawLine, i) => {
     const fenceMatch = rawLine.match(/^\s*(`{3,}|~{3,})(.*)$/);
     if (fenceMatch) {
@@ -387,6 +415,10 @@ export function extractMarkdownLinks(body: string): MarkdownLink[] {
     while ((match = linkRe.exec(scan)) !== null) {
       links.push({ text: match[1], target: match[2], line: i + 1 });
     }
+    if (inMdxOpeningTag || lineStartsMdxOpeningTag(scan)) {
+      links.push(...extractMdxHrefProps(scan, i + 1));
+    }
+    inMdxOpeningTag = isMdxOpeningTagStillOpen(scan, inMdxOpeningTag);
   });
   return links;
 }
@@ -563,7 +595,8 @@ export function resolvePageLinksByText(
 // Pages that have repeatedly regressed on source-path-vs-published-route drift
 // (NemoClaw#5445, #6290, #5465, #5460, #6601). Guard every inference and Manage
 // Sandboxes page because their nested navigation differs from source directories.
-const GUARDED_SOURCE_PAGES = [
+export const GUARDED_SOURCE_PAGES = [
+  "index.mdx",
   "reference/commands.mdx",
   "reference/network-policies.mdx",
   "reference/platform-support.mdx",
