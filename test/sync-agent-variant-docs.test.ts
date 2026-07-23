@@ -7,6 +7,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -83,11 +84,15 @@ Run $$nemoclaw list.
         return { path: outputPath, contents };
       });
 
-      const result = spawnSync(process.execPath, ["--import", "tsx", fixtureScript, "--check"], {
-        cwd: fixtureRoot,
-        encoding: "utf8",
-        timeout: 10_000,
-      });
+      const result = spawnSync(
+        process.execPath,
+        ["--import", "tsx", realpathSync(fixtureScript), "--check"],
+        {
+          cwd: fixtureRoot,
+          encoding: "utf8",
+          timeout: 10_000,
+        },
+      );
       const output = `${result.stdout}\n${result.stderr}`;
 
       expect(result.status).toBe(0);
@@ -152,11 +157,15 @@ Run $$nemoclaw list.
       writeFileSync(outOfSyncPath, outOfSyncContents);
       writeFileSync(stalePath, staleContents);
 
-      const result = spawnSync(process.execPath, ["--import", "tsx", fixtureScript, "--check"], {
-        cwd: fixtureRoot,
-        encoding: "utf8",
-        timeout: 10_000,
-      });
+      const result = spawnSync(
+        process.execPath,
+        ["--import", "tsx", realpathSync(fixtureScript), "--check"],
+        {
+          cwd: fixtureRoot,
+          encoding: "utf8",
+          timeout: 10_000,
+        },
+      );
       const output = `${result.stdout}\n${result.stderr}`;
 
       expect(result.status).toBe(1);
