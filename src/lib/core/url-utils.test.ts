@@ -207,10 +207,20 @@ describe("unsafeEndpointUrlViolation", () => {
 describe("isLoopbackHostname", () => {
   it.each([
     ["localhost", true],
+    ["localhost.", true],
     ["127.0.0.1", true],
     ["127.0.0.2", true],
+    ["127.255.255.255", true],
     ["::1", true],
     ["[::1]", true],
+    ["127.000.000.001", false],
+    ["127.1", false],
+    ["127.999.999.999", false],
+    ["127.0.0.256", false],
+    ["127.0.0", false],
+    ["127.0.0.1.example", false],
+    ["notlocalhost", false],
+    ["localhost.com", false],
     ["example.com", false],
     ["", false],
   ] as const)("classifies %s", (input, expected) => {

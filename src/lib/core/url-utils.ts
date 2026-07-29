@@ -6,6 +6,8 @@
  * formatting helpers used across the CLI.
  */
 
+import { isIP } from "node:net";
+
 export function compactText(value = ""): string {
   return String(value).replace(/\s+/g, " ").trim();
 }
@@ -183,10 +185,13 @@ export function isLoopbackHostname(hostname = ""): boolean {
   const normalized = String(hostname || "")
     .trim()
     .toLowerCase()
-    .replace(/^\[|\]$/g, "");
-  return (
-    normalized === "localhost" || normalized === "::1" || /^127(?:\.\d{1,3}){3}$/.test(normalized)
-  );
+    .replace(/^\[|\]$/g, "")
+    .replace(/\.$/, "");
+  return normalized === "localhost" || normalized === "::1" || isLoopbackIpv4(normalized);
+}
+
+function isLoopbackIpv4(hostname: string): boolean {
+  return isIP(hostname) === 4 && hostname.split(".")[0] === "127";
 }
 
 /**

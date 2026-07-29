@@ -116,6 +116,46 @@ describe("buildChain", () => {
     expect(buildChain({ chatUiUrl: "http://[::1]:18789" }).shouldDisableDeviceAuth).toBe(false);
   });
 
+  it("treats absolute localhost URLs as loopback", () => {
+    const c = buildChain({ chatUiUrl: "http://localhost.:18789" });
+    expect(c.accessUrl).toBe("http://127.0.0.1:18789");
+    expect(c.corsOrigins).toEqual(["http://127.0.0.1:18789"]);
+    expect(c.forwardTarget).toBe("18789");
+    expect(c.shouldDisableDeviceAuth).toBe(false);
+  });
+
+  it("does not treat malformed dotted 127 hosts as loopback", () => {
+    const c = buildChain({ chatUiUrl: "http://127.999.999.999:18789" });
+    expect(c.accessUrl).toBe("http://127.999.999.999:18789");
+    expect(c.corsOrigins).toEqual(["http://127.0.0.1:18789"]);
+    expect(c.forwardTarget).toBe("0.0.0.0:18789");
+    expect(c.shouldDisableDeviceAuth).toBe(true);
+  });
+
+  it("does not treat localhost substrings in malformed URLs as loopback", () => {
+    const c = buildChain({ chatUiUrl: "http://localhost.com:bad" });
+    expect(c.accessUrl).toBe("http://localhost.com:bad");
+    expect(c.corsOrigins).toEqual(["http://127.0.0.1:18789"]);
+    expect(c.forwardTarget).toBe("0.0.0.0:18789");
+    expect(c.shouldDisableDeviceAuth).toBe(true);
+  });
+
+  it("does not treat malformed bracketed IPv6 host suffixes as loopback", () => {
+    const c = buildChain({ chatUiUrl: "http://[::1].example:bad" });
+    expect(c.accessUrl).toBe("http://[::1].example:bad");
+    expect(c.corsOrigins).toEqual(["http://127.0.0.1:18789"]);
+    expect(c.forwardTarget).toBe("0.0.0.0:18789");
+    expect(c.shouldDisableDeviceAuth).toBe(true);
+  });
+
+  it("requires brackets for IPv6 loopback URLs with ports", () => {
+    const c = buildChain({ chatUiUrl: "http://::1:18789" });
+    expect(c.accessUrl).toBe("http://::1:18789");
+    expect(c.corsOrigins).toEqual(["http://127.0.0.1:18789"]);
+    expect(c.forwardTarget).toBe("0.0.0.0:18789");
+    expect(c.shouldDisableDeviceAuth).toBe(true);
+  });
+
   // #3259 — explicit operator opt-in to bind dashboard on all interfaces
   // for remote-SSH-deployed hosts (Brev / cloud workstations).
   it("binds to 0.0.0.0 when bindOverride='0.0.0.0' is set, even for loopback URL", () => {

@@ -7,7 +7,7 @@
  */
 
 import { DASHBOARD_PORT } from "../core/ports";
-import { isLoopbackDashboardUrl } from "./url";
+import { isLoopbackDashboardHostname, isLoopbackDashboardUrl } from "./url";
 
 export interface PlatformHints {
   chatUiUrl?: string;
@@ -70,8 +70,25 @@ function isLoopbackUrl(chatUiUrl: string): boolean {
   try {
     return isLoopbackDashboardUrl(ensureScheme(raw));
   } catch {
-    return /localhost|::1|127(?:\.\d{1,3}){3}/i.test(raw);
+    return isLoopbackDashboardHostname(extractHostnameFromMalformedUrl(raw));
   }
+}
+
+function extractHostnameFromMalformedUrl(raw: string): string {
+  let authority = raw.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");
+  const pathIndex = authority.search(/[/?#]/);
+  if (pathIndex >= 0) authority = authority.slice(0, pathIndex);
+  const userinfoIndex = authority.lastIndexOf("@");
+  if (userinfoIndex >= 0) authority = authority.slice(userinfoIndex + 1);
+  if (authority === "::1") return authority;
+  if (authority.startsWith("[")) {
+    const end = authority.indexOf("]");
+    if (end < 0) return authority;
+    const suffix = authority.slice(end + 1);
+    return suffix === "" || suffix.startsWith(":") ? authority.slice(0, end + 1) : authority;
+  }
+  const portIndex = authority.indexOf(":");
+  return portIndex >= 0 ? authority.slice(0, portIndex) : authority;
 }
 
 function normalizeEndpointPath(value: string | undefined, fallback: string): string {

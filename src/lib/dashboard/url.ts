@@ -3,9 +3,14 @@
 
 import { isLoopbackHostname } from "../core/url-utils.ts";
 
+/** Classify a dashboard hostname with the repository-wide loopback policy. */
+export function isLoopbackDashboardHostname(value: string): boolean {
+  return isLoopbackHostname(value);
+}
+
 /** Classify a validated dashboard URL with the repository-wide loopback policy. */
 export function isLoopbackDashboardUrl(value: string): boolean {
-  return isLoopbackHostname(new URL(value).hostname);
+  return isLoopbackDashboardHostname(new URL(value).hostname);
 }
 
 /** Rebind a loopback dashboard URL without changing a proxy-owned external URL. */
