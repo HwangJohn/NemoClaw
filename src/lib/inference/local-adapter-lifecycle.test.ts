@@ -116,6 +116,34 @@ describe("local adapter lifecycle", () => {
   });
 
   it.each([
+    ["plain digits", "123"],
+    ["digits with newline", "123\n"],
+    ["digits with CRLF", "123\r\n"],
+  ])("loads a persisted PID from %s", (_label, raw) => {
+    const pidPath = path.join(tempDir(), "adapter.pid");
+    fs.writeFileSync(pidPath, raw);
+
+    expect(loadLocalAdapterPid(pidPath)).toBe(123);
+  });
+
+  it.each([
+    ["suffix junk", "123abc"],
+    ["extra line", "123\njunk"],
+    ["internal whitespace", "12 3"],
+    ["zero", "0"],
+    ["negative", "-1"],
+    ["empty", ""],
+    ["multiple trailing newlines", "123\n\n"],
+    ["leading whitespace", " 123"],
+    ["trailing whitespace", "123 "],
+  ])("rejects malformed persisted PID text with %s", (_label, raw) => {
+    const pidPath = path.join(tempDir(), "adapter.pid");
+    fs.writeFileSync(pidPath, raw);
+
+    expect(loadLocalAdapterPid(pidPath)).toBeNull();
+  });
+
+  it.each([
     "ollama-auth-proxy.js",
     "ollama-auth-proxy.mts",
   ])("guards PID cleanup for the supported %s script", (scriptName) => {

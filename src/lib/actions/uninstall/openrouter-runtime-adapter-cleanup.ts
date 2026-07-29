@@ -28,6 +28,7 @@ import {
   writeDurablePrivateBedrockRuntimeJson,
 } from "../../inference/bedrock-runtime/lifecycle";
 import { BEDROCK_RUNTIME_ADAPTER_PROCESS_MATCHER } from "../../inference/bedrock-runtime";
+import { parseLocalAdapterPidText } from "../../inference/local-adapter-lifecycle";
 
 interface RuntimeAdapterCleanupRuntime extends BedrockRuntimeAdapterProcessRuntime {
   commandExists: (command: string) => boolean;
@@ -164,9 +165,8 @@ function stopRuntimeAdapter(
   const pidFile = path.join(paths.nemoclawStateDir, descriptor.pidFile);
   if (runtime.existsSync(pidFile)) {
     try {
-      const raw = fs.readFileSync(pidFile, "utf-8").trim();
-      const pid = Number.parseInt(raw, 10);
-      if (Number.isFinite(pid) && pid > 0 && isRuntimeAdapterPid(pid, runtime, descriptor)) {
+      const pid = parseLocalAdapterPidText(fs.readFileSync(pidFile, "utf-8"));
+      if (pid !== null && isRuntimeAdapterPid(pid, runtime, descriptor)) {
         if (tryStopRuntimeAdapterPid(pid, runtime, descriptor)) stopped.add(pid);
       }
     } catch {

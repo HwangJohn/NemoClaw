@@ -192,11 +192,22 @@ export function persistLocalAdapterPid(filePath: string, pid: number | null | un
   writeLocalAdapterSecretFile(filePath, String(pid));
 }
 
+export function parseLocalAdapterPidText(raw: string): number | null {
+  const match = /^(\d+)(?:\r?\n)?$/.exec(raw);
+  if (!match) return null;
+  const digits = match[1];
+  if (digits === undefined) return null;
+  const pid = Number(digits);
+  return Number.isSafeInteger(pid) && pid > 0 ? pid : null;
+}
+
 export function loadLocalAdapterPid(filePath: string): number | null {
-  const raw = readLocalAdapterTextFile(filePath);
-  if (!raw) return null;
-  const pid = Number.parseInt(raw, 10);
-  return Number.isInteger(pid) && pid > 0 ? pid : null;
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    return parseLocalAdapterPidText(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return null;
+  }
 }
 
 export function isLocalAdapterProcess(

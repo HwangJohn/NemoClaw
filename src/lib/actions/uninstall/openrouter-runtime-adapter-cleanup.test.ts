@@ -10,9 +10,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   type RunResult,
+  runUninstallPlan as runUninstallPlanBase,
   type UninstallRunDeps,
   type UninstallRunOptions,
-  runUninstallPlan as runUninstallPlanBase,
 } from "./run-plan";
 
 function ok(stdout = ""): RunResult {
@@ -300,6 +300,47 @@ describe("runtime adapter uninstall cleanup", () => {
       expect(fs.existsSync(path.join(tmpHome, ".nemoclaw", "bedrock-runtime-adapter.json"))).toBe(
         true,
       );
+    } finally {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["suffix junk", "44323abc"],
+    ["extra line", "44323\njunk"],
+  ])("ignores a malformed persisted adapter PID file with %s", (_label, pidText) => {
+    const killed: number[] = [];
+    const exited = new Set<number>();
+    const tmpHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), "nemoclaw-uninstall-test-openrouter-bad-pidfile-"),
+    );
+    const pidFile = path.join(tmpHome, ".nemoclaw", "openrouter-runtime-adapter.pid");
+    fs.mkdirSync(path.dirname(pidFile), { recursive: true });
+    fs.writeFileSync(pidFile, pidText);
+
+    try {
+      const stub = psStub("44323", { exited });
+      const result = runUninstallPlan(
+        { assumeYes: true, deleteModels: false, keepOpenShell: true },
+        {
+          commandExists: () => true,
+          env: { HOME: tmpHome, LOGNAME: "testuser" } as NodeJS.ProcessEnv,
+          existsSync: (target) => target === pidFile,
+          isTty: false,
+          kill: (pid) => {
+            killed.push(pid);
+            exited.add(pid);
+            return true;
+          },
+          log: vi.fn(),
+          rmSync: vi.fn(),
+          run: runStub({ ps: stub }),
+          runDocker: () => ok(""),
+        },
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(killed).not.toContain(44323);
     } finally {
       fs.rmSync(tmpHome, { recursive: true, force: true });
     }
