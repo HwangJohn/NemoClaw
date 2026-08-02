@@ -232,7 +232,7 @@ def _validate_matrix(matrix: dict) -> None:
         if (
             not isinstance(runtimes, list)
             or not runtimes
-            or any(not isinstance(runtime, str) or runtime == "" for runtime in runtimes)
+            or any(not isinstance(runtime, str) or runtime.strip() == "" for runtime in runtimes)
         ):
             raise ValueError(
                 f"ci/platform-matrix.json: platforms[{idx}].runtimes must be a "

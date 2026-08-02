@@ -124,6 +124,7 @@ except ValueError as exc:
         ["empty-list", []],
         ["non-string-item", ["Docker", 1]],
         ["empty-string-item", ["Docker", ""]],
+        ["whitespace-string-item", ["Docker", " \t"]],
       ] as const;
       const outputs = cases.map(([label, runtimes]) => {
         const matrixPath = path.join(tmp, `${label}.json`);
@@ -166,7 +167,13 @@ module.main()
       const output = outputs.join("\n");
       const expected =
         "Error: ci/platform-matrix.json: platforms[0].runtimes must be a non-empty list of non-empty strings";
-      for (const label of ["non-list", "empty-list", "non-string-item", "empty-string-item"]) {
+      for (const label of [
+        "non-list",
+        "empty-list",
+        "non-string-item",
+        "empty-string-item",
+        "whitespace-string-item",
+      ]) {
         expect(output).toContain(`${label}:${expected}`);
       }
       expect(output).not.toContain("NO_ERROR");
