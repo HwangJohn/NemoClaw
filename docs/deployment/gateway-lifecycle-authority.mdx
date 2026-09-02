@@ -207,18 +207,28 @@ It does not transfer process ownership to NemoClaw.
 
 ## Fix a failure
 
-Resolve an external gateway failure through the declared supervisor.
-For `systemd-system`, inspect the declared service with:
-
-```bash
-systemctl status openshell-gateway.service
-```
-
-For `systemd-user`, use the user manager:
+Resolve a gateway failure through the component that owns the gateway lifecycle.
+Start with `$$nemoclaw status` or `$$nemoclaw status --json`.
+For a NemoClaw-managed Linux packaged service, inspect the managed user service that exists on the host.
+NemoClaw can use the upstream package unit or the NemoClaw-staged unit, depending on how the gateway service was installed:
 
 ```bash
 systemctl --user status openshell-gateway.service
+systemctl --user status nemoclaw-openshell-gateway.service
 ```
 
-Bring the supervised gateway up, leave exactly one verified process holding the configured port, and rerun `$$nemoclaw onboard`.
+For `externally-supervised`, inspect the exact `supervisor.serviceName` reported by the selected authority.
+For `systemd-user`, use the user manager:
+
+```bash
+systemctl --user status <serviceName>
+```
+
+For `systemd-system`, use the system manager:
+
+```bash
+systemctl status <serviceName>
+```
+
+Bring the gateway up, leave exactly one verified process holding the configured port, and rerun `$$nemoclaw onboard`.
 To hand the lifecycle back to NemoClaw, remove the platform gateway service and declare `nemoclaw-managed`, or remove the declaration.
