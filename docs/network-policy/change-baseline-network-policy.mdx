@@ -37,20 +37,44 @@ Open `agents/langchain-deepagents-code/policy-additions.yaml` and add or modify 
 </AgentOnly>
 
 Edit YAML manually when a maintained preset does not cover the required host, such as a reviewed public partner API.
-Each entry in the `network_policies` section defines an endpoint group with these fields:
+Each entry in the `network_policies` section defines a named endpoint group.
+Choose one policy name for the map key and repeat it in the required `name` field:
+
+```yaml
+network_policies:
+  my_service:
+    name: my_service
+    endpoints:
+      - host: api.example.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow: { method: GET, path: "/**" }
+    binaries:
+      - { path: /usr/bin/curl }
+```
+
+Use these fields when you author or modify an entry:
+
+`name`
+: Required policy entry name.
+Use the same value as the `network_policies` key.
 
 `endpoints`
-: Host and port pairs that the sandbox can reach.
-
-`binaries`
-: Executables allowed to use the endpoint.
+: Host and port entries that the sandbox can reach.
+Each endpoint owns its protocol, enforcement mode, method and path rules, and encoded-slash handling.
 
 `rules`
-: HTTP methods and paths that the endpoint permits.
+: Endpoint-level HTTP methods and paths that the endpoint permits.
+Put `rules` inside each endpoint item, not next to `endpoints` or `binaries`.
 
 `allow_encoded_slash`
-: Allows percent-encoded slashes such as `%2F` in request paths.
+: Endpoint-level option that allows percent-encoded slashes such as `%2F` in request paths.
 Leave this field disabled unless the service uses encoded slashes in its documented route format, such as ClawHub scoped package names.
+
+`binaries`
+: Executables allowed to use the endpoint, written as objects with a `path` value.
 
 To include a maintained preset in the baseline policy, merge its `network_policies` entries into the applicable baseline file.
 Use [Apply Policy Presets](apply-policy-presets) when you need to add a preset to one running sandbox.
@@ -91,4 +115,4 @@ Use `openshell policy get <name>` when you need to inspect the effective OpenShe
 
 - [Customize the Network Policy](../customize-network-policy) helps you choose the correct policy workflow.
 - [Create Custom Policy Presets](create-custom-policy-presets) adds durable access for one sandbox without changing the baseline.
-- [Network Policies](../../reference/network-policies) explains the baseline policy schema and tiers.
+- [Network Policies](../../reference/network-policies) summarizes the baseline policy entries and tiers.
